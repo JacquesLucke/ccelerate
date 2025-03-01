@@ -356,6 +356,7 @@ version = "0.1.0"
 dependencies = [
  "actix-web",
  "anyhow",
+ "base64",
  "ccelerate_shared",
  "serde",
  "serde_json",
@@ -375,6 +376,7 @@ name = "ccelerate_wrappers"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "ccelerate_shared",
  "reqwest",
 ]

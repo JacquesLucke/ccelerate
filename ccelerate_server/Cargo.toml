@@ -10,3 +10,4 @@ serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.139"
 tokio = { version = "1.43.0", features = ["full"] }
 ccelerate_shared = { path = "../ccelerate_shared" }
+base64 = "0.22.1"

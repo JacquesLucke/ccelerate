@@ -7,3 +7,4 @@ edition = "2024"
 reqwest = { version = "0.12.12", features = ["blocking", "json"] }
 ccelerate_shared = { path = "../ccelerate_shared" }
 anyhow = "1.0.96"
+base64 = "0.22.1"
