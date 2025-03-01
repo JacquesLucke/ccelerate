@@ -18,7 +18,14 @@ pub fn wrap_command(command: &str) {
             exit(0);
         }
         Err(err) => {
-            eprintln!("Failed: {}", err);
+            if err.is_connect() {
+                eprintln!(
+                    "Cannot connect to ccelerate_server on port {}, is it running?",
+                    PORT
+                );
+            } else {
+                eprintln!("Failed: {}", err);
+            }
             exit(1);
         }
     }
