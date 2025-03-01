@@ -1,17 +1,30 @@
 use actix_web::HttpResponse;
 use anyhow::Result;
 use base64::prelude::*;
+use ccelerate_shared::RunRequestData;
 
 #[actix_web::get("/")]
 async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
 }
 
+fn need_eager_evaluation(run_request: &RunRequestData) -> bool {
+    let marker = "CMakeScratch";
+    if run_request.cwd.to_str().unwrap_or("").contains(marker) {
+        return true;
+    }
+    for arg in &run_request.args {
+        if arg.contains(marker) {
+            return true;
+        }
+    }
+    return false;
+}
+
 #[actix_web::post("/run")]
-async fn route_run(
-    run_request: actix_web::web::Json<ccelerate_shared::RunRequestData>,
-) -> impl actix_web::Responder {
+async fn route_run(run_request: actix_web::web::Json<RunRequestData>) -> impl actix_web::Responder {
     println!("{:?}", run_request);
+    let eager_evaluation = need_eager_evaluation(&run_request);
     let Ok(command) = tokio::process::Command::new(&run_request.binary)
         .args(&run_request.args)
         .current_dir(&run_request.cwd)
@@ -30,8 +43,16 @@ async fn route_run(
         }
     };
     let response_data = ccelerate_shared::RunResponseData {
-        stdout: BASE64_STANDARD.encode(&result.stdout),
-        stderr: BASE64_STANDARD.encode(&result.stderr),
+        stdout: if eager_evaluation {
+            BASE64_STANDARD.encode(&result.stdout)
+        } else {
+            "".to_string()
+        },
+        stderr: if eager_evaluation {
+            BASE64_STANDARD.encode(&result.stderr)
+        } else {
+            "".to_string()
+        },
         status: result.status.code().unwrap_or(1),
     };
     HttpResponse::Ok().json(&response_data)
