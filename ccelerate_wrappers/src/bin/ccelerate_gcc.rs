@@ -1,3 +1,3 @@
 fn main() {
-    ccelerate_wrappers::say_hello("gcc");
+    ccelerate_wrappers::wrap_command("gcc");
 }

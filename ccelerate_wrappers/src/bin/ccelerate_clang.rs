@@ -1,3 +1,3 @@
 fn main() {
-    ccelerate_wrappers::say_hello("clang");
+    ccelerate_wrappers::wrap_command("clang");
 }

@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["ccelerate_wrappers", "ccelerate_server"]
+members = ["ccelerate_shared", "ccelerate_wrappers", "ccelerate_server"]
