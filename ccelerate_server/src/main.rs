@@ -12,6 +12,7 @@ use rusqlite_migration::{M, Migrations};
 
 use path_utils::make_absolute;
 
+mod parse_ar;
 mod parse_gcc;
 mod path_utils;
 
