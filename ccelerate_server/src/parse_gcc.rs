@@ -24,6 +24,8 @@ pub struct GCCArgs {
     pub depfile_target_name: Option<String>,
     pub compile_only: bool,
     pub shared: bool,
+    pub libraries: Vec<String>,
+    pub no_pie: bool,
 }
 
 impl Default for GCCArgs {
@@ -45,6 +47,8 @@ impl Default for GCCArgs {
             depfile_target_name: None,
             compile_only: false,
             shared: false,
+            libraries: vec![],
+            no_pie: false,
         }
     }
 }
@@ -106,6 +110,10 @@ impl GCCArgs {
                 args.primary_output = Some(make_absolute(cwd, Path::new(path)));
             } else if arg_str == "-c" {
                 args.compile_only = true;
+            } else if arg_str.starts_with("-l") {
+                args.libraries.push(arg_str[2..].to_string());
+            } else if arg_str == "-no-pie" {
+                args.no_pie = true;
             } else {
                 args.sources.push(make_absolute(cwd, Path::new(raw_arg)));
             }
@@ -124,6 +132,9 @@ impl GCCArgs {
         if self.shared {
             args.push("-shared".into());
         }
+        if self.no_pie {
+            args.push("-no-pie".into());
+        }
         if let Some(lang_std) = &self.lang_std {
             args.push(lang_std.into());
         }
@@ -132,6 +143,11 @@ impl GCCArgs {
         }
         for arg in &self.f_flags {
             args.push(arg.into());
+        }
+        for arg in &self.libraries {
+            let mut combined = OsString::from("-l");
+            combined.push(arg);
+            args.push(combined);
         }
         if self.depfile_generate {
             args.push("-MD".into());
@@ -424,6 +440,98 @@ mod test {
             ))
         );
         assert_eq!(args.defines, vec!["NDEBUG".to_string()]);
+
+        test_round_trip(&raw_args);
+    }
+
+    #[test]
+    fn test_parse_gcc_compile_args_for_final_linking() {
+        let raw_args = vec![
+            "-Wuninitialized",
+            "-Wredundant-decls",
+            "-Wall",
+            "-Wno-invalid-offsetof",
+            "-Wno-sign-compare",
+            "-Wlogical-op",
+            "-Winit-self",
+            "-Wmissing-include-dirs",
+            "-Wno-div-by-zero",
+            "-Wtype-limits",
+            "-Werror=return-type",
+            "-Wno-char-subscripts",
+            "-Wno-unknown-pragmas",
+            "-Wpointer-arith",
+            "-Wunused-parameter",
+            "-Wwrite-strings",
+            "-Wundef",
+            "-Wcomma-subscript",
+            "-Wformat-signedness",
+            "-Wrestrict",
+            "-Wno-suggest-override",
+            "-Wuninitialized",
+            "-Wno-stringop-overread",
+            "-Wno-stringop-overflow",
+            "-Wimplicit-fallthrough=5",
+            "-Wundef",
+            "-Wmissing-declarations",
+            "-march=x86-64-v2",
+            "-pipe",
+            "-fPIC",
+            "-funsigned-char",
+            "-fno-strict-aliasing",
+            "-ffp-contract=off",
+            "-fmacro-prefix-map=/home/jacques/blender/blender/=",
+            "-fmacro-prefix-map=/home/jacques/Documents/ccelerate_test/build_blender/=",
+            "-Wno-maybe-uninitialized",
+            "-O2",
+            "-DNDEBUG",
+            "-no-pie",
+            "-Wl,--version-script=/home/jacques/blender/blender/source/creator/symbols_unix.map",
+            "-latomic",
+            "source/blender/blentranslation/msgfmt/CMakeFiles/msgfmt.dir/msgfmt.cc.o",
+            "-o",
+            "bin/msgfmt",
+            "-Wl,-rpath,$ORIGIN/lib:/home/jacques/Documents/ccelerate_test/build_blender/bin/lib:/home/jacques/blender/blender/lib/linux_x64/tbb/lib",
+            "lib/libbf_blenlib.a",
+            "lib/libbf_intern_guardedalloc.a",
+            "/home/jacques/blender/blender/lib/linux_x64/zlib/lib/libz.a",
+            "-lutil",
+            "-lc",
+            "-lm",
+            "-ldl",
+            "lib/libbf_dna.a",
+            "lib/libbf_intern_guardedalloc.a",
+            "lib/libextern_fmtlib.a",
+            "lib/libextern_xxhash.a",
+            "lib/libbf_intern_eigen.a",
+            "/usr/lib/gcc/x86_64-redhat-linux/14/libgomp.a",
+            "lib/libextern_wcwidth.a",
+            "/home/jacques/blender/blender/lib/linux_x64/tbb/lib/libtbb.so",
+            "/home/jacques/blender/blender/lib/linux_x64/zstd/lib/libzstd.a",
+            "/home/jacques/blender/blender/lib/linux_x64/gmp/lib/libgmpxx.a",
+            "/home/jacques/blender/blender/lib/linux_x64/gmp/lib/libgmp.a",
+            "/home/jacques/blender/blender/lib/linux_x64/fftw3/lib/libfftw3f.a",
+            "/home/jacques/blender/blender/lib/linux_x64/fftw3/lib/libfftw3.a",
+            "/home/jacques/blender/blender/lib/linux_x64/fftw3/lib/libfftw3f_threads.a",
+            "lib/libbf_intern_libc_compat.a",
+        ];
+        let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
+
+        let args = GCCArgs::parse(
+            &Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
+            &raw_args,
+        );
+        assert!(args.is_ok());
+        let args = args.unwrap();
+
+        assert!(args.no_pie);
+        assert_eq!(
+            args.primary_output,
+            Some(PathBuf::from(
+                "/home/jacques/Documents/ccelerate_test/build_blender/bin/msgfmt"
+            ))
+        );
+        assert_eq!(args.libraries, vec!["atomic", "util", "c", "m", "dl"]);
 
         test_round_trip(&raw_args);
     }
