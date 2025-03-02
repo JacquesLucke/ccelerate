@@ -10,6 +10,11 @@ use ccelerate_shared::RunRequestData;
 use parking_lot::Mutex;
 use rusqlite_migration::{M, Migrations};
 
+use path_utils::make_absolute;
+
+mod parse_gcc;
+mod path_utils;
+
 struct State {
     conn: Arc<Mutex<rusqlite::Connection>>,
 }
@@ -55,13 +60,6 @@ enum Command {
     Archive(ArchiveCommand),
     Binary(BinaryCommand),
     Unknown(UnknownCommand),
-}
-
-fn make_absolute(base: &Path, path: &Path) -> PathBuf {
-    if path.is_absolute() {
-        return path.to_path_buf();
-    }
-    base.join(path)
 }
 
 fn parse_command(run_request: &RunRequestData) -> Command {
