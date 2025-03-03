@@ -13,3 +13,5 @@ pub struct RunResponseData {
     pub stderr: String,
     pub status: i32,
 }
+
+pub const DEFAULT_PORT: u16 = 6235;

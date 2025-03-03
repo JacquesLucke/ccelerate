@@ -8,7 +8,7 @@ use crate::path_utils::make_absolute;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct GCCArgs {
-    pub sources: Vec<PathBuf>,
+    pub sources: Vec<SourceFile>,
     pub primary_output: Option<PathBuf>,
     pub user_includes: Vec<PathBuf>,
     pub system_includes: Vec<PathBuf>,
@@ -28,6 +28,15 @@ pub struct GCCArgs {
     pub no_pie: bool,
     pub link_dirs: Vec<PathBuf>,
     pub linker_args: Vec<OsString>,
+    pub print_sysroot: bool,
+    pub flag_v: bool,
+    pub include_files: Vec<SourceFile>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct SourceFile {
+    pub path: PathBuf,
+    pub language: Option<String>,
 }
 
 impl Default for GCCArgs {
@@ -53,6 +62,9 @@ impl Default for GCCArgs {
             no_pie: false,
             link_dirs: vec![],
             linker_args: vec![],
+            print_sysroot: false,
+            flag_v: false,
+            include_files: vec![],
         }
     }
 }
@@ -60,6 +72,8 @@ impl Default for GCCArgs {
 impl GCCArgs {
     pub fn parse(cwd: &Path, raw_args: &[&OsStr]) -> Result<Self> {
         let mut args = Self::default();
+
+        let mut last_language = None;
 
         let mut raw_args_iter = raw_args.iter();
         while let Some(raw_arg) = raw_args_iter.next() {
@@ -93,6 +107,28 @@ impl GCCArgs {
                 args.pipe = true;
             } else if arg_str == "-shared" {
                 args.shared = true;
+            } else if arg_str == "-print-sysroot" {
+                args.print_sysroot = true;
+            } else if arg_str == "-v" {
+                args.flag_v = true;
+            } else if arg_str == "-x" {
+                let name = raw_args_iter
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+                let name = name.to_string_lossy().to_string();
+                if name == "none" {
+                    last_language = None;
+                } else {
+                    last_language = Some(name);
+                }
+            } else if arg_str == "-include" {
+                let path = raw_args_iter
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("Missing path for -include flag"))?;
+                args.include_files.push(SourceFile {
+                    path: make_absolute(cwd, Path::new(path)),
+                    language: last_language.clone(),
+                });
             } else if arg_str.starts_with("-f") {
                 args.f_flags.push(arg_str.to_string());
             } else if arg_str.starts_with("-O") {
@@ -131,8 +167,14 @@ impl GCCArgs {
                     anyhow::anyhow!("Missing argument for -Xlinker flag: {}", arg_str)
                 })?;
                 args.linker_args.push(arg.into());
+            } else if arg_str.starts_with("-") {
+                return Err(anyhow::anyhow!("Unknown GCC flag: {}", arg_str));
             } else {
-                args.sources.push(make_absolute(cwd, Path::new(raw_arg)));
+                let path = make_absolute(cwd, Path::new(raw_arg));
+                args.sources.push(SourceFile {
+                    path,
+                    language: last_language.clone(),
+                });
             }
         }
         Ok(args)
@@ -151,6 +193,12 @@ impl GCCArgs {
         }
         if self.no_pie {
             args.push("-no-pie".into());
+        }
+        if self.print_sysroot {
+            args.push("-print-sysroot".into());
+        }
+        if self.flag_v {
+            args.push("-v".into());
         }
         if let Some(lang_std) = &self.lang_std {
             args.push(lang_std.into());
@@ -206,14 +254,40 @@ impl GCCArgs {
             args.push("-Xlinker".into());
             args.push(arg.clone());
         }
+
+        let mut last_language = None;
+
+        for arg in &self.include_files {
+            self.to_args_update_language(&mut last_language, &arg.language, &mut args);
+            args.push("-include".into());
+            args.push(arg.path.as_os_str().into());
+        }
         if let Some(path) = &self.primary_output {
             args.push("-o".into());
             args.push(path.as_os_str().into());
         }
         for arg in &self.sources {
-            args.push(arg.as_os_str().into());
+            self.to_args_update_language(&mut last_language, &arg.language, &mut args);
+            args.push(arg.path.as_os_str().into());
         }
         args
+    }
+
+    fn to_args_update_language(
+        &self,
+        last_language: &mut Option<String>,
+        new_language: &Option<String>,
+        args: &mut Vec<OsString>,
+    ) {
+        if last_language != new_language {
+            args.push("-x".into());
+            if let Some(language) = &new_language {
+                args.push(language.into());
+            } else {
+                args.push("none".into());
+            }
+            *last_language = new_language.clone();
+        }
     }
 }
 
@@ -306,9 +380,12 @@ mod test {
         let args = args.unwrap();
         assert_eq!(
             args.sources,
-            vec![Path::new(
-                "/home/jacques/blender/blender/source/blender/blenlib/intern/BLI_mempool.cc"
-            )]
+            vec![SourceFile {
+                path: PathBuf::from(
+                    "/home/jacques/blender/blender/source/blender/blenlib/intern/BLI_mempool.cc"
+                ),
+                language: None
+            }]
         );
         assert_eq!(
             args.primary_output,
@@ -455,7 +532,10 @@ mod test {
             "/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/decoder.cpp.o",
             "/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/encoder.cpp.o",
             "/home/jacques/Documents/ccelerate_test/build_blender/lib/libdraco.a",
-        ].iter().map(|s| Path::new(s)).collect::<Vec<_>>()
+        ].iter().map(|s| SourceFile {
+            path: Path::new(s).to_path_buf(),
+            language: None
+        }).collect::<Vec<_>>()
     );
         assert_eq!(args.compile_only, false);
         assert_eq!(args.depfile_generate, false);
@@ -580,7 +660,10 @@ mod test {
                 "/home/jacques/blender/blender/lib/linux_x64/fftw3/lib/libfftw3.a",
                 "/home/jacques/blender/blender/lib/linux_x64/fftw3/lib/libfftw3f_threads.a",
                 "/home/jacques/Documents/ccelerate_test/build_blender/lib/libbf_intern_libc_compat.a"
-            ].iter().map(|s| Path::new(s)).collect::<Vec<_>>()
+            ].iter().map(|s| SourceFile {
+                path: Path::new(s).to_path_buf(),
+                language: None
+            }).collect::<Vec<_>>()
         );
 
         test_round_trip(&raw_args);

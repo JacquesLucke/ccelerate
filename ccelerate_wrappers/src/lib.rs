@@ -1,8 +1,6 @@
 use base64::prelude::*;
 use std::{env::args, io::Write, process::exit};
 
-const PORT: u16 = 6235;
-
 pub fn wrap_command(command: &str) {
     let args = args().skip(1).collect::<Vec<_>>();
     let client = reqwest::blocking::Client::builder()
@@ -10,7 +8,10 @@ pub fn wrap_command(command: &str) {
         .build()
         .unwrap();
     let response = client
-        .post(format!("http://127.0.0.1:{}/run", PORT))
+        .post(format!(
+            "http://127.0.0.1:{}/run",
+            ccelerate_shared::DEFAULT_PORT
+        ))
         .json(&ccelerate_shared::RunRequestData {
             binary: command.to_string(),
             args: args,
@@ -42,7 +43,7 @@ pub fn wrap_command(command: &str) {
             if err.is_connect() {
                 println!(
                     "Cannot connect to ccelerate_server on port {}, is it running?",
-                    PORT
+                    ccelerate_shared::DEFAULT_PORT
                 );
             } else if err.is_timeout() {
                 println!("Connection to ccelerate_server timed out");
