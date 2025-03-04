@@ -6,7 +6,7 @@ use std::{
 
 use crate::path_utils::make_absolute;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GCCArgs {
     pub sources: Vec<SourceFile>,
     pub primary_output: Option<PathBuf>,
@@ -33,7 +33,7 @@ pub struct GCCArgs {
     pub include_files: Vec<SourceFile>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SourceFile {
     pub path: PathBuf,
     pub language: Option<String>,

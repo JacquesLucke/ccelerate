@@ -7,7 +7,7 @@ use anyhow::Result;
 
 use crate::path_utils::make_absolute;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ArArgs {
     pub flag_q: bool,
     pub flag_c: bool,

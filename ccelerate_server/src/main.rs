@@ -13,6 +13,7 @@ use ratatui::{
 };
 use rusqlite_migration::{M, Migrations};
 
+mod command;
 mod parse_ar;
 mod parse_gcc;
 mod path_utils;
@@ -25,7 +26,7 @@ struct State {
 }
 
 struct TaskItem {
-    data: RunRequestData,
+    data: command::Command,
     active: Arc<Mutex<bool>>,
 }
 
@@ -49,61 +50,24 @@ fn need_eager_evaluation(run_request: &RunRequestData) -> bool {
 
 #[actix_web::post("/run")]
 async fn route_run(
-    mut run_request: actix_web::web::Json<RunRequestData>,
+    run_request: actix_web::web::Json<RunRequestData>,
     state: actix_web::web::Data<State>,
 ) -> impl actix_web::Responder {
     let eager_evaluation = need_eager_evaluation(&run_request);
-
-    let output_path = match run_request.binary.as_str() {
-        "ar" => {
-            if let Ok(args) = parse_ar::ArArgs::parse(
-                &run_request.cwd,
-                run_request
-                    .args
-                    .iter()
-                    .map(|s| OsStr::new(s))
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ) {
-                run_request.args = args
-                    .to_args()
-                    .iter()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .collect();
-                args.output
-            } else {
-                eprintln!("Failed: {:#?}", run_request);
-                std::process::exit(1);
-            }
-        }
-        "gcc" | "g++" | "clang" | "clang++" => {
-            if let Ok(args) = parse_gcc::GCCArgs::parse(
-                &run_request.cwd,
-                run_request
-                    .args
-                    .iter()
-                    .map(|s| OsStr::new(s))
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ) {
-                run_request.args = args
-                    .to_args()
-                    .iter()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .collect();
-                args.primary_output
-            } else {
-                eprintln!("Failed: {:#?}", run_request);
-                std::process::exit(1);
-            }
-        }
-        _ => {
-            eprintln!("Failed: {:#?}", run_request);
-            std::process::exit(1);
-        }
+    let Ok(command) = command::Command::new(
+        &run_request.binary,
+        &run_request.cwd,
+        &run_request
+            .args
+            .iter()
+            .map(|a| OsStr::new(a))
+            .collect::<Vec<_>>(),
+    ) else {
+        eprintln!("Failed: {:#?}", run_request);
+        std::process::exit(1);
     };
 
-    if let Some(output_path) = &output_path {
+    if let Some(output_path) = command.primary_output_path() {
         let conn = state.conn.lock();
         conn.execute(
             "INSERT OR REPLACE INTO Files (binary, path, cwd, args) VALUES (?1, ?2, ?3, ?4)",
@@ -119,7 +83,7 @@ async fn route_run(
     let active = {
         let mut items = state.items.lock();
         items.push(TaskItem {
-            data: run_request.clone(),
+            data: command.clone(),
             active: Arc::new(Mutex::new(true)),
         });
         state.items_table_state.lock().select_last();
@@ -129,17 +93,10 @@ async fn route_run(
         *active.lock() = false;
     }
 
-    let Ok(command) = tokio::process::Command::new(&run_request.binary)
-        .args(&run_request.args)
-        .current_dir(&run_request.cwd)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-    else {
+    let Ok(child) = command.run() else {
         return HttpResponse::InternalServerError().body("Failed to spawn command");
     };
-    let result = command.wait_with_output().await;
+    let result = child.wait_with_output().await;
     let result = match result {
         Ok(result) => result,
         Err(err) => {
@@ -255,13 +212,20 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
 
     let table = ratatui::widgets::Table::new(
         items.iter().map(|item| {
-            ratatui::widgets::Row::new([ratatui::text::Text::raw(item.data.args.join(" "))]).style(
-                if *item.active.lock() {
-                    not_done_style
-                } else {
-                    done_style
-                },
-            )
+            ratatui::widgets::Row::new([ratatui::text::Text::raw(
+                item.data
+                    .primary_output_path()
+                    .unwrap_or_default()
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            )])
+            .style(if *item.active.lock() {
+                not_done_style
+            } else {
+                done_style
+            })
         }),
         [Percentage(100)],
     );
