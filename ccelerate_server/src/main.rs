@@ -32,6 +32,16 @@ struct TaskItem {
     end_time: Arc<Mutex<Option<Instant>>>,
 }
 
+impl TaskItem {
+    fn duration(&self) -> f64 {
+        self.end_time
+            .lock()
+            .unwrap_or_else(|| Instant::now())
+            .duration_since(self.start_time)
+            .as_secs_f64()
+    }
+}
+
 #[actix_web::get("/")]
 async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
@@ -205,7 +215,14 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
     use ratatui::layout::Constraint::*;
 
     let mut items = state.items.lock();
-    items.sort_by_key(|item| *item.active.lock());
+    items.sort_by_key(|item| {
+        let active = *item.active.lock();
+        if active {
+            (active, (item.duration() * 100f64) as u64)
+        } else {
+            (active, 0)
+        }
+    });
     let mut items_table_state = state.items_table_state.lock();
 
     let vertical = Layout::vertical([Length(1), Min(0)]);
@@ -220,7 +237,7 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
         items.iter().map(|item| {
             ratatui::widgets::Row::new([
                 ratatui::text::Text::raw(format!(
-                    "{:.2}s",
+                    "{:3.1}s",
                     item.end_time
                         .lock()
                         .unwrap_or_else(|| Instant::now())

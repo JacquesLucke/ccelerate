@@ -17,6 +17,7 @@ pub struct GCCArgs {
     pub machine_args: Vec<String>,
     pub pipe: bool,
     pub f_flags: Vec<String>,
+    pub g_flags: Vec<String>,
     pub opt_flags: Vec<String>,
     pub lang_std: Option<String>,
     pub depfile_generate: bool,
@@ -51,6 +52,7 @@ impl Default for GCCArgs {
             machine_args: vec![],
             pipe: false,
             f_flags: vec![],
+            g_flags: vec![],
             opt_flags: vec![],
             lang_std: None,
             depfile_generate: false,
@@ -155,6 +157,8 @@ impl GCCArgs {
                 args.primary_output = Some(make_absolute(cwd, Path::new(path)));
             } else if arg_str == "-c" {
                 args.compile_only = true;
+            } else if arg_str.starts_with("-g") {
+                args.g_flags.push(arg_str.to_string());
             } else if arg_str.starts_with("-l") {
                 args.libraries.push(arg_str[2..].to_string());
             } else if arg_str == "-no-pie" {
@@ -204,6 +208,9 @@ impl GCCArgs {
             args.push(lang_std.into());
         }
         for arg in &self.opt_flags {
+            args.push(arg.into());
+        }
+        for arg in &self.g_flags {
             args.push(arg.into());
         }
         for arg in &self.f_flags {
