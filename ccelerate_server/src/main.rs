@@ -1,4 +1,4 @@
-use std::{ffi::OsStr, sync::Arc};
+use std::{ffi::OsStr, sync::Arc, time::Instant};
 
 use actix_web::HttpResponse;
 use anyhow::Result;
@@ -28,6 +28,8 @@ struct State {
 struct TaskItem {
     data: command::Command,
     active: Arc<Mutex<bool>>,
+    start_time: Instant,
+    end_time: Arc<Mutex<Option<Instant>>>,
 }
 
 #[actix_web::get("/")]
@@ -80,17 +82,21 @@ async fn route_run(
         )
         .unwrap();
     }
-    let active = {
+    let end_props = {
         let mut items = state.items.lock();
         items.push(TaskItem {
             data: command.clone(),
             active: Arc::new(Mutex::new(true)),
+            start_time: Instant::now(),
+            end_time: Arc::new(Mutex::new(None)),
         });
         state.items_table_state.lock().select_last();
-        items.last().unwrap().active.clone()
+        let last_item = items.last().unwrap();
+        (last_item.active.clone(), last_item.end_time.clone())
     };
     scopeguard::defer! {
-        *active.lock() = false;
+        *end_props.0.lock() = false;
+        *end_props.1.lock() = Some(Instant::now());
     }
 
     let Ok(child) = command.run() else {
@@ -212,22 +218,32 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
 
     let table = ratatui::widgets::Table::new(
         items.iter().map(|item| {
-            ratatui::widgets::Row::new([ratatui::text::Text::raw(
-                item.data
-                    .primary_output_path()
-                    .unwrap_or_default()
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string(),
-            )])
+            ratatui::widgets::Row::new([
+                ratatui::text::Text::raw(format!(
+                    "{:.2}s",
+                    item.end_time
+                        .lock()
+                        .unwrap_or_else(|| Instant::now())
+                        .duration_since(item.start_time)
+                        .as_secs_f64()
+                )),
+                ratatui::text::Text::raw(
+                    item.data
+                        .primary_output_path()
+                        .unwrap_or_default()
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                ),
+            ])
             .style(if *item.active.lock() {
                 not_done_style
             } else {
                 done_style
             })
         }),
-        [Percentage(100)],
+        [Length(10), Percentage(100)],
     );
 
     frame.render_stateful_widget(table, main_area, &mut items_table_state);
