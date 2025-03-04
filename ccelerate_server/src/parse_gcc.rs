@@ -1197,14 +1197,6 @@ mod test {
             "-ldl",
         ];
         let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
-
-        let args = GCCArgs::parse(
-            &Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
-            &raw_args,
-        );
-        assert!(args.is_ok());
-        let args = args.unwrap();
-
         test_round_trip(&raw_args);
     }
 
