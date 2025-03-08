@@ -32,8 +32,8 @@ static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST
 struct State {
     address: String,
     conn: Arc<Mutex<rusqlite::Connection>>,
-    items: Arc<Mutex<Vec<TaskItem>>>,
-    items_table_state: Arc<Mutex<TableState>>,
+    tasks_logger: TasksLogger,
+    tasks_table_state: Arc<Mutex<TableState>>,
 }
 
 struct TaskItem {
@@ -50,6 +50,76 @@ impl TaskItem {
             .unwrap_or_else(|| Instant::now())
             .duration_since(self.start_time)
             .as_secs_f64()
+    }
+}
+
+struct TasksLogger {
+    tasks: Arc<Mutex<Vec<TaskLog>>>,
+}
+
+impl TasksLogger {
+    fn new() -> Self {
+        Self {
+            tasks: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn start_task(&self, name: &str) -> TaskLogHandle {
+        let end_time = Arc::new(Mutex::new(None));
+        let task = TaskLog {
+            name: name.to_string(),
+            start_time: Instant::now(),
+            end_time: end_time.clone(),
+        };
+        self.tasks.lock().push(task);
+        TaskLogHandle { end_time: end_time }
+    }
+
+    fn get_for_print(&self) -> Vec<TaskLogPrint> {
+        self.tasks
+            .lock()
+            .iter()
+            .map(|t| TaskLogPrint {
+                name: t.name.clone(),
+                duration: t.duration(),
+                active: t.is_running(),
+            })
+            .collect()
+    }
+}
+
+struct TaskLog {
+    name: String,
+    start_time: Instant,
+    end_time: Arc<Mutex<Option<Instant>>>,
+}
+
+struct TaskLogPrint {
+    name: String,
+    duration: Duration,
+    active: bool,
+}
+
+impl TaskLog {
+    fn is_running(&self) -> bool {
+        self.end_time.lock().is_none()
+    }
+
+    fn duration(&self) -> Duration {
+        self.end_time
+            .lock()
+            .unwrap_or_else(|| Instant::now())
+            .duration_since(self.start_time)
+    }
+}
+
+struct TaskLogHandle {
+    end_time: Arc<Mutex<Option<Instant>>>,
+}
+
+impl Drop for TaskLogHandle {
+    fn drop(&mut self) {
+        *self.end_time.lock() = Some(Instant::now());
     }
 }
 
@@ -223,22 +293,13 @@ async fn route_run(
         )
         .unwrap();
     }
-    let end_props = {
-        let mut items = state.items.lock();
-        items.push(TaskItem {
-            data: command.clone(),
-            active: Arc::new(Mutex::new(true)),
-            start_time: Instant::now(),
-            end_time: Arc::new(Mutex::new(None)),
-        });
-        state.items_table_state.lock().select_last();
-        let last_item = items.last().unwrap();
-        (last_item.active.clone(), last_item.end_time.clone())
-    };
-    scopeguard::defer! {
-        *end_props.0.lock() = false;
-        *end_props.1.lock() = Some(Instant::now());
-    }
+    let _task_handle = state.tasks_logger.start_task(
+        &command
+            .primary_output_path()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+    );
 
     match &command.args {
         CommandArgs::Gcc(args) => {
@@ -264,7 +325,6 @@ async fn route_run(
             if args.stop_before_link {
                 let dummy_object = ASSETS_DIR.get_file("dummy.o").unwrap();
                 let object_path = args.primary_output.as_ref().unwrap();
-                println!("Preprocess: {:?}", object_path);
                 std::fs::write(object_path, dummy_object.contents()).unwrap();
                 return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
                     ..Default::default()
@@ -308,7 +368,6 @@ async fn route_run(
                             let CommandArgs::Gcc(args) = &mut source_command.args else {
                                 panic!("Expected Gcc");
                             };
-                            println!("Compile: {:?}", object_path);
                             args.primary_output = Some(object_path.clone());
                             source_command
                                 .run()
@@ -372,7 +431,6 @@ async fn route_run(
                 cwd: run_request.cwd.clone(),
                 args: CommandArgs::Gcc(updated_args),
             };
-            println!("Link: {:#?}", updated_command);
             let result = updated_command
                 .run()
                 .unwrap()
@@ -435,18 +493,19 @@ async fn main() -> Result<()> {
     let state = actix_web::web::Data::new(State {
         address: addr,
         conn: Arc::new(Mutex::new(conn)),
-        items: Arc::new(Mutex::new(Vec::new())),
-        items_table_state: Arc::new(Mutex::new(TableState::default())),
+        tasks_logger: TasksLogger::new(),
+        tasks_table_state: Arc::new(Mutex::new(TableState::default())),
     });
 
     tokio::spawn(server_thread(state.clone()));
 
-    sleep(Duration::from_secs(1000)).await;
+    // sleep(Duration::from_secs(1000)).await;
 
     let mut terminal = ratatui::init();
 
     loop {
         let state_clone = state.clone();
+        state_clone.tasks_table_state.lock().select_last();
         terminal
             .draw(|frame| {
                 draw_terminal(frame, state_clone);
@@ -480,16 +539,19 @@ async fn main() -> Result<()> {
 fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>) {
     use ratatui::layout::Constraint::*;
 
-    let mut items = state.items.lock();
-    items.sort_by_key(|item| {
-        let active = *item.active.lock();
-        if active {
-            (active, (item.duration() * 100f64) as u64)
-        } else {
-            (active, 0)
-        }
+    let mut tasks = state.tasks_logger.get_for_print();
+    tasks.sort_by_key(|t| {
+        (
+            t.active,
+            if t.active {
+                (t.duration.as_secs_f64() * 100f64) as u64
+            } else {
+                0
+            },
+        )
     });
-    let mut items_table_state = state.items_table_state.lock();
+
+    let mut tasks_table_state = state.tasks_table_state.lock();
 
     let vertical = Layout::vertical([Length(1), Min(0)]);
     let [title_area, main_area] = vertical.areas(frame.area());
@@ -500,34 +562,15 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
     let not_done_style = Style::new().fg(Color::Blue);
 
     let table = ratatui::widgets::Table::new(
-        items.iter().map(|item| {
+        tasks.iter().map(|t| {
             ratatui::widgets::Row::new([
-                ratatui::text::Text::raw(format!(
-                    "{:3.1}s",
-                    item.end_time
-                        .lock()
-                        .unwrap_or_else(|| Instant::now())
-                        .duration_since(item.start_time)
-                        .as_secs_f64()
-                )),
-                ratatui::text::Text::raw(
-                    item.data
-                        .primary_output_path()
-                        .unwrap_or_default()
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                ),
+                ratatui::text::Text::raw(format!("{:3.1}s", t.duration.as_secs_f64())),
+                ratatui::text::Text::raw(&t.name),
             ])
-            .style(if *item.active.lock() {
-                not_done_style
-            } else {
-                done_style
-            })
+            .style(if t.active { not_done_style } else { done_style })
         }),
         [Length(10), Percentage(100)],
     );
 
-    frame.render_stateful_widget(table, main_area, &mut items_table_state);
+    frame.render_stateful_widget(table, main_area, &mut tasks_table_state);
 }
