@@ -7,7 +7,7 @@ pub struct RunRequestData {
     pub cwd: PathBuf,
 }
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
 pub struct RunResponseData {
     pub stdout: String,
     pub stderr: String,

@@ -23,7 +23,9 @@ pub struct GCCArgs {
     pub depfile_generate: bool,
     pub depfile_output_path: Option<PathBuf>,
     pub depfile_target_name: Option<String>,
-    pub compile_only: bool,
+    pub stop_before_link: bool,
+    pub stop_before_assemble: bool,
+    pub stop_after_preprocessing: bool,
     pub shared: bool,
     pub libraries: Vec<String>,
     pub no_pie: bool,
@@ -32,6 +34,11 @@ pub struct GCCArgs {
     pub print_sysroot: bool,
     pub flag_v: bool,
     pub include_files: Vec<SourceFile>,
+    pub aa_flag: bool,
+    pub target_flags: Vec<String>,
+    pub cxx_flag: bool,
+    pub ecxx_flag: bool,
+    pub openmp_flag: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -58,7 +65,9 @@ impl Default for GCCArgs {
             depfile_generate: false,
             depfile_output_path: None,
             depfile_target_name: None,
-            compile_only: false,
+            stop_before_link: false,
+            stop_before_assemble: false,
+            stop_after_preprocessing: false,
             shared: false,
             libraries: vec![],
             no_pie: false,
@@ -67,6 +76,11 @@ impl Default for GCCArgs {
             print_sysroot: false,
             flag_v: false,
             include_files: vec![],
+            aa_flag: false,
+            target_flags: vec![],
+            cxx_flag: false,
+            ecxx_flag: false,
+            openmp_flag: false,
         }
     }
 }
@@ -103,6 +117,8 @@ impl GCCArgs {
                 }
             } else if arg_str.starts_with("-W") {
                 args.warnings.push(arg_str.to_string());
+            } else if arg_str.starts_with("--target") {
+                args.target_flags.push(arg_str.to_string());
             } else if arg_str.starts_with("-m") {
                 args.machine_args.push(arg_str.to_string());
             } else if arg_str == "-pipe" {
@@ -113,6 +129,14 @@ impl GCCArgs {
                 args.print_sysroot = true;
             } else if arg_str == "-v" {
                 args.flag_v = true;
+            } else if arg_str == "-Aa" {
+                args.aa_flag = true;
+            } else if arg_str == "--c++" {
+                args.cxx_flag = true;
+            } else if arg_str == "--ec++" {
+                args.ecxx_flag = true;
+            } else if arg_str == "--openmp" {
+                args.openmp_flag = true;
             } else if arg_str == "-x" {
                 let name = raw_args_iter
                     .next()
@@ -156,7 +180,11 @@ impl GCCArgs {
                     .ok_or_else(|| anyhow::anyhow!("Missing path for -o flag"))?;
                 args.primary_output = Some(make_absolute(cwd, Path::new(path)));
             } else if arg_str == "-c" {
-                args.compile_only = true;
+                args.stop_before_link = true;
+            } else if arg_str == "-S" {
+                args.stop_before_assemble = true;
+            } else if arg_str == "-E" {
+                args.stop_after_preprocessing = true;
             } else if arg_str.starts_with("-g") {
                 args.g_flags.push(arg_str.to_string());
             } else if arg_str.starts_with("-l") {
@@ -186,8 +214,14 @@ impl GCCArgs {
 
     pub fn to_args(&self) -> Vec<OsString> {
         let mut args: Vec<OsString> = vec![];
-        if self.compile_only {
+        if self.stop_before_link {
             args.push("-c".into());
+        }
+        if self.stop_before_assemble {
+            args.push("-S".into());
+        }
+        if self.stop_after_preprocessing {
+            args.push("-E".into());
         }
         if self.pipe {
             args.push("-pipe".into());
@@ -201,8 +235,23 @@ impl GCCArgs {
         if self.print_sysroot {
             args.push("-print-sysroot".into());
         }
+        for flag in &self.target_flags {
+            args.push(flag.into());
+        }
+        if self.aa_flag {
+            args.push("-Aa".into());
+        }
         if self.flag_v {
             args.push("-v".into());
+        }
+        if self.cxx_flag {
+            args.push("--c++".into());
+        }
+        if self.ecxx_flag {
+            args.push("--ec++".into());
+        }
+        if self.openmp_flag {
+            args.push("--openmp".into());
         }
         if let Some(lang_std) = &self.lang_std {
             args.push(lang_std.into());
@@ -400,7 +449,7 @@ mod test {
                 "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/makesdna/intern/CMakeFiles/makesdna.dir/__/__/blenlib/intern/BLI_mempool.cc.o"
             ))
         );
-        assert!(args.compile_only);
+        assert!(args.stop_before_link);
         assert!(args.depfile_generate);
         assert_eq!(
         args.depfile_target_name,
@@ -544,7 +593,7 @@ mod test {
             language: None
         }).collect::<Vec<_>>()
     );
-        assert_eq!(args.compile_only, false);
+        assert_eq!(args.stop_before_link, false);
         assert_eq!(args.depfile_generate, false);
         assert_eq!(
             args.primary_output,

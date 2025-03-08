@@ -4,6 +4,7 @@ use actix_web::HttpResponse;
 use anyhow::Result;
 use base64::prelude::*;
 use ccelerate_shared::RunRequestData;
+use command::CommandArgs;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
 use ratatui::{
@@ -47,17 +48,31 @@ async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
 }
 
-fn need_eager_evaluation(run_request: &RunRequestData) -> bool {
-    let marker = "CMakeScratch";
-    if run_request.cwd.to_str().unwrap_or("").contains(marker) {
+fn is_marker_in_args_or_cwd(command: &command::Command, marker: &str) -> bool {
+    if command.cwd.to_string_lossy().contains(marker) {
         return true;
     }
-    for arg in &run_request.args {
-        if arg.contains(marker) {
+    for arg in &command.to_args() {
+        if arg.to_string_lossy().contains(marker) {
             return true;
         }
     }
-    return false;
+    false
+}
+
+fn is_cmake_scratch_command(command: &command::Command) -> bool {
+    is_marker_in_args_or_cwd(command, "CMakeScratch")
+}
+
+fn is_compiler_id_check_command(command: &command::Command) -> bool {
+    is_marker_in_args_or_cwd(command, "CompilerIdC")
+}
+
+fn is_print_sysroot_command(command: &command::Command) -> bool {
+    let CommandArgs::Gcc(args) = &command.args else {
+        return false;
+    };
+    args.print_sysroot
 }
 
 #[actix_web::post("/run")]
@@ -65,7 +80,6 @@ async fn route_run(
     run_request: actix_web::web::Json<RunRequestData>,
     state: actix_web::web::Data<State>,
 ) -> impl actix_web::Responder {
-    let eager_evaluation = need_eager_evaluation(&run_request);
     let Ok(command) = command::Command::new(
         &run_request.binary,
         &run_request.cwd,
@@ -75,7 +89,7 @@ async fn route_run(
             .map(|a| OsStr::new(a))
             .collect::<Vec<_>>(),
     ) else {
-        eprintln!("Failed: {:#?}", run_request);
+        eprintln!("Could not parse: {:#?}", run_request);
         std::process::exit(1);
     };
 
@@ -109,30 +123,36 @@ async fn route_run(
         *end_props.1.lock() = Some(Instant::now());
     }
 
-    let Ok(child) = command.run() else {
-        return HttpResponse::InternalServerError().body("Failed to spawn command");
-    };
-    let result = child.wait_with_output().await;
-    let result = match result {
-        Ok(result) => result,
-        Err(err) => {
-            return HttpResponse::InternalServerError().body(format!("{}", err));
+    match &command.args {
+        CommandArgs::Gcc(_) => {
+            if is_cmake_scratch_command(&command)
+                || is_compiler_id_check_command(&command)
+                || is_print_sysroot_command(&command)
+            {
+                let Ok(result) = command.run() else {
+                    return HttpResponse::InternalServerError().body("Failed to spawn command");
+                };
+                let Ok(result) = result.wait_with_output().await else {
+                    return HttpResponse::InternalServerError().body("Failed to wait on command");
+                };
+                return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
+                    stdout: BASE64_STANDARD.encode(&result.stdout),
+                    stderr: BASE64_STANDARD.encode(&result.stderr),
+                    status: result.status.code().unwrap_or(1),
+                });
+            }
+            command.run().unwrap().wait_with_output().await.unwrap();
+            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
+                ..Default::default()
+            });
+        }
+        CommandArgs::Ar(_) => {
+            command.run().unwrap().wait_with_output().await.unwrap();
+            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
+                ..Default::default()
+            });
         }
     };
-    let response_data = ccelerate_shared::RunResponseData {
-        stdout: if eager_evaluation {
-            BASE64_STANDARD.encode(&result.stdout)
-        } else {
-            "".to_string()
-        },
-        stderr: if eager_evaluation {
-            BASE64_STANDARD.encode(&result.stderr)
-        } else {
-            "".to_string()
-        },
-        status: result.status.code().unwrap_or(1),
-    };
-    HttpResponse::Ok().json(&response_data)
 }
 
 async fn server_thread(state: actix_web::web::Data<State>) {
