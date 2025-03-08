@@ -1,3 +1,3 @@
 fn main() {
-    ccelerate_wrappers::wrap_command("ar");
+    ccelerate_wrappers::wrap_command(ccelerate_shared::WrappedBinary::Ar);
 }

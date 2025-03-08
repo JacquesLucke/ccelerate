@@ -1,8 +1,7 @@
-use base64::prelude::*;
-use std::{env::args, io::Write, process::exit};
+use std::{io::Write, process::exit};
 
-pub fn wrap_command(command: &str) {
-    let args = args().skip(1).collect::<Vec<_>>();
+pub fn wrap_command(wrapped_binary: ccelerate_shared::WrappedBinary) {
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     let client = reqwest::blocking::Client::builder()
         .timeout(None)
         .build()
@@ -12,11 +11,14 @@ pub fn wrap_command(command: &str) {
             "http://127.0.0.1:{}/run",
             ccelerate_shared::DEFAULT_PORT
         ))
-        .json(&ccelerate_shared::RunRequestData {
-            binary: command.to_string(),
-            args: args,
-            cwd: std::env::current_dir().unwrap(),
-        })
+        .json(
+            &ccelerate_shared::RunRequestData {
+                binary: wrapped_binary,
+                args: args,
+                cwd: std::env::current_dir().unwrap(),
+            }
+            .to_wire(),
+        )
         .send();
     match response {
         Ok(response) => {
@@ -25,18 +27,14 @@ pub fn wrap_command(command: &str) {
                 exit(1);
             }
             let data = response
-                .json::<ccelerate_shared::RunResponseData>()
+                .json::<ccelerate_shared::RunResponseDataWire>()
                 .unwrap();
-            let Ok(stdout) = BASE64_STANDARD.decode(&data.stdout) else {
-                println!("Failed to decode stdout");
+            let Ok(data) = ccelerate_shared::RunResponseData::from_wire(data) else {
+                println!("Failed to decode response");
                 exit(1);
             };
-            let Ok(stderr) = BASE64_STANDARD.decode(&data.stderr) else {
-                println!("Failed to decode stderr");
-                exit(1);
-            };
-            std::io::stdout().write_all(&stdout).unwrap();
-            std::io::stderr().write_all(&stderr).unwrap();
+            std::io::stdout().write_all(&data.stdout).unwrap();
+            std::io::stderr().write_all(&data.stderr).unwrap();
             exit(data.status);
         }
         Err(err) => {

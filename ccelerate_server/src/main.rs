@@ -8,8 +8,7 @@ use std::{
 
 use actix_web::HttpResponse;
 use anyhow::Result;
-use base64::prelude::*;
-use ccelerate_shared::RunRequestData;
+use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use command::{Command, CommandArgs};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
@@ -91,10 +90,14 @@ fn get_command_for_file(path: &Path, conn: &rusqlite::Connection) -> Option<comm
         "SELECT binary, cwd, args FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
+            // TODO: Support OsStr in the database.
+            let binary = row.get::<usize, String>(0).unwrap();
+            let cwd = row.get::<usize, String>(1).unwrap();
+            let args = row.get::<usize, String>(2).unwrap();
             Ok(Command::new(
-                row.get::<usize, String>(0).unwrap().as_str(),
-                Path::new(&row.get::<usize, String>(1).unwrap()),
-                serde_json::from_str::<Vec<String>>(&row.get::<usize, String>(2).unwrap())
+                WrappedBinary::from_standard_binary_name(OsStr::new(&binary)).unwrap(),
+                Path::new(&cwd),
+                serde_json::from_str::<Vec<String>>(&args)
                     .unwrap()
                     .iter()
                     .map(|s| OsStr::new(s))
@@ -149,13 +152,31 @@ fn find_root_link_sources(
     Ok(final_sources.into_iter().collect())
 }
 
+fn is_gcc_compatible_binary(binary: &str) -> bool {
+    match binary {
+        "gcc" | "g++" | "clang" | "clang++" => true,
+        _ => false,
+    }
+}
+
+fn is_ar_compatible_binary(binary: &str) -> bool {
+    match binary {
+        "ar" => true,
+        _ => false,
+    }
+}
+
 #[actix_web::post("/run")]
 async fn route_run(
-    run_request: actix_web::web::Json<RunRequestData>,
+    run_request: actix_web::web::Json<RunRequestDataWire>,
     state: actix_web::web::Data<State>,
 ) -> impl actix_web::Responder {
+    let Ok(run_request) = RunRequestData::from_wire(&run_request) else {
+        eprintln!("Could not parse: {:#?}", run_request);
+        return HttpResponse::InternalServerError().body("Failed to parse request");
+    };
     let Ok(command) = command::Command::new(
-        &run_request.binary,
+        run_request.binary,
         &run_request.cwd,
         &run_request
             .args
@@ -169,13 +190,24 @@ async fn route_run(
 
     if let Some(output_path) = command.primary_output_path() {
         let conn = state.conn.lock();
+        // TODO: Support OsStr in the database.
         conn.execute(
             "INSERT OR REPLACE INTO Files (binary, path, cwd, args) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![
-                run_request.binary,
+                run_request
+                    .binary
+                    .to_standard_binary_name()
+                    .to_string_lossy(),
                 output_path.to_string_lossy(),
                 run_request.cwd.to_str().unwrap(),
-                serde_json::to_string(&run_request.args).unwrap()
+                serde_json::to_string(
+                    &run_request
+                        .args
+                        .iter()
+                        .map(|s| s.to_string_lossy())
+                        .collect::<Vec<_>>()
+                )
+                .unwrap()
             ],
         )
         .unwrap();
@@ -209,18 +241,21 @@ async fn route_run(
                 let Ok(result) = result.wait_with_output().await else {
                     return HttpResponse::InternalServerError().body("Failed to wait on command");
                 };
-                return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
-                    stdout: BASE64_STANDARD.encode(&result.stdout),
-                    stderr: BASE64_STANDARD.encode(&result.stderr),
-                    status: result.status.code().unwrap_or(1),
-                });
+                return HttpResponse::Ok().json(
+                    &ccelerate_shared::RunResponseData {
+                        stdout: result.stdout,
+                        stderr: result.stderr,
+                        status: result.status.code().unwrap_or(1),
+                    }
+                    .to_wire(),
+                );
             }
             if args.stop_before_link {
                 let dummy_object = ASSETS_DIR.get_file("dummy.o").unwrap();
                 let object_path = args.primary_output.as_ref().unwrap();
                 println!("Preprocess: {:?}", object_path);
                 std::fs::write(object_path, dummy_object.contents()).unwrap();
-                return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
+                return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
                     ..Default::default()
                 });
             }
@@ -295,7 +330,7 @@ async fn route_run(
                 ..Default::default()
             };
             Command {
-                binary: "ar".into(),
+                binary: WrappedBinary::Ar,
                 cwd: run_request.cwd.clone(),
                 args: CommandArgs::Ar(thin_archive_args),
             }
@@ -333,17 +368,20 @@ async fn route_run(
                 .wait_with_output()
                 .await
                 .unwrap();
-            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
-                stdout: BASE64_STANDARD.encode(&result.stdout),
-                stderr: BASE64_STANDARD.encode(&result.stderr),
-                status: result.status.code().unwrap_or(1),
-            });
+            return HttpResponse::Ok().json(
+                &ccelerate_shared::RunResponseData {
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    status: result.status.code().unwrap_or(1),
+                }
+                .to_wire(),
+            );
         }
         CommandArgs::Ar(args) => {
             let dummy_archive = ASSETS_DIR.get_file("dummy_lib.a").unwrap();
             let archive_path = args.output.as_ref().unwrap();
             std::fs::write(archive_path, dummy_archive.contents()).unwrap();
-            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
+            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
                 ..Default::default()
             });
         }
