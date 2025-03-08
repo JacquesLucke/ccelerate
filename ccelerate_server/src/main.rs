@@ -21,7 +21,7 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
-use tokio::time::sleep;
+use tokio::{task::JoinHandle, time::sleep};
 
 mod command;
 mod parse_ar;
@@ -218,44 +218,72 @@ async fn route_run(
             if args.stop_before_link {
                 let dummy_object = ASSETS_DIR.get_file("dummy.o").unwrap();
                 let object_path = args.primary_output.as_ref().unwrap();
+                println!("Preprocess: {:?}", object_path);
                 std::fs::write(object_path, dummy_object.contents()).unwrap();
                 return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
                     ..Default::default()
                 });
             }
             // This does the final link.
-            let sources = find_root_link_sources(&args, &state.conn.lock());
-            println!("Run for {:#?}", args.primary_output);
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let Ok(sources) = find_root_link_sources(&args, &state.conn.lock()) else {
+                return HttpResponse::InternalServerError()
+                    .body("Failed to find root link sources");
+            };
+            let object_file_sources: Vec<_> = sources
+                .iter()
+                .filter(|s| s.extension() == Some(OsStr::new("o")))
+                .collect();
+            let other_file_sources: Vec<_> = sources
+                .iter()
+                .filter(|s| s.extension() != Some(OsStr::new("o")))
+                .collect();
+
+            struct ObjectSourceFile {
+                object_path: PathBuf,
+                handle: JoinHandle<()>,
+            }
 
             let semaphore = Arc::new(tokio::sync::Semaphore::new(20));
-            let handles: Vec<_> = sources
-                .as_ref()
-                .unwrap()
+            let object_sources: Vec<_> = object_file_sources
                 .iter()
                 .map(|source| {
                     let source_command = get_command_for_file(&source, &state.conn.lock());
-                    println!("Run for final: {:#?}", source_command);
-
                     let permit = semaphore.clone().acquire_owned();
-                    tokio::task::spawn(async move {
+                    let object_path = tmp_dir.path().join(format!(
+                        "{}_{}",
+                        uuid::Uuid::new_v4().to_string(),
+                        source.file_name().unwrap().to_string_lossy()
+                    ));
+                    let object_path_clone = object_path.clone();
+                    let handle = tokio::task::spawn(async move {
                         let _permit = permit.await.unwrap();
-                        if let Some(source_command) = source_command {
-                            let source_result = source_command
+                        if let Some(mut source_command) = source_command {
+                            let CommandArgs::Gcc(args) = &mut source_command.args else {
+                                panic!("Expected Gcc");
+                            };
+                            println!("Compile: {:?}", object_path);
+                            args.primary_output = Some(object_path.clone());
+                            source_command
                                 .run()
                                 .unwrap()
                                 .wait_with_output()
                                 .await
                                 .unwrap();
-                            println!("Source result: {:#?}", source_result);
                         }
-                    })
+                    });
+                    ObjectSourceFile {
+                        object_path: object_path_clone,
+                        handle,
+                    }
                 })
                 .collect();
-            for handle in handles {
-                handle.await.unwrap();
+            let mut object_source_paths = vec![];
+            for object_source in object_sources {
+                object_source.handle.await.unwrap();
+                object_source_paths.push(object_source.object_path);
             }
 
-            let tmp_dir = tempfile::tempdir().unwrap();
             let tmp_lib_path = tmp_dir.path().join("my_tmp_lib.a");
             let thin_archive_args = ArArgs {
                 flag_c: true,
@@ -263,17 +291,10 @@ async fn route_run(
                 flag_s: true,
                 flag_T: true,
                 output: Some(tmp_lib_path.clone().into()),
-                sources: sources
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .filter(|s| s.extension() == Some(OsStr::new("o")))
-                    .map(|s| s.clone())
-                    .collect(),
+                sources: object_source_paths.iter().map(|s| s.clone()).collect(),
                 ..Default::default()
             };
-            println!("Run for thin archive: {:#?}", thin_archive_args);
-            let thin_archive_result = Command {
+            Command {
                 binary: "ar".into(),
                 cwd: run_request.cwd.clone(),
                 args: CommandArgs::Ar(thin_archive_args),
@@ -283,16 +304,12 @@ async fn route_run(
             .wait_with_output()
             .await
             .unwrap();
-            println!("Run for thin archive result: {:#?}", thin_archive_result);
 
             let mut updated_args = args.clone();
-            updated_args.sources = sources
-                .as_ref()
-                .unwrap()
+            updated_args.sources = other_file_sources
                 .iter()
-                .filter(|s| s.extension() != Some(OsStr::new("o")))
                 .map(|s| SourceFile {
-                    path: s.clone(),
+                    path: s.to_path_buf(),
                     language: None,
                 })
                 .collect();
@@ -309,7 +326,7 @@ async fn route_run(
                 cwd: run_request.cwd.clone(),
                 args: CommandArgs::Gcc(updated_args),
             };
-            println!("{:#?}", updated_command);
+            println!("Link: {:#?}", updated_command);
             let result = updated_command
                 .run()
                 .unwrap()
