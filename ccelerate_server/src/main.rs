@@ -324,7 +324,7 @@ async fn route_run(
                 flag_c: true,
                 flag_q: true,
                 flag_s: true,
-                flag_t: true,
+                thin_archive: true,
                 output: Some(tmp_lib_path.clone().into()),
                 sources: object_source_paths.iter().map(|s| s.clone()).collect(),
                 ..Default::default()
