@@ -37,31 +37,4 @@ impl Command {
             }),
         }
     }
-
-    pub fn primary_output_path(&self) -> Option<PathBuf> {
-        match &self.args {
-            CommandArgs::Ar(args) => args.output.clone(),
-            CommandArgs::Gcc(args) => args.primary_output.clone(),
-        }
-    }
-
-    pub fn to_args(&self) -> Vec<OsString> {
-        match &self.args {
-            CommandArgs::Ar(args) => args.to_args(),
-            CommandArgs::Gcc(args) => args.to_args(),
-        }
-    }
-
-    pub fn run(&self) -> Result<tokio::process::Child> {
-        let args = self.to_args();
-        Ok(
-            tokio::process::Command::new(&self.binary.to_standard_binary_name())
-                .args(args)
-                .current_dir(&self.cwd)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()?,
-        )
-    }
 }

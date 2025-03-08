@@ -9,7 +9,7 @@ use std::{
 use actix_web::HttpResponse;
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
-use command::{Command, CommandArgs};
+use command::CommandArgs;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
 use parse_ar::ArArgs;
@@ -20,7 +20,6 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
-use tokio::{task::JoinHandle, time::sleep};
 
 mod command;
 mod parse_ar;
@@ -34,23 +33,6 @@ struct State {
     conn: Arc<Mutex<rusqlite::Connection>>,
     tasks_logger: TasksLogger,
     tasks_table_state: Arc<Mutex<TableState>>,
-}
-
-struct TaskItem {
-    data: command::Command,
-    active: Arc<Mutex<bool>>,
-    start_time: Instant,
-    end_time: Arc<Mutex<Option<Instant>>>,
-}
-
-impl TaskItem {
-    fn duration(&self) -> f64 {
-        self.end_time
-            .lock()
-            .unwrap_or_else(|| Instant::now())
-            .duration_since(self.start_time)
-            .as_secs_f64()
-    }
 }
 
 struct TasksLogger {
@@ -179,11 +161,8 @@ async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
 }
 
-fn is_marker_in_args_or_cwd(command: &command::Command, marker: &str) -> bool {
-    if command.cwd.to_string_lossy().contains(marker) {
-        return true;
-    }
-    for arg in &command.to_args() {
+fn gcc_args_have_marker(args: &GCCArgs, marker: &str) -> bool {
+    for arg in args.to_args() {
         if arg.to_string_lossy().contains(marker) {
             return true;
         }
@@ -191,19 +170,26 @@ fn is_marker_in_args_or_cwd(command: &command::Command, marker: &str) -> bool {
     false
 }
 
-fn is_cmake_scratch_command(command: &command::Command) -> bool {
-    is_marker_in_args_or_cwd(command, "CMakeScratch")
+fn gcc_args_or_cwd_have_marker(args: &GCCArgs, cwd: &Path, marker: &str) -> bool {
+    if gcc_args_have_marker(args, marker) {
+        return true;
+    }
+    if cwd.to_string_lossy().contains(marker) {
+        return true;
+    }
+    false
 }
 
-fn is_compiler_id_check_command(command: &command::Command) -> bool {
-    is_marker_in_args_or_cwd(command, "CompilerIdC")
-}
-
-fn is_print_sysroot_command(command: &command::Command) -> bool {
-    let CommandArgs::Gcc(args) = &command.args else {
-        return false;
-    };
+fn is_gcc_print_sysroot_command(args: &GCCArgs) -> bool {
     args.print_sysroot
+}
+
+fn is_gcc_compiler_id_check(args: &GCCArgs, cwd: &Path) -> bool {
+    gcc_args_or_cwd_have_marker(args, cwd, "CompilerIdC")
+}
+
+fn is_gcc_cmakescratch(args: &GCCArgs, cwd: &Path) -> bool {
+    gcc_args_or_cwd_have_marker(args, cwd, "CMakeScratch")
 }
 
 fn get_command_for_file(path: &Path, conn: &rusqlite::Connection) -> Option<command::Command> {
@@ -218,7 +204,7 @@ fn get_command_for_file(path: &Path, conn: &rusqlite::Connection) -> Option<comm
     .ok()
 }
 
-fn find_root_link_sources(
+fn find_smallest_link_units(
     link_args: &GCCArgs,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<PathBuf>> {
@@ -258,6 +244,294 @@ fn find_root_link_sources(
     Ok(final_sources.into_iter().collect())
 }
 
+async fn handle_eager_gcc_request(
+    binary: WrappedBinary,
+    request_gcc_args: &GCCArgs,
+    cwd: &Path,
+    state: &State,
+) -> HttpResponse {
+    let _log_handle = state.tasks_logger.start_task(&format!(
+        "Eager: {:?} {}",
+        binary.to_standard_binary_name(),
+        request_gcc_args
+            .to_args()
+            .iter()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ")
+    ));
+    let child = tokio::process::Command::new(binary.to_standard_binary_name())
+        .args(request_gcc_args.to_args())
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let Ok(child) = child else {
+        return HttpResponse::InternalServerError().body("Failed to spawn child");
+    };
+    let Ok(child_result) = child.wait_with_output().await else {
+        return HttpResponse::InternalServerError().body("Failed to wait on child");
+    };
+    HttpResponse::Ok().json(
+        &ccelerate_shared::RunResponseData {
+            stdout: child_result.stdout,
+            stderr: child_result.stderr,
+            status: child_result.status.code().unwrap_or(1),
+        }
+        .to_wire(),
+    )
+}
+
+async fn handle_gcc_without_link_request(
+    binary: WrappedBinary,
+    request_gcc_args: &GCCArgs,
+    cwd: &Path,
+    state: &State,
+) -> HttpResponse {
+    let Some(request_output_path) = request_gcc_args.primary_output.as_ref() else {
+        return HttpResponse::NotImplemented().body("Expected output path");
+    };
+    let _log_handle = state
+        .tasks_logger
+        .start_task(&format!("Handle object file: {:?}", request_output_path));
+    store_db_file(
+        &state.conn.lock(),
+        &DbFilesRow {
+            path: request_output_path.clone(),
+            cwd: cwd.to_path_buf(),
+            binary: binary,
+            args: request_gcc_args.to_args(),
+        },
+    )
+    .unwrap();
+    let dummy_object = ASSETS_DIR.get_file("dummy_object.o").unwrap();
+    std::fs::write(request_output_path, dummy_object.contents()).unwrap();
+    HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
+        ..Default::default()
+    })
+}
+
+#[derive(Debug, Clone)]
+struct WrappedLinkUnit {
+    original_object_path: PathBuf,
+    wrapped_object_path: PathBuf,
+}
+
+fn osstring_to_osstr_vec(s: &[OsString]) -> Vec<&OsStr> {
+    s.iter().map(|s| s.as_ref()).collect()
+}
+
+async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State) {
+    let link_units = link_units.to_vec();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(24));
+    let handles = link_units
+        .into_iter()
+        .map(|unit| {
+            let Some(original_unit_info) =
+                load_db_file(&state.conn.lock(), &unit.original_object_path)
+            else {
+                panic!("There should be information stored about this file");
+            };
+            let Ok(original_gcc_args) = GCCArgs::parse(
+                &original_unit_info.cwd,
+                &osstring_to_osstr_vec(&original_unit_info.args),
+            ) else {
+                panic!("Cannot parse original gcc arguments");
+            };
+            let permit = semaphore.clone().acquire_owned();
+            tokio::task::spawn(async move {
+                let _permit = permit.await.unwrap();
+                let mut modified_gcc_args = original_gcc_args;
+                modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
+                modified_gcc_args.depfile_generate = false;
+                modified_gcc_args.depfile_target_name = None;
+                modified_gcc_args.depfile_output_path = None;
+
+                println!("Compile: {:#?}", modified_gcc_args);
+
+                let child = tokio::process::Command::new(
+                    original_unit_info.binary.to_standard_binary_name(),
+                )
+                .args(modified_gcc_args.to_args())
+                .current_dir(&original_unit_info.cwd)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn();
+                let Ok(child) = child else {
+                    panic!("Failed to spawn child");
+                };
+                let Ok(_child_result) = child.wait_with_output().await else {
+                    panic!("Failed to wait on child");
+                };
+            })
+        })
+        .collect::<Vec<_>>();
+    for handle in handles {
+        handle.await.unwrap();
+    }
+}
+
+async fn handle_gcc_final_link_request(
+    binary: WrappedBinary,
+    request_gcc_args: &GCCArgs,
+    cwd: &Path,
+    state: &State,
+) -> HttpResponse {
+    let tmp_dir = tempfile::tempdir().unwrap();
+    let Ok(smallest_link_units) = find_smallest_link_units(&request_gcc_args, &state.conn.lock())
+    else {
+        return HttpResponse::InternalServerError().body("Failed to find link sources");
+    };
+    let mut wrapped_link_units = Vec::new();
+    let mut unmodified_link_units = Vec::new();
+    for link_unit in &smallest_link_units {
+        if link_unit.extension() == Some(OsStr::new("o")) {
+            wrapped_link_units.push(WrappedLinkUnit {
+                original_object_path: link_unit.clone(),
+                wrapped_object_path: tmp_dir.path().join(format!(
+                    "{}_{}",
+                    uuid::Uuid::new_v4().to_string(),
+                    link_unit.file_name().unwrap().to_string_lossy()
+                )),
+            });
+        } else {
+            unmodified_link_units.push(link_unit.clone());
+        }
+    }
+    println!("Building wrapped link units: {:#?}", wrapped_link_units);
+    build_wrapped_link_units(&wrapped_link_units, state).await;
+
+    let wrapped_units_archive_path = tmp_dir.path().join("wrapped_units.a");
+    let wrapped_units_archive_args = ArArgs {
+        flag_c: true,
+        flag_q: true,
+        flag_s: true,
+        thin_archive: true,
+        output: Some(wrapped_units_archive_path.clone()),
+        sources: wrapped_link_units
+            .iter()
+            .map(|u| u.wrapped_object_path.clone())
+            .collect(),
+    };
+
+    tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
+        .args(wrapped_units_archive_args.to_args())
+        .current_dir(&cwd)
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .await
+        .unwrap();
+
+    let mut modified_gcc_args = request_gcc_args.clone();
+    modified_gcc_args.sources = vec![];
+    modified_gcc_args.sources.push(SourceFile {
+        path: wrapped_units_archive_path.clone(),
+        language: None,
+    });
+    modified_gcc_args.sources.extend(
+        unmodified_link_units
+            .iter()
+            .map(|w| SourceFile {
+                path: w.clone(),
+                language: None,
+            })
+            .collect::<Vec<_>>(),
+    );
+
+    modified_gcc_args.use_link_group = true;
+    println!("Link: {:#?}", modified_gcc_args.to_args());
+    let child = tokio::process::Command::new(binary.to_standard_binary_name())
+        .args(modified_gcc_args.to_args())
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
+    let Ok(child) = child else {
+        return HttpResponse::InternalServerError().body("Failed to spawn child");
+    };
+    let Ok(child_result) = child.wait_with_output().await else {
+        return HttpResponse::InternalServerError().body("Failed to wait on child");
+    };
+    HttpResponse::Ok().json(
+        &ccelerate_shared::RunResponseData {
+            stdout: child_result.stdout,
+            stderr: child_result.stderr,
+            status: child_result.status.code().unwrap_or(1),
+        }
+        .to_wire(),
+    )
+}
+
+async fn handle_request(request: &RunRequestData, state: &State) -> HttpResponse {
+    let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+    match request.binary {
+        WrappedBinary::Ar => {
+            let Ok(request_ar_args) = ArArgs::parse(&request.cwd, &request_args_ref) else {
+                return HttpResponse::NotImplemented().body("Cannot parse ar arguments");
+            };
+            let Some(request_output_path) = request_ar_args.output.as_ref() else {
+                return HttpResponse::NotImplemented().body("Expected output path");
+            };
+            let _task_handle = state.tasks_logger.start_task(&format!(
+                "Generate dummy archive: {:?}",
+                request_output_path
+            ));
+            store_db_file(
+                &state.conn.lock(),
+                &DbFilesRow {
+                    path: request_output_path.clone(),
+                    cwd: request.cwd.clone(),
+                    binary: request.binary,
+                    args: request_ar_args.to_args(),
+                },
+            )
+            .unwrap();
+            let dummy_archive = ASSETS_DIR.get_file("dummy_archive.a").unwrap();
+            std::fs::write(request_output_path, dummy_archive.contents()).unwrap();
+            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
+                ..Default::default()
+            });
+        }
+        WrappedBinary::Gcc | WrappedBinary::Gxx | WrappedBinary::Clang | WrappedBinary::Clangxx => {
+            let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
+                return HttpResponse::NotImplemented().body("Cannot parse gcc arguments");
+            };
+            if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
+                || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
+                || is_gcc_print_sysroot_command(&request_gcc_args)
+            {
+                return handle_eager_gcc_request(
+                    request.binary,
+                    &request_gcc_args,
+                    &request.cwd,
+                    state,
+                )
+                .await;
+            }
+            if request_gcc_args.stop_before_link {
+                return handle_gcc_without_link_request(
+                    request.binary,
+                    &request_gcc_args,
+                    &request.cwd,
+                    state,
+                )
+                .await;
+            }
+            return handle_gcc_final_link_request(
+                request.binary,
+                &request_gcc_args,
+                &request.cwd,
+                state,
+            )
+            .await;
+        }
+    };
+}
+
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestDataWire>,
@@ -267,194 +541,7 @@ async fn route_run(
         eprintln!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
-    let Ok(command) = command::Command::new(
-        run_request.binary,
-        &run_request.cwd,
-        &run_request
-            .args
-            .iter()
-            .map(|a| OsStr::new(a))
-            .collect::<Vec<_>>(),
-    ) else {
-        eprintln!("Could not parse: {:#?}", run_request);
-        std::process::exit(1);
-    };
-
-    if let Some(output_path) = command.primary_output_path() {
-        let conn = state.conn.lock();
-        store_db_file(
-            &conn,
-            &DbFilesRow {
-                path: output_path.clone(),
-                cwd: run_request.cwd.clone(),
-                binary: run_request.binary,
-                args: run_request.args.clone(),
-            },
-        )
-        .unwrap();
-    }
-    let _task_handle = state.tasks_logger.start_task(
-        &command
-            .primary_output_path()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string(),
-    );
-
-    match &command.args {
-        CommandArgs::Gcc(args) => {
-            if is_cmake_scratch_command(&command)
-                || is_compiler_id_check_command(&command)
-                || is_print_sysroot_command(&command)
-            {
-                let Ok(result) = command.run() else {
-                    return HttpResponse::InternalServerError().body("Failed to spawn command");
-                };
-                let Ok(result) = result.wait_with_output().await else {
-                    return HttpResponse::InternalServerError().body("Failed to wait on command");
-                };
-                return HttpResponse::Ok().json(
-                    &ccelerate_shared::RunResponseData {
-                        stdout: result.stdout,
-                        stderr: result.stderr,
-                        status: result.status.code().unwrap_or(1),
-                    }
-                    .to_wire(),
-                );
-            }
-            if args.stop_before_link {
-                let dummy_object = ASSETS_DIR.get_file("dummy.o").unwrap();
-                let object_path = args.primary_output.as_ref().unwrap();
-                std::fs::write(object_path, dummy_object.contents()).unwrap();
-                return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
-                    ..Default::default()
-                });
-            }
-            // This does the final link.
-            let tmp_dir = tempfile::tempdir().unwrap();
-            let Ok(sources) = find_root_link_sources(&args, &state.conn.lock()) else {
-                return HttpResponse::InternalServerError()
-                    .body("Failed to find root link sources");
-            };
-            let object_file_sources: Vec<_> = sources
-                .iter()
-                .filter(|s| s.extension() == Some(OsStr::new("o")))
-                .collect();
-            let other_file_sources: Vec<_> = sources
-                .iter()
-                .filter(|s| s.extension() != Some(OsStr::new("o")))
-                .collect();
-
-            struct ObjectSourceFile {
-                object_path: PathBuf,
-                handle: JoinHandle<()>,
-            }
-
-            let semaphore = Arc::new(tokio::sync::Semaphore::new(20));
-            let object_sources: Vec<_> = object_file_sources
-                .iter()
-                .map(|source| {
-                    let source_command = get_command_for_file(&source, &state.conn.lock());
-                    let permit = semaphore.clone().acquire_owned();
-                    let object_path = tmp_dir.path().join(format!(
-                        "{}_{}",
-                        uuid::Uuid::new_v4().to_string(),
-                        source.file_name().unwrap().to_string_lossy()
-                    ));
-                    let object_path_clone = object_path.clone();
-                    let handle = tokio::task::spawn(async move {
-                        let _permit = permit.await.unwrap();
-                        if let Some(mut source_command) = source_command {
-                            let CommandArgs::Gcc(args) = &mut source_command.args else {
-                                panic!("Expected Gcc");
-                            };
-                            args.primary_output = Some(object_path.clone());
-                            source_command
-                                .run()
-                                .unwrap()
-                                .wait_with_output()
-                                .await
-                                .unwrap();
-                        }
-                    });
-                    ObjectSourceFile {
-                        object_path: object_path_clone,
-                        handle,
-                    }
-                })
-                .collect();
-            let mut object_source_paths = vec![];
-            for object_source in object_sources {
-                object_source.handle.await.unwrap();
-                object_source_paths.push(object_source.object_path);
-            }
-
-            let tmp_lib_path = tmp_dir.path().join("my_tmp_lib.a");
-            let thin_archive_args = ArArgs {
-                flag_c: true,
-                flag_q: true,
-                flag_s: true,
-                thin_archive: true,
-                output: Some(tmp_lib_path.clone().into()),
-                sources: object_source_paths.iter().map(|s| s.clone()).collect(),
-                ..Default::default()
-            };
-            Command {
-                binary: WrappedBinary::Ar,
-                cwd: run_request.cwd.clone(),
-                args: CommandArgs::Ar(thin_archive_args),
-            }
-            .run()
-            .unwrap()
-            .wait_with_output()
-            .await
-            .unwrap();
-
-            let mut updated_args = args.clone();
-            updated_args.sources = other_file_sources
-                .iter()
-                .map(|s| SourceFile {
-                    path: s.to_path_buf(),
-                    language: None,
-                })
-                .collect();
-            updated_args.sources.insert(
-                0,
-                SourceFile {
-                    path: tmp_lib_path.into(),
-                    language: None,
-                },
-            );
-            updated_args.use_groups = true;
-            let updated_command = Command {
-                binary: run_request.binary.clone(),
-                cwd: run_request.cwd.clone(),
-                args: CommandArgs::Gcc(updated_args),
-            };
-            let result = updated_command
-                .run()
-                .unwrap()
-                .wait_with_output()
-                .await
-                .unwrap();
-            return HttpResponse::Ok().json(
-                &ccelerate_shared::RunResponseData {
-                    stdout: result.stdout,
-                    stderr: result.stderr,
-                    status: result.status.code().unwrap_or(1),
-                }
-                .to_wire(),
-            );
-        }
-        CommandArgs::Ar(args) => {
-            let dummy_archive = ASSETS_DIR.get_file("dummy_lib.a").unwrap();
-            let archive_path = args.output.as_ref().unwrap();
-            std::fs::write(archive_path, dummy_archive.contents()).unwrap();
-            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
-                ..Default::default()
-            });
-        }
-    };
+    return handle_request(&run_request, &state).await;
 }
 
 async fn server_thread(state: actix_web::web::Data<State>) {
@@ -499,7 +586,7 @@ async fn main() -> Result<()> {
 
     tokio::spawn(server_thread(state.clone()));
 
-    // sleep(Duration::from_secs(1000)).await;
+    tokio::time::sleep(Duration::from_secs(1000)).await;
 
     let mut terminal = ratatui::init();
 

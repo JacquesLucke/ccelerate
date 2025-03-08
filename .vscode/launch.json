@@ -1,0 +1,254 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in library 'ccelerate_shared'",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib", "--package=ccelerate_shared"],
+        "filter": {
+          "name": "ccelerate_shared",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in library 'ccelerate_wrappers'",
+      "cargo": {
+        "args": ["test", "--no-run", "--lib", "--package=ccelerate_wrappers"],
+        "filter": {
+          "name": "ccelerate_wrappers",
+          "kind": "lib"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'ccelerate_ar'",
+      "cargo": {
+        "args": ["build", "--bin=ccelerate_ar", "--package=ccelerate_wrappers"],
+        "filter": {
+          "name": "ccelerate_ar",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_ar'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_ar",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_ar",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'ccelerate_clang'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=ccelerate_clang",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_clang",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_clang'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_clang",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_clang",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'ccelerate_clangxx'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=ccelerate_clangxx",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_clangxx",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_clangxx'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_clangxx",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_clangxx",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'ccelerate_gcc'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=ccelerate_gcc",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_gcc",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_gcc'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_gcc",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_gcc",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'ccelerate_gxx'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=ccelerate_gxx",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_gxx",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_gxx'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_gxx",
+          "--package=ccelerate_wrappers"
+        ],
+        "filter": {
+          "name": "ccelerate_gxx",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug executable 'ccelerate_server'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=ccelerate_server",
+          "--package=ccelerate_server"
+        ],
+        "filter": {
+          "name": "ccelerate_server",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_server'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_server",
+          "--package=ccelerate_server"
+        ],
+        "filter": {
+          "name": "ccelerate_server",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
