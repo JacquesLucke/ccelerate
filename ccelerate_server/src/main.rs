@@ -1,5 +1,6 @@
 use std::{
-    ffi::{OsStr, OsString},
+    collections::HashSet,
+    ffi::OsStr,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -12,7 +13,8 @@ use ccelerate_shared::RunRequestData;
 use command::{Command, CommandArgs};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
-use parse_gcc::GCCArgs;
+use parse_ar::ArArgs;
+use parse_gcc::{GCCArgs, SourceFile};
 use ratatui::{
     layout::Layout,
     style::{Color, Style},
@@ -25,6 +27,8 @@ mod command;
 mod parse_ar;
 mod parse_gcc;
 mod path_utils;
+
+static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
 
 struct State {
     address: String,
@@ -109,7 +113,7 @@ fn find_root_link_sources(
     link_args: &GCCArgs,
     conn: &rusqlite::Connection,
 ) -> Result<Vec<PathBuf>> {
-    let mut final_sources = vec![];
+    let mut final_sources = HashSet::new();
     let mut remaining_paths = vec![];
     for arg in &link_args.sources {
         remaining_paths.push(arg.path.clone());
@@ -117,7 +121,7 @@ fn find_root_link_sources(
     while let Some(current_path) = remaining_paths.pop() {
         match current_path.to_string_lossy().to_string() {
             p if p.ends_with(".o") => {
-                final_sources.push(current_path.clone());
+                final_sources.insert(current_path.clone());
             }
             p if p.ends_with(".a") => {
                 let file_command = get_command_for_file(&current_path, conn);
@@ -131,18 +135,18 @@ fn find_root_link_sources(
                         }
                     }
                 } else {
-                    final_sources.push(current_path.clone());
+                    final_sources.insert(current_path.clone());
                 }
             }
             p if p.ends_with(".so") || p.contains(".so.") => {
-                final_sources.push(current_path.clone());
+                final_sources.insert(current_path.clone());
             }
             _ => {
                 panic!("unhandled extension: {:?}", current_path);
             }
         };
     }
-    Ok(final_sources)
+    Ok(final_sources.into_iter().collect())
 }
 
 #[actix_web::post("/run")]
@@ -212,49 +216,115 @@ async fn route_run(
                 });
             }
             if args.stop_before_link {
-                let mut preprocess_args = args.clone();
-                preprocess_args.stop_before_link = false;
-                preprocess_args.stop_after_preprocessing = true;
-                preprocess_args.primary_output = None;
-                let Ok(preprocess_command) = command::Command::new(
-                    &command.binary,
-                    &command.cwd,
-                    preprocess_args
-                        .to_args()
-                        .iter()
-                        .map(|s| s.as_ref())
-                        .collect::<Vec<_>>()
-                        .as_slice(),
-                ) else {
-                    return HttpResponse::InternalServerError()
-                        .body("Failed to spawn preprocess command");
-                };
-                preprocess_command
-                    .run()
-                    .unwrap()
-                    .wait_with_output()
-                    .await
-                    .unwrap();
-
-                command.run().unwrap().wait_with_output().await.unwrap();
-
+                let dummy_object = ASSETS_DIR.get_file("dummy.o").unwrap();
+                let object_path = args.primary_output.as_ref().unwrap();
+                std::fs::write(object_path, dummy_object.contents()).unwrap();
                 return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
                     ..Default::default()
                 });
             }
             // This does the final link.
-            let _sources = find_root_link_sources(&args, &state.conn.lock());
-            // println!("{:#?}", args.primary_output);
-            // println!("sources: {:#?}", sources);
-            let result = command.run().unwrap().wait_with_output().await.unwrap();
+            let sources = find_root_link_sources(&args, &state.conn.lock());
+            println!("Run for {:#?}", args.primary_output);
+
+            let semaphore = Arc::new(tokio::sync::Semaphore::new(20));
+            let handles: Vec<_> = sources
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(|source| {
+                    let source_command = get_command_for_file(&source, &state.conn.lock());
+                    println!("Run for final: {:#?}", source_command);
+
+                    let permit = semaphore.clone().acquire_owned();
+                    tokio::task::spawn(async move {
+                        let _permit = permit.await.unwrap();
+                        if let Some(source_command) = source_command {
+                            let source_result = source_command
+                                .run()
+                                .unwrap()
+                                .wait_with_output()
+                                .await
+                                .unwrap();
+                            println!("Source result: {:#?}", source_result);
+                        }
+                    })
+                })
+                .collect();
+            for handle in handles {
+                handle.await.unwrap();
+            }
+
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let tmp_lib_path = tmp_dir.path().join("my_tmp_lib.a");
+            let thin_archive_args = ArArgs {
+                flag_c: true,
+                flag_q: true,
+                flag_s: true,
+                flag_T: true,
+                output: Some(tmp_lib_path.clone().into()),
+                sources: sources
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .filter(|s| s.extension() == Some(OsStr::new("o")))
+                    .map(|s| s.clone())
+                    .collect(),
+                ..Default::default()
+            };
+            println!("Run for thin archive: {:#?}", thin_archive_args);
+            let thin_archive_result = Command {
+                binary: "ar".into(),
+                cwd: run_request.cwd.clone(),
+                args: CommandArgs::Ar(thin_archive_args),
+            }
+            .run()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
+            println!("Run for thin archive result: {:#?}", thin_archive_result);
+
+            let mut updated_args = args.clone();
+            updated_args.sources = sources
+                .as_ref()
+                .unwrap()
+                .iter()
+                .filter(|s| s.extension() != Some(OsStr::new("o")))
+                .map(|s| SourceFile {
+                    path: s.clone(),
+                    language: None,
+                })
+                .collect();
+            updated_args.sources.insert(
+                0,
+                SourceFile {
+                    path: tmp_lib_path.into(),
+                    language: None,
+                },
+            );
+            let updated_command = Command {
+                binary: run_request.binary.clone(),
+                cwd: run_request.cwd.clone(),
+                args: CommandArgs::Gcc(updated_args),
+            };
+            println!("{:#?}", updated_command);
+            let result = updated_command
+                .run()
+                .unwrap()
+                .wait_with_output()
+                .await
+                .unwrap();
             return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
                 stdout: BASE64_STANDARD.encode(&result.stdout),
                 stderr: BASE64_STANDARD.encode(&result.stderr),
                 status: result.status.code().unwrap_or(1),
             });
         }
-        CommandArgs::Ar(_) => {
-            command.run().unwrap().wait_with_output().await.unwrap();
+        CommandArgs::Ar(args) => {
+            let dummy_archive = ASSETS_DIR.get_file("dummy_lib.a").unwrap();
+            let archive_path = args.output.as_ref().unwrap();
+            std::fs::write(archive_path, dummy_archive.contents()).unwrap();
             return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
                 ..Default::default()
             });

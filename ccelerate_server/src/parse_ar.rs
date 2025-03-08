@@ -11,6 +11,8 @@ use crate::path_utils::make_absolute;
 pub struct ArArgs {
     pub flag_q: bool,
     pub flag_c: bool,
+    pub flag_s: bool,
+    pub flag_T: bool,
     pub output: Option<PathBuf>,
     pub sources: Vec<PathBuf>,
 }
@@ -20,6 +22,8 @@ impl Default for ArArgs {
         Self {
             flag_q: false,
             flag_c: false,
+            flag_s: false,
+            flag_T: false,
             output: None,
             sources: vec![],
         }
@@ -37,6 +41,8 @@ impl ArArgs {
             match c {
                 'q' => args.flag_q = true,
                 'c' => args.flag_c = true,
+                's' => args.flag_s = true,
+                'T' => args.flag_T = true,
                 _ => return Err(anyhow::anyhow!("Unknown ar flag: {}", c)),
             }
         }
@@ -59,6 +65,12 @@ impl ArArgs {
         }
         if self.flag_c {
             first_arg.push("c");
+        }
+        if self.flag_s {
+            first_arg.push("s");
+        }
+        if self.flag_T {
+            first_arg.push("T");
         }
         args.push(first_arg);
         if let Some(output) = &self.output {
