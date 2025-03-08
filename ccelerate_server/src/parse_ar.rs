@@ -12,7 +12,7 @@ pub struct ArArgs {
     pub flag_q: bool,
     pub flag_c: bool,
     pub flag_s: bool,
-    pub flag_T: bool,
+    pub flag_t: bool,
     pub output: Option<PathBuf>,
     pub sources: Vec<PathBuf>,
 }
@@ -23,7 +23,7 @@ impl Default for ArArgs {
             flag_q: false,
             flag_c: false,
             flag_s: false,
-            flag_T: false,
+            flag_t: false,
             output: None,
             sources: vec![],
         }
@@ -42,7 +42,7 @@ impl ArArgs {
                 'q' => args.flag_q = true,
                 'c' => args.flag_c = true,
                 's' => args.flag_s = true,
-                'T' => args.flag_T = true,
+                'T' => args.flag_t = true,
                 _ => return Err(anyhow::anyhow!("Unknown ar flag: {}", c)),
             }
         }
@@ -69,7 +69,7 @@ impl ArArgs {
         if self.flag_s {
             first_arg.push("s");
         }
-        if self.flag_T {
+        if self.flag_t {
             first_arg.push("T");
         }
         args.push(first_arg);
