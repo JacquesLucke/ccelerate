@@ -1,18 +1,25 @@
-use std::{ffi::OsStr, sync::Arc, time::Instant};
+use std::{
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use actix_web::HttpResponse;
 use anyhow::Result;
 use base64::prelude::*;
 use ccelerate_shared::RunRequestData;
-use command::CommandArgs;
+use command::{Command, CommandArgs};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
+use parse_gcc::GCCArgs;
 use ratatui::{
     layout::Layout,
     style::{Color, Style},
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
+use tokio::time::sleep;
 
 mod command;
 mod parse_ar;
@@ -75,6 +82,69 @@ fn is_print_sysroot_command(command: &command::Command) -> bool {
     args.print_sysroot
 }
 
+fn get_command_for_file(path: &Path, conn: &rusqlite::Connection) -> Option<command::Command> {
+    let command = conn.query_row(
+        "SELECT binary, cwd, args FROM Files WHERE path = ?",
+        rusqlite::params![path.to_string_lossy().to_string()],
+        |row| {
+            Ok(Command::new(
+                row.get::<usize, String>(0).unwrap().as_str(),
+                Path::new(&row.get::<usize, String>(1).unwrap()),
+                serde_json::from_str::<Vec<String>>(&row.get::<usize, String>(2).unwrap())
+                    .unwrap()
+                    .iter()
+                    .map(|s| OsStr::new(s))
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            ))
+        },
+    );
+    let Ok(command) = command else {
+        return None;
+    };
+    command.ok()
+}
+
+fn find_root_link_sources(
+    link_args: &GCCArgs,
+    conn: &rusqlite::Connection,
+) -> Result<Vec<PathBuf>> {
+    let mut final_sources = vec![];
+    let mut remaining_paths = vec![];
+    for arg in &link_args.sources {
+        remaining_paths.push(arg.path.clone());
+    }
+    while let Some(current_path) = remaining_paths.pop() {
+        match current_path.to_string_lossy().to_string() {
+            p if p.ends_with(".o") => {
+                final_sources.push(current_path.clone());
+            }
+            p if p.ends_with(".a") => {
+                let file_command = get_command_for_file(&current_path, conn);
+                if let Some(file_command) = file_command {
+                    match file_command.args {
+                        CommandArgs::Gcc(args) => {
+                            remaining_paths.extend(args.sources.iter().map(|s| s.path.clone()));
+                        }
+                        CommandArgs::Ar(args) => {
+                            remaining_paths.extend(args.sources.iter().map(|s| s.clone()));
+                        }
+                    }
+                } else {
+                    final_sources.push(current_path.clone());
+                }
+            }
+            p if p.ends_with(".so") || p.contains(".so.") => {
+                final_sources.push(current_path.clone());
+            }
+            _ => {
+                panic!("unhandled extension: {:?}", current_path);
+            }
+        };
+    }
+    Ok(final_sources)
+}
+
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestData>,
@@ -124,7 +194,7 @@ async fn route_run(
     }
 
     match &command.args {
-        CommandArgs::Gcc(_) => {
+        CommandArgs::Gcc(args) => {
             if is_cmake_scratch_command(&command)
                 || is_compiler_id_check_command(&command)
                 || is_print_sysroot_command(&command)
@@ -141,9 +211,46 @@ async fn route_run(
                     status: result.status.code().unwrap_or(1),
                 });
             }
-            command.run().unwrap().wait_with_output().await.unwrap();
+            if args.stop_before_link {
+                let mut preprocess_args = args.clone();
+                preprocess_args.stop_before_link = false;
+                preprocess_args.stop_after_preprocessing = true;
+                preprocess_args.primary_output = None;
+                let Ok(preprocess_command) = command::Command::new(
+                    &command.binary,
+                    &command.cwd,
+                    preprocess_args
+                        .to_args()
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>()
+                        .as_slice(),
+                ) else {
+                    return HttpResponse::InternalServerError()
+                        .body("Failed to spawn preprocess command");
+                };
+                preprocess_command
+                    .run()
+                    .unwrap()
+                    .wait_with_output()
+                    .await
+                    .unwrap();
+
+                command.run().unwrap().wait_with_output().await.unwrap();
+
+                return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
+                    ..Default::default()
+                });
+            }
+            // This does the final link.
+            let _sources = find_root_link_sources(&args, &state.conn.lock());
+            // println!("{:#?}", args.primary_output);
+            // println!("sources: {:#?}", sources);
+            let result = command.run().unwrap().wait_with_output().await.unwrap();
             return HttpResponse::Ok().json(&ccelerate_shared::RunResponseData {
-                ..Default::default()
+                stdout: BASE64_STANDARD.encode(&result.stdout),
+                stderr: BASE64_STANDARD.encode(&result.stderr),
+                status: result.status.code().unwrap_or(1),
             });
         }
         CommandArgs::Ar(_) => {
@@ -196,6 +303,8 @@ async fn main() -> Result<()> {
     });
 
     tokio::spawn(server_thread(state.clone()));
+
+    sleep(Duration::from_secs(1000)).await;
 
     let mut terminal = ratatui::init();
 
