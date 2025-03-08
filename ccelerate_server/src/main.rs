@@ -152,20 +152,6 @@ fn find_root_link_sources(
     Ok(final_sources.into_iter().collect())
 }
 
-fn is_gcc_compatible_binary(binary: &str) -> bool {
-    match binary {
-        "gcc" | "g++" | "clang" | "clang++" => true,
-        _ => false,
-    }
-}
-
-fn is_ar_compatible_binary(binary: &str) -> bool {
-    match binary {
-        "ar" => true,
-        _ => false,
-    }
-}
-
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestDataWire>,
