@@ -39,6 +39,7 @@ pub struct GCCArgs {
     pub cxx_flag: bool,
     pub ecxx_flag: bool,
     pub openmp_flag: bool,
+    pub use_groups: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -81,6 +82,7 @@ impl Default for GCCArgs {
             cxx_flag: false,
             ecxx_flag: false,
             openmp_flag: false,
+            use_groups: false,
         }
     }
 }
@@ -322,9 +324,15 @@ impl GCCArgs {
             args.push("-o".into());
             args.push(path.as_os_str().into());
         }
+        if self.use_groups {
+            args.push("-Wl,--start-group".into());
+        }
         for arg in &self.sources {
             self.to_args_update_language(&mut last_language, &arg.language, &mut args);
             args.push(arg.path.as_os_str().into());
+        }
+        if self.use_groups {
+            args.push("-Wl,--end-group".into());
         }
         args
     }

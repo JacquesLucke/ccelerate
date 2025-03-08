@@ -303,6 +303,7 @@ async fn route_run(
                     language: None,
                 },
             );
+            updated_args.use_groups = true;
             let updated_command = Command {
                 binary: run_request.binary.clone(),
                 cwd: run_request.cwd.clone(),
