@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    ffi::OsStr,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -53,6 +53,57 @@ impl TaskItem {
     }
 }
 
+struct DbFilesRow {
+    path: PathBuf,
+    cwd: PathBuf,
+    binary: WrappedBinary,
+    args: Vec<OsString>,
+}
+
+fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
+    // TODO: Support OsStr in the database.
+    conn.execute(
+        "INSERT OR REPLACE INTO Files (binary, path, cwd, args) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![
+            row.binary.to_standard_binary_name().to_string_lossy(),
+            row.path.to_string_lossy(),
+            row.cwd.to_string_lossy(),
+            serde_json::to_string(
+                &row.args
+                    .iter()
+                    .map(|s| s.to_string_lossy())
+                    .collect::<Vec<_>>()
+            )
+            .unwrap()
+        ],
+    )?;
+    Ok(())
+}
+
+fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> {
+    conn.query_row(
+        "SELECT binary, cwd, args FROM Files WHERE path = ?",
+        rusqlite::params![path.to_string_lossy().to_string()],
+        |row| {
+            // TODO: Support OsStr in the database.
+            let binary = row.get::<usize, String>(0).unwrap();
+            let cwd = row.get::<usize, String>(1).unwrap();
+            let args = row.get::<usize, String>(2).unwrap();
+            Ok(DbFilesRow {
+                path: path.to_path_buf(),
+                cwd: Path::new(&cwd).to_path_buf(),
+                binary: WrappedBinary::from_standard_binary_name(OsStr::new(&binary)).unwrap(),
+                args: serde_json::from_str::<Vec<String>>(&args)
+                    .unwrap()
+                    .into_iter()
+                    .map(OsString::from)
+                    .collect(),
+            })
+        },
+    )
+    .ok()
+}
+
 #[actix_web::get("/")]
 async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
@@ -86,30 +137,15 @@ fn is_print_sysroot_command(command: &command::Command) -> bool {
 }
 
 fn get_command_for_file(path: &Path, conn: &rusqlite::Connection) -> Option<command::Command> {
-    let command = conn.query_row(
-        "SELECT binary, cwd, args FROM Files WHERE path = ?",
-        rusqlite::params![path.to_string_lossy().to_string()],
-        |row| {
-            // TODO: Support OsStr in the database.
-            let binary = row.get::<usize, String>(0).unwrap();
-            let cwd = row.get::<usize, String>(1).unwrap();
-            let args = row.get::<usize, String>(2).unwrap();
-            Ok(Command::new(
-                WrappedBinary::from_standard_binary_name(OsStr::new(&binary)).unwrap(),
-                Path::new(&cwd),
-                serde_json::from_str::<Vec<String>>(&args)
-                    .unwrap()
-                    .iter()
-                    .map(|s| OsStr::new(s))
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-            ))
-        },
-    );
-    let Ok(command) = command else {
+    let Some(row) = load_db_file(conn, path) else {
         return None;
     };
-    command.ok()
+    command::Command::new(
+        row.binary,
+        &row.cwd,
+        &row.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
+    )
+    .ok()
 }
 
 fn find_root_link_sources(
@@ -176,25 +212,14 @@ async fn route_run(
 
     if let Some(output_path) = command.primary_output_path() {
         let conn = state.conn.lock();
-        // TODO: Support OsStr in the database.
-        conn.execute(
-            "INSERT OR REPLACE INTO Files (binary, path, cwd, args) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![
-                run_request
-                    .binary
-                    .to_standard_binary_name()
-                    .to_string_lossy(),
-                output_path.to_string_lossy(),
-                run_request.cwd.to_str().unwrap(),
-                serde_json::to_string(
-                    &run_request
-                        .args
-                        .iter()
-                        .map(|s| s.to_string_lossy())
-                        .collect::<Vec<_>>()
-                )
-                .unwrap()
-            ],
+        store_db_file(
+            &conn,
+            &DbFilesRow {
+                path: output_path.clone(),
+                cwd: run_request.cwd.clone(),
+                binary: run_request.binary,
+                args: run_request.args.clone(),
+            },
         )
         .unwrap();
     }
