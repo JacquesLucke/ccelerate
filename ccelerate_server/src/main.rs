@@ -310,6 +310,97 @@ async fn handle_eager_gcc_request(
     )
 }
 
+#[derive(Debug, Clone, Default)]
+struct SourceCodeLine<'a> {
+    line_number: usize,
+    line: &'a str,
+}
+
+#[derive(Debug, Clone, Default)]
+struct AnalysePreprocessResult<'a> {
+    proper_direct_headers: HashSet<PathBuf>,
+    local_code: Vec<SourceCodeLine<'a>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct GccPreprocessLine<'a> {
+    line_number: usize,
+    header_name: &'a str,
+    is_start_of_new_file: bool,
+    is_return_to_file: bool,
+    _next_is_system_header: bool,
+    _next_is_extern_c: bool,
+}
+
+impl<'a> GccPreprocessLine<'a> {
+    fn parse(line: &'a [u8]) -> Result<Self> {
+        let line = std::str::from_utf8(line)?;
+        let err = || anyhow::anyhow!("Failed to parse line: {:?}", line);
+        static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+            regex::Regex::new(r#"# (\d+) "(.*)"\s*(\d?)\s*(\d?)\s*(\d?)\s*(\d?)"#).unwrap()
+        });
+        let Some(captures) = RE.captures(line) else {
+            return Err(err());
+        };
+        let Some(line_number) = captures.get(1).unwrap().as_str().parse::<usize>().ok() else {
+            return Err(err());
+        };
+        let name = captures.get(2).unwrap().as_str();
+        let mut numbers = vec![];
+        for i in 3..=6 {
+            let number_str = captures.get(i).unwrap().as_str();
+            if number_str.is_empty() {
+                continue;
+            }
+            let Some(number) = number_str.parse::<i32>().ok() else {
+                return Err(err());
+            };
+            numbers.push(number);
+        }
+
+        Ok(GccPreprocessLine {
+            line_number,
+            header_name: name,
+            is_start_of_new_file: numbers.contains(&1),
+            is_return_to_file: numbers.contains(&2),
+            _next_is_system_header: numbers.contains(&3),
+            _next_is_extern_c: numbers.contains(&4),
+        })
+    }
+}
+
+fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
+    let mut result = AnalysePreprocessResult::default();
+    let mut header_stack = vec![];
+    let mut next_line = 0;
+
+    for line in code.split(|&b| b == b'\n') {
+        if line.starts_with(b"# ") {
+            let preprocessor_line = GccPreprocessLine::parse(line)?;
+            next_line = preprocessor_line.line_number;
+            if preprocessor_line.is_start_of_new_file {
+                if header_stack.is_empty() {
+                    result
+                        .proper_direct_headers
+                        .insert(PathBuf::from(preprocessor_line.header_name));
+                }
+                header_stack.push(preprocessor_line.header_name);
+            } else if preprocessor_line.is_return_to_file {
+                header_stack.pop();
+            }
+        } else {
+            if header_stack.is_empty() {
+                result.local_code.push(SourceCodeLine {
+                    line_number: next_line,
+                    line: std::str::from_utf8(line)?,
+                });
+            }
+            next_line += 1;
+        }
+    }
+    Ok(result)
+}
+
 async fn handle_gcc_without_link_request(
     binary: WrappedBinary,
     request_gcc_args: &GCCArgs,
@@ -345,7 +436,7 @@ async fn handle_gcc_without_link_request(
     state
         .pool
         .run(async move || {
-            tokio::process::Command::new(binary.to_standard_binary_name())
+            let result = tokio::process::Command::new(binary.to_standard_binary_name())
                 .args(&modified_gcc_args.to_args())
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
@@ -355,6 +446,8 @@ async fn handle_gcc_without_link_request(
                 .wait_with_output()
                 .await
                 .unwrap();
+            let _analysis = analyse_preprocessed_file(&result.stdout);
+            // log::info!("Analysis: {:#?}", analysis);
         })
         .await
         .unwrap();
