@@ -387,9 +387,18 @@ fn is_local_header(header: &str) -> bool {
         || header.ends_with("dna_rename_defs.h")
         || header.ends_with("dna_includes_as_strings.h")
         || header.ends_with("BLI_strict_flags.h")
+        || header.ends_with("RNA_enum_items.hh")
+        || header.ends_with("UI_icons.hh")
+        || header.ends_with(".cc")
+        || header.ends_with(".c")
+        || header.ends_with("glsl_compositor_source_list.h")
 }
 
-static TMP_EXTRA_DEFINES: &[&str] = &["DNA_DEPRECATED_ALLOW", "GHASH_INTERNAL_API"];
+static TMP_EXTRA_DEFINES: &[&str] = &[
+    "DNA_DEPRECATED_ALLOW",
+    "GHASH_INTERNAL_API",
+    "AUD_CAPI_IMPLEMENTATION",
+];
 
 fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
     let mut result = AnalysePreprocessResult::default();
@@ -654,7 +663,14 @@ async fn build_combined_translation_unit(
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(headers_code.as_bytes()).await.unwrap();
     }
-    let child_result = child.wait_with_output().await.unwrap();
+    let child_result = {
+        log::info!("Preprocess Header: {:?}", dst_object_file.file_name());
+        let _log_handle = state.tasks_logger.start_task(&format!(
+            "Preprocess Header: {:?}",
+            dst_object_file.file_name()
+        ));
+        child.wait_with_output().await.unwrap()
+    };
 
     let mut combined_code: String = "".to_string();
     combined_code.push_str(std::str::from_utf8(&child_result.stdout).unwrap());
@@ -664,7 +680,10 @@ async fn build_combined_translation_unit(
         combined_code.push_str(&preprocessed_code);
     }
 
-    let unit_file = tempfile::Builder::new().suffix(ext).tempfile().unwrap();
+    let unit_file = tempfile::Builder::new()
+        .suffix(&format!(".{}", ext))
+        .tempfile()
+        .unwrap();
     let unit_file_path = unit_file.path();
     tokio::fs::write(unit_file_path, combined_code)
         .await
@@ -684,7 +703,13 @@ async fn build_combined_translation_unit(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let result = child.wait_with_output().await.unwrap();
+    let result = {
+        log::info!("Compile unit: {:#?}", compile_gcc_args.to_args());
+        let _log_handle = state
+            .tasks_logger
+            .start_task(&format!("Compile unit: {:?}", dst_object_file.file_name()));
+        child.wait_with_output().await.unwrap()
+    };
     if !result.status.success() {
         log::error!(
             "Compile unit failed: {}",
@@ -699,17 +724,6 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &Data<S
     let handles = link_units
         .into_iter()
         .map(|unit| {
-            let Some(original_unit_info) =
-                load_db_file(&state.conn.lock(), &unit.original_object_path)
-            else {
-                panic!("There should be information stored about this file");
-            };
-            let Ok(original_gcc_args) = GCCArgs::parse(
-                &original_unit_info.cwd,
-                &osstring_to_osstr_vec(&original_unit_info.args),
-            ) else {
-                panic!("Cannot parse original gcc arguments");
-            };
             let state_clone = state.clone();
             state.pool.run(async move || {
                 build_combined_translation_unit(
@@ -718,38 +732,6 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &Data<S
                     &state_clone,
                 )
                 .await;
-
-                let mut modified_gcc_args = original_gcc_args;
-                modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
-                modified_gcc_args.depfile_generate = false;
-                modified_gcc_args.depfile_target_name = None;
-                modified_gcc_args.depfile_output_path = None;
-
-                log::info!("Compile: {:#?}", modified_gcc_args);
-
-                let _log_handle = state_clone.tasks_logger.start_task(&format!(
-                    "Compile: {}",
-                    unit.wrapped_object_path
-                        .file_name()
-                        .unwrap()
-                        .to_string_lossy()
-                ));
-
-                let child = tokio::process::Command::new(
-                    original_unit_info.binary.to_standard_binary_name(),
-                )
-                .args(modified_gcc_args.to_args())
-                .current_dir(&original_unit_info.cwd)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn();
-                let Ok(child) = child else {
-                    panic!("Failed to spawn child");
-                };
-                let Ok(_child_result) = child.wait_with_output().await else {
-                    panic!("Failed to wait on child");
-                };
             })
         })
         .collect::<Vec<_>>();
