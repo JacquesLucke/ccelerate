@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use actix_web::HttpResponse;
+use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -357,7 +357,7 @@ fn osstring_to_osstr_vec(s: &[OsString]) -> Vec<&OsStr> {
     s.iter().map(|s| s.as_ref()).collect()
 }
 
-async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State) {
+async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &Data<State>) {
     let link_units = link_units.to_vec();
     let handles = link_units
         .into_iter()
@@ -373,6 +373,7 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
             ) else {
                 panic!("Cannot parse original gcc arguments");
             };
+            let state_clone = state.clone();
             state.pool.run(async move || {
                 let mut modified_gcc_args = original_gcc_args;
                 modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
@@ -381,6 +382,14 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
                 modified_gcc_args.depfile_output_path = None;
 
                 log::info!("Compile: {:#?}", modified_gcc_args);
+
+                let _log_handle = state_clone.tasks_logger.start_task(&format!(
+                    "Compile: {}",
+                    unit.wrapped_object_path
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                ));
 
                 let child = tokio::process::Command::new(
                     original_unit_info.binary.to_standard_binary_name(),
@@ -409,7 +418,7 @@ async fn handle_gcc_final_link_request(
     binary: WrappedBinary,
     request_gcc_args: &GCCArgs,
     cwd: &Path,
-    state: &State,
+    state: &Data<State>,
 ) -> HttpResponse {
     let tmp_dir = tempfile::tempdir().unwrap();
     let Ok(smallest_link_units) = find_smallest_link_units(&request_gcc_args, &state.conn.lock())
@@ -513,7 +522,7 @@ async fn handle_gcc_final_link_request(
     )
 }
 
-async fn handle_request(request: &RunRequestData, state: &State) -> HttpResponse {
+async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
     match request.binary {
         WrappedBinary::Ar => {
@@ -582,7 +591,7 @@ async fn handle_request(request: &RunRequestData, state: &State) -> HttpResponse
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestDataWire>,
-    state: actix_web::web::Data<State>,
+    state: Data<State>,
 ) -> impl actix_web::Responder {
     let Ok(run_request) = RunRequestData::from_wire(&run_request) else {
         log::error!("Could not parse: {:#?}", run_request);
@@ -591,7 +600,7 @@ async fn route_run(
     return handle_request(&run_request, &state).await;
 }
 
-async fn server_thread(state: actix_web::web::Data<State>) {
+async fn server_thread(state: Data<State>) {
     let state_clone = state.clone();
     actix_web::HttpServer::new(move || {
         actix_web::App::new()
