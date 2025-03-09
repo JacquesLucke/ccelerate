@@ -393,10 +393,12 @@ fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
             }
         } else {
             if header_stack.is_empty() {
-                result.local_code.push(SourceCodeLine {
-                    line_number: next_line,
-                    line: std::str::from_utf8(line)?,
-                });
+                if !line.is_empty() {
+                    result.local_code.push(SourceCodeLine {
+                        line_number: next_line,
+                        line: std::str::from_utf8(line)?,
+                    });
+                }
             }
             next_line += 1;
         }
@@ -408,11 +410,12 @@ async fn handle_gcc_without_link_request(
     binary: WrappedBinary,
     request_gcc_args: &GCCArgs,
     cwd: &Path,
-    state: &State,
+    state: &Data<State>,
 ) -> HttpResponse {
     let Some(request_output_path) = request_gcc_args.primary_output.as_ref() else {
         return HttpResponse::NotImplemented().body("Expected output path");
     };
+    let request_output_path_clone = request_output_path.clone();
 
     let _log_handle = state.tasks_logger.start_task(&format!(
         "Prepare: {:?}",
@@ -436,11 +439,20 @@ async fn handle_gcc_without_link_request(
     modified_gcc_args.stop_before_link = false;
     modified_gcc_args.stop_after_preprocessing = true;
     log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
+    let state_clone = state.clone();
     state
         .pool
         .run(async move || {
+            let realized_args = modified_gcc_args.to_args();
+            let realized_args_buffer = realized_args
+                .iter()
+                .map(|s| s.as_encoded_bytes())
+                .flatten()
+                .map(|b| *b)
+                .collect::<Vec<_>>();
+            let realized_args_hash = twox_hash::XxHash64::oneshot(0, &realized_args_buffer);
             let result = tokio::process::Command::new(binary.to_standard_binary_name())
-                .args(&modified_gcc_args.to_args())
+                .args(&realized_args)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -449,8 +461,37 @@ async fn handle_gcc_without_link_request(
                 .wait_with_output()
                 .await
                 .unwrap();
-            let _analysis = analyse_preprocessed_file(&result.stdout);
-            // log::info!("Analysis: {:#?}", analysis);
+            let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
+            let realized_args_hash_str = format!("{:x}", realized_args_hash);
+            let preprocess_file_name = format!(
+                "{}_{}.ii",
+                &realized_args_hash_str,
+                request_output_path_clone
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+            );
+            let preprocess_file_path = state_clone
+                .data_dir
+                .join("preprocessed")
+                .join(&realized_args_hash_str[..2])
+                .join(preprocess_file_name);
+            std::fs::create_dir_all(&preprocess_file_path.parent().unwrap()).unwrap();
+            let mut file = std::fs::File::create(preprocess_file_path).unwrap();
+
+            let source_file_path = modified_gcc_args.sources.first();
+            for line in analysis.local_code {
+                if let Some(source_file_path) = source_file_path {
+                    writeln!(
+                        file,
+                        "# {} \"{}\"",
+                        line.line_number,
+                        source_file_path.path.display()
+                    )
+                    .unwrap();
+                }
+                writeln!(file, "{}", line.line).unwrap();
+            }
         })
         .await
         .unwrap();
