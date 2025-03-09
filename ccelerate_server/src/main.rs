@@ -331,8 +331,35 @@ struct SourceCodeLine<'a> {
 
 #[derive(Debug, Clone, Default)]
 struct AnalysePreprocessResult<'a> {
-    proper_direct_headers: Vec<PathBuf>,
+    global_headers: Vec<PathBuf>,
     local_code: Vec<SourceCodeLine<'a>>,
+}
+
+fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &str) -> Vec<String> {
+    let code = code.replace("\\\n", " ");
+
+    static INCLUDE_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        regex::Regex::new(r#"(?m)^#include[ \t]+["<](.*)[">]"#).unwrap()
+    });
+    let mut last_global_include_index = 0;
+    for captures in INCLUDE_RE.captures_iter(&code) {
+        let Some(header_name) = captures.get(1).map(|m| m.as_str()) else {
+            continue;
+        };
+        if !global_headers.iter().any(|h| h.ends_with(header_name)) {
+            continue;
+        }
+        last_global_include_index = captures.get(0).unwrap().start();
+    }
+
+    static DEFINE_RE: once_cell::sync::Lazy<regex::Regex> =
+        once_cell::sync::Lazy::new(|| regex::Regex::new(r#"(?m)^#define.*$"#).unwrap());
+
+    let mut result = vec![];
+    for captures in DEFINE_RE.captures_iter(&code[..last_global_include_index]) {
+        result.push(captures.get(0).unwrap().as_str().to_string());
+    }
+    result
 }
 
 #[derive(Debug, Clone, Default)]
@@ -413,8 +440,8 @@ fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
                 if header_stack.is_empty() {
                     if !is_local_header(&preprocessor_line.header_name) {
                         let header_path = PathBuf::from(preprocessor_line.header_name);
-                        if !result.proper_direct_headers.contains(&header_path) {
-                            result.proper_direct_headers.push(header_path);
+                        if !result.global_headers.contains(&header_path) {
+                            result.global_headers.push(header_path);
                         }
                     }
                 }
@@ -506,11 +533,29 @@ async fn handle_gcc_without_link_request(
                     .wait_with_output()
                     .await
                     .unwrap();
+                if !result.status.success() {
+                    log::error!(
+                        "Preprocess failed: {}",
+                        std::str::from_utf8(&result.stderr).unwrap()
+                    );
+                    std::process::exit(1);
+                }
                 let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
-                headers.lock().extend(analysis.proper_direct_headers);
+                let source_file_path = modified_gcc_args.sources.first();
+                if let Some(source_file_path) = source_file_path {
+                    let source_code = tokio::fs::read_to_string(&source_file_path.path)
+                        .await
+                        .unwrap();
+                    let header_defines =
+                        find_global_include_extra_defines(&analysis.global_headers, &source_code);
+                    if !header_defines.is_empty() {
+                        log::info!("Found extra defines: {:#?}", header_defines);
+                    }
+                }
+
+                headers.lock().extend(analysis.global_headers);
 
                 let mut file = std::fs::File::create(preprocess_file_path).unwrap();
-                let source_file_path = modified_gcc_args.sources.first();
                 for line in analysis.local_code {
                     if let Some(source_file_path) = source_file_path {
                         writeln!(
