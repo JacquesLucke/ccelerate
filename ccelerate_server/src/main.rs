@@ -218,10 +218,6 @@ fn gcc_args_or_cwd_have_marker(args: &GCCArgs, cwd: &Path, marker: &str) -> bool
     false
 }
 
-fn is_gcc_print_sysroot_command(args: &GCCArgs) -> bool {
-    args.print_sysroot
-}
-
 fn is_gcc_compiler_id_check(args: &GCCArgs, cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CompilerIdC")
 }
@@ -493,7 +489,7 @@ async fn handle_gcc_final_link_request(
         modified_gcc_args
             .primary_output
             .as_ref()
-            .unwrap()
+            .unwrap_or(&PathBuf::from(""))
             .to_string_lossy()
     ));
 
@@ -558,7 +554,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
             };
             if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
                 || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
-                || is_gcc_print_sysroot_command(&request_gcc_args)
+                || request_gcc_args.primary_output.is_none()
             {
                 return handle_eager_gcc_request(
                     request.binary,
