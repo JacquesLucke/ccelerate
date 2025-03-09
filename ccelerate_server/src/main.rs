@@ -323,9 +323,10 @@ async fn handle_gcc_without_link_request(
     let Some(request_output_path) = request_gcc_args.primary_output.as_ref() else {
         return HttpResponse::NotImplemented().body("Expected output path");
     };
-    let _log_handle = state
-        .tasks_logger
-        .start_task(&format!("Handle object file: {:?}", request_output_path));
+    let _log_handle = state.tasks_logger.start_task(&format!(
+        "Prepare: {:?}",
+        request_output_path.file_name().unwrap().to_string_lossy()
+    ));
     store_db_file(
         &state.conn.lock(),
         &DbFilesRow {
@@ -506,8 +507,8 @@ async fn handle_request(request: &RunRequestData, state: &State) -> HttpResponse
                 return HttpResponse::NotImplemented().body("Expected output path");
             };
             let _task_handle = state.tasks_logger.start_task(&format!(
-                "Generate dummy archive: {:?}",
-                request_output_path
+                "Prepare: {}",
+                request_output_path.file_name().unwrap().to_string_lossy()
             ));
             store_db_file(
                 &state.conn.lock(),
