@@ -323,6 +323,7 @@ async fn handle_gcc_without_link_request(
     let Some(request_output_path) = request_gcc_args.primary_output.as_ref() else {
         return HttpResponse::NotImplemented().body("Expected output path");
     };
+
     let _log_handle = state.tasks_logger.start_task(&format!(
         "Prepare: {:?}",
         request_output_path.file_name().unwrap().to_string_lossy()
@@ -338,7 +339,9 @@ async fn handle_gcc_without_link_request(
     )
     .unwrap();
     let dummy_object = ASSETS_DIR.get_file("dummy_object.o").unwrap();
-    std::fs::write(request_output_path, dummy_object.contents()).unwrap();
+    tokio::fs::write(request_output_path, dummy_object.contents())
+        .await
+        .unwrap();
     HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
         ..Default::default()
     })
@@ -445,15 +448,20 @@ async fn handle_gcc_final_link_request(
             .map(|u| u.wrapped_object_path.clone())
             .collect(),
     };
-
-    tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
-        .args(wrapped_units_archive_args.to_args())
-        .current_dir(&cwd)
-        .spawn()
-        .unwrap()
-        .wait_with_output()
-        .await
-        .unwrap();
+    {
+        let _task_handle = state.tasks_logger.start_task(&format!(
+            "Build thin archive: {}",
+            wrapped_units_archive_path.to_string_lossy()
+        ));
+        tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
+            .args(wrapped_units_archive_args.to_args())
+            .current_dir(&cwd)
+            .spawn()
+            .unwrap()
+            .wait_with_output()
+            .await
+            .unwrap();
+    }
 
     let mut modified_gcc_args = request_gcc_args.clone();
     modified_gcc_args.sources = vec![];
@@ -470,6 +478,15 @@ async fn handle_gcc_final_link_request(
             })
             .collect::<Vec<_>>(),
     );
+
+    let _link_task_handle = state.tasks_logger.start_task(&format!(
+        "Link: {}",
+        modified_gcc_args
+            .primary_output
+            .as_ref()
+            .unwrap()
+            .to_string_lossy()
+    ));
 
     modified_gcc_args.use_link_group = true;
     log::info!("Link: {:#?}", modified_gcc_args.to_args());
@@ -616,11 +633,12 @@ async fn main() -> Result<()> {
             cwd TEXT NOT NULL,
             binary TEXT NOT NULL,
             args JSON NOT NULL
-            );",
+        );",
     )]);
 
     let db_path = "./ccelerate.db";
     let mut conn = rusqlite::Connection::open(db_path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
     db_migrations.to_latest(&mut conn)?;
 
     let addr = format!("127.0.0.1:{}", cli.port);
