@@ -543,6 +543,7 @@ async fn server_thread(state: actix_web::web::Data<State>) {
             .service(route_index)
             .service(route_run)
     })
+    .client_request_timeout(Duration::from_secs(0))
     .bind(state_clone.address.clone())
     .unwrap()
     .run()
