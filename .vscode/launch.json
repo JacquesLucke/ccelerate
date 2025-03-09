@@ -7,6 +7,43 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Debug executable 'ccelerate_server'",
+      "cargo": {
+        "args": [
+          "build",
+          "--bin=ccelerate_server",
+          "--package=ccelerate_server"
+        ],
+        "filter": {
+          "name": "ccelerate_server",
+          "kind": "bin"
+        }
+      },
+      "args": ["--no-tui"],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "name": "Debug unit tests in executable 'ccelerate_server'",
+      "cargo": {
+        "args": [
+          "test",
+          "--no-run",
+          "--bin=ccelerate_server",
+          "--package=ccelerate_server"
+        ],
+        "filter": {
+          "name": "ccelerate_server",
+          "kind": "bin"
+        }
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "Debug unit tests in library 'ccelerate_shared'",
       "cargo": {
         "args": ["test", "--no-run", "--lib", "--package=ccelerate_shared"],
@@ -207,43 +244,6 @@
         ],
         "filter": {
           "name": "ccelerate_gxx",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug executable 'ccelerate_server'",
-      "cargo": {
-        "args": [
-          "build",
-          "--bin=ccelerate_server",
-          "--package=ccelerate_server"
-        ],
-        "filter": {
-          "name": "ccelerate_server",
-          "kind": "bin"
-        }
-      },
-      "args": [],
-      "cwd": "${workspaceFolder}"
-    },
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Debug unit tests in executable 'ccelerate_server'",
-      "cargo": {
-        "args": [
-          "test",
-          "--no-run",
-          "--bin=ccelerate_server",
-          "--package=ccelerate_server"
-        ],
-        "filter": {
-          "name": "ccelerate_server",
           "kind": "bin"
         }
       },

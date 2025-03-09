@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     ffi::{OsStr, OsString},
+    io::Write,
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::Arc,
@@ -368,7 +369,6 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
             ) else {
                 panic!("Cannot parse original gcc arguments");
             };
-            let no_tui = state.cli.no_tui;
             state.pool.run(async move || {
                 let mut modified_gcc_args = original_gcc_args;
                 modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
@@ -376,9 +376,7 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
                 modified_gcc_args.depfile_target_name = None;
                 modified_gcc_args.depfile_output_path = None;
 
-                if no_tui {
-                    println!("Compile: {:#?}", modified_gcc_args);
-                }
+                log::info!("Compile: {:#?}", modified_gcc_args);
 
                 let child = tokio::process::Command::new(
                     original_unit_info.binary.to_standard_binary_name(),
@@ -430,9 +428,7 @@ async fn handle_gcc_final_link_request(
             unmodified_link_units.push(link_unit.clone());
         }
     }
-    if state.cli.no_tui {
-        println!("Building wrapped link units: {:#?}", wrapped_link_units);
-    }
+    log::info!("Building wrapped link units: {:#?}", wrapped_link_units);
 
     build_wrapped_link_units(&wrapped_link_units, state).await;
 
@@ -475,9 +471,7 @@ async fn handle_gcc_final_link_request(
     );
 
     modified_gcc_args.use_link_group = true;
-    if state.cli.no_tui {
-        println!("Link: {:#?}", modified_gcc_args.to_args());
-    }
+    log::info!("Link: {:#?}", modified_gcc_args.to_args());
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(modified_gcc_args.to_args())
         .current_dir(&cwd)
@@ -573,7 +567,7 @@ async fn route_run(
     state: actix_web::web::Data<State>,
 ) -> impl actix_web::Responder {
     let Ok(run_request) = RunRequestData::from_wire(&run_request) else {
-        eprintln!("Could not parse: {:#?}", run_request);
+        log::error!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
     return handle_request(&run_request, &state).await;
@@ -593,6 +587,22 @@ async fn server_thread(state: actix_web::web::Data<State>) {
     .run()
     .await
     .unwrap();
+}
+
+struct NoTuiLogger {}
+
+impl log::Log for NoTuiLogger {
+    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+        true
+    }
+
+    fn log(&self, record: &log::Record) {
+        println!("{} - {}", record.level(), record.args());
+    }
+
+    fn flush(&self) {
+        let _ = std::io::stdout().flush();
+    }
 }
 
 #[tokio::main]
@@ -627,7 +637,10 @@ async fn main() -> Result<()> {
     });
 
     if state.cli.no_tui {
-        println!("Listening on http://{}", addr);
+        log::set_logger(&NoTuiLogger {})
+            .map(|()| log::set_max_level(log::LevelFilter::Info))
+            .unwrap();
+        log::info!("Listening on http://{}", addr);
         server_thread(state.clone()).await;
         return Ok(());
     }
