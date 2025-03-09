@@ -23,7 +23,11 @@ pub fn wrap_command(wrapped_binary: ccelerate_shared::WrappedBinary) {
     match response {
         Ok(response) => {
             if !response.status().is_success() {
-                println!("Failed to run command");
+                println!(
+                    "Failed to run command (status: {}): {}",
+                    response.status(),
+                    response.text().unwrap_or("Unknown error".to_string()),
+                );
                 exit(1);
             }
             let data = response
