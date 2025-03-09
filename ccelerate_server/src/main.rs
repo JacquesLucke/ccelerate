@@ -1,6 +1,7 @@
 use std::{
     collections::HashSet,
     ffi::{OsStr, OsString},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -32,6 +33,7 @@ struct State {
     conn: Arc<Mutex<rusqlite::Connection>>,
     tasks_logger: TasksLogger,
     tasks_table_state: Arc<Mutex<TableState>>,
+    pool: ParallelPool,
 }
 
 struct TasksLogger {
@@ -340,7 +342,6 @@ fn osstring_to_osstr_vec(s: &[OsString]) -> Vec<&OsStr> {
 
 async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State) {
     let link_units = link_units.to_vec();
-    let pool = ParallelPool::new(24);
     let handles = link_units
         .into_iter()
         .map(|unit| {
@@ -355,7 +356,7 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
             ) else {
                 panic!("Cannot parse original gcc arguments");
             };
-            pool.run(async move || {
+            state.pool.run(async move || {
                 let mut modified_gcc_args = original_gcc_args;
                 modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
                 modified_gcc_args.depfile_generate = false;
@@ -597,6 +598,11 @@ async fn main() -> Result<()> {
         conn: Arc::new(Mutex::new(conn)),
         tasks_logger: TasksLogger::new(),
         tasks_table_state: Arc::new(Mutex::new(TableState::default())),
+        pool: ParallelPool::new(
+            std::thread::available_parallelism()
+                .unwrap_or(NonZeroUsize::new(1).unwrap())
+                .get(),
+        ),
     });
 
     tokio::spawn(server_thread(state.clone()));
