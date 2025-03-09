@@ -127,6 +127,7 @@ struct DbFilesRow {
     cwd: PathBuf,
     binary: WrappedBinary,
     args: Vec<OsString>,
+    local_code_file: Option<PathBuf>,
 }
 
 struct ParallelPool {
@@ -156,7 +157,7 @@ impl ParallelPool {
 fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
     // TODO: Support OsStr in the database.
     conn.execute(
-        "INSERT OR REPLACE INTO Files (binary, path, cwd, args) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR REPLACE INTO Files (binary, path, cwd, args, local_code_file) VALUES (?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![
             row.binary.to_standard_binary_name().to_string_lossy(),
             row.path.to_string_lossy(),
@@ -167,7 +168,8 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
                     .map(|s| s.to_string_lossy())
                     .collect::<Vec<_>>()
             )
-            .unwrap()
+            .unwrap(),
+            row.local_code_file.as_ref().map(|s| s.to_string_lossy()),
         ],
     )?;
     Ok(())
@@ -175,13 +177,14 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
 
 fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> {
     conn.query_row(
-        "SELECT binary, cwd, args FROM Files WHERE path = ?",
+        "SELECT binary, cwd, args, local_code_file FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
             // TODO: Support OsStr in the database.
             let binary = row.get::<usize, String>(0).unwrap();
             let cwd = row.get::<usize, String>(1).unwrap();
             let args = row.get::<usize, String>(2).unwrap();
+            let local_code_file = row.get::<usize, Option<String>>(3).unwrap();
             Ok(DbFilesRow {
                 path: path.to_path_buf(),
                 cwd: Path::new(&cwd).to_path_buf(),
@@ -191,6 +194,7 @@ fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> 
                     .into_iter()
                     .map(OsString::from)
                     .collect(),
+                local_code_file: local_code_file.map(|p| Path::new(&p).to_path_buf()),
             })
         },
     )
@@ -421,16 +425,6 @@ async fn handle_gcc_without_link_request(
         "Prepare: {:?}",
         request_output_path.file_name().unwrap().to_string_lossy()
     ));
-    store_db_file(
-        &state.conn.lock(),
-        &DbFilesRow {
-            path: request_output_path.clone(),
-            cwd: cwd.to_path_buf(),
-            binary: binary,
-            args: request_gcc_args.to_args(),
-        },
-    )
-    .unwrap();
 
     // Do preprocessing on the provided files. This also generates a depfile that e.g. ninja will use
     // to know which headers an object file depends on.
@@ -438,68 +432,85 @@ async fn handle_gcc_without_link_request(
     modified_gcc_args.primary_output = None;
     modified_gcc_args.stop_before_link = false;
     modified_gcc_args.stop_after_preprocessing = true;
-    log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
-    let state_clone = state.clone();
-    state
-        .pool
-        .run(async move || {
-            let realized_args = modified_gcc_args.to_args();
-            let realized_args_buffer = realized_args
-                .iter()
-                .map(|s| s.as_encoded_bytes())
-                .flatten()
-                .map(|b| *b)
-                .collect::<Vec<_>>();
-            let realized_args_hash = twox_hash::XxHash64::oneshot(0, &realized_args_buffer);
-            let result = tokio::process::Command::new(binary.to_standard_binary_name())
-                .args(&realized_args)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .unwrap()
-                .wait_with_output()
-                .await
-                .unwrap();
-            let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
-            let realized_args_hash_str = format!("{:x}", realized_args_hash);
-            let preprocess_file_name = format!(
-                "{}_{}.ii",
-                &realized_args_hash_str,
-                request_output_path_clone
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-            );
-            let preprocess_file_path = state_clone
-                .data_dir
-                .join("preprocessed")
-                .join(&realized_args_hash_str[..2])
-                .join(preprocess_file_name);
-            std::fs::create_dir_all(&preprocess_file_path.parent().unwrap()).unwrap();
-            let mut file = std::fs::File::create(preprocess_file_path).unwrap();
 
-            let source_file_path = modified_gcc_args.sources.first();
-            for line in analysis.local_code {
-                if let Some(source_file_path) = source_file_path {
-                    writeln!(
-                        file,
-                        "# {} \"{}\"",
-                        line.line_number,
-                        source_file_path.path.display()
-                    )
+    let realized_args = modified_gcc_args.to_args();
+    let realized_args_buffer = realized_args
+        .iter()
+        .map(|s| s.as_encoded_bytes())
+        .flatten()
+        .map(|b| *b)
+        .collect::<Vec<_>>();
+    let realized_args_hash = twox_hash::XxHash64::oneshot(0, &realized_args_buffer);
+    let realized_args_hash_str = format!("{:x}", realized_args_hash);
+    let preprocess_file_name = format!(
+        "{}_{}.ii",
+        &realized_args_hash_str,
+        request_output_path_clone
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+    );
+    let preprocess_file_path = state
+        .data_dir
+        .join("preprocessed")
+        .join(&realized_args_hash_str[..2])
+        .join(preprocess_file_name);
+    std::fs::create_dir_all(&preprocess_file_path.parent().unwrap()).unwrap();
+
+    log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
+    {
+        let preprocess_file_path = preprocess_file_path.clone();
+        state
+            .pool
+            .run(async move || {
+                let result = tokio::process::Command::new(binary.to_standard_binary_name())
+                    .args(&realized_args)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .unwrap()
+                    .wait_with_output()
+                    .await
                     .unwrap();
+                let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
+
+                let mut file = std::fs::File::create(preprocess_file_path).unwrap();
+                let source_file_path = modified_gcc_args.sources.first();
+                for line in analysis.local_code {
+                    if let Some(source_file_path) = source_file_path {
+                        writeln!(
+                            file,
+                            "# {} \"{}\"",
+                            line.line_number,
+                            source_file_path.path.display()
+                        )
+                        .unwrap();
+                    }
+                    writeln!(file, "{}", line.line).unwrap();
                 }
-                writeln!(file, "{}", line.line).unwrap();
-            }
-        })
-        .await
-        .unwrap();
+            })
+            .await
+            .unwrap();
+    }
 
     let dummy_object = ASSETS_DIR.get_file("dummy_object.o").unwrap();
     tokio::fs::write(request_output_path, dummy_object.contents())
         .await
         .unwrap();
+
+    store_db_file(
+        &state.conn.lock(),
+        &DbFilesRow {
+            path: request_output_path.clone(),
+            cwd: cwd.to_path_buf(),
+            binary: binary,
+            args: request_gcc_args.to_args(),
+            local_code_file: Some(preprocess_file_path),
+        },
+    )
+    .unwrap();
+
     HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
         ..Default::default()
     })
@@ -701,6 +712,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                     cwd: request.cwd.clone(),
                     binary: request.binary,
                     args: request_ar_args.to_args(),
+                    local_code_file: None,
                 },
             )
             .unwrap();
@@ -806,7 +818,8 @@ async fn main() -> Result<()> {
             path TEXT NOT NULL PRIMARY KEY,
             cwd TEXT NOT NULL,
             binary TEXT NOT NULL,
-            args JSON NOT NULL
+            args JSON NOT NULL,
+            local_code_file TEXT
         );",
     )]);
 
