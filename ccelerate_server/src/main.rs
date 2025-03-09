@@ -426,19 +426,24 @@ fn is_local_header(header: &str) -> bool {
         || header.ends_with(".cc")
         || header.ends_with(".c")
         || header.ends_with("glsl_compositor_source_list.h")
+        || header.ends_with("BLI_kdtree_impl.h")
+        || header.ends_with("kdtree_impl.h")
+        || header.ends_with("state_template.h")
+        || header.ends_with("shadow_state_template.h")
 }
 
 fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
     let mut result = AnalysePreprocessResult::default();
-    let mut header_stack = vec![];
+    let mut header_stack: Vec<&str> = vec![];
     let mut next_line = 0;
 
     for line in code.split(|&b| b == b'\n') {
+        let is_local = header_stack.iter().all(|s| is_local_header(s));
         if line.starts_with(b"# ") {
             let preprocessor_line = GccPreprocessLine::parse(line)?;
             next_line = preprocessor_line.line_number;
             if preprocessor_line.is_start_of_new_file {
-                if header_stack.is_empty() {
+                if is_local {
                     if !is_local_header(&preprocessor_line.header_name) {
                         let header_path = PathBuf::from(preprocessor_line.header_name);
                         if !result.global_headers.contains(&header_path) {
@@ -452,7 +457,6 @@ fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
             }
         } else {
             if !line.is_empty() {
-                let is_local = header_stack.iter().all(|s| is_local_header(s));
                 if is_local {
                     result.local_code.push(SourceCodeLine {
                         line_number: next_line,
@@ -533,7 +537,7 @@ async fn handle_gcc_without_link_request(
                     .wait_with_output()
                     .await
                     .unwrap();
-                if !result.status.success() {
+                if !result.stderr.is_empty() {
                     log::error!(
                         "Preprocess failed: {}",
                         std::str::from_utf8(&result.stderr).unwrap()
@@ -543,15 +547,15 @@ async fn handle_gcc_without_link_request(
                 let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
                 let source_file_path = modified_gcc_args.sources.first();
                 if let Some(source_file_path) = source_file_path {
-                    let source_code = tokio::fs::read_to_string(&source_file_path.path)
-                        .await
-                        .unwrap();
-                    global_defines
-                        .lock()
-                        .extend(find_global_include_extra_defines(
-                            &analysis.global_headers,
-                            &source_code,
-                        ));
+                    if let Ok(source_code) = tokio::fs::read_to_string(&source_file_path.path).await
+                    {
+                        global_defines
+                            .lock()
+                            .extend(find_global_include_extra_defines(
+                                &analysis.global_headers,
+                                &source_code,
+                            ));
+                    }
                 }
 
                 headers.lock().extend(analysis.global_headers);
