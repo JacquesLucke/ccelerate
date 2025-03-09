@@ -28,12 +28,24 @@ mod path_utils;
 
 static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
 
+#[derive(clap::Parser, Debug)]
+#[command(name = "ccelerate_server")]
+struct CLI {
+    #[arg(long, default_value_t = ccelerate_shared::DEFAULT_PORT)]
+    port: u16,
+    #[arg(long)]
+    no_tui: bool,
+    #[arg(short, long)]
+    jobs: Option<usize>,
+}
+
 struct State {
     address: String,
     conn: Arc<Mutex<rusqlite::Connection>>,
     tasks_logger: TasksLogger,
     tasks_table_state: Arc<Mutex<TableState>>,
     pool: ParallelPool,
+    cli: CLI,
 }
 
 struct TasksLogger {
@@ -356,6 +368,7 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
             ) else {
                 panic!("Cannot parse original gcc arguments");
             };
+            let no_tui = state.cli.no_tui;
             state.pool.run(async move || {
                 let mut modified_gcc_args = original_gcc_args;
                 modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
@@ -363,7 +376,9 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
                 modified_gcc_args.depfile_target_name = None;
                 modified_gcc_args.depfile_output_path = None;
 
-                println!("Compile: {:#?}", modified_gcc_args);
+                if no_tui {
+                    println!("Compile: {:#?}", modified_gcc_args);
+                }
 
                 let child = tokio::process::Command::new(
                     original_unit_info.binary.to_standard_binary_name(),
@@ -415,7 +430,10 @@ async fn handle_gcc_final_link_request(
             unmodified_link_units.push(link_unit.clone());
         }
     }
-    println!("Building wrapped link units: {:#?}", wrapped_link_units);
+    if state.cli.no_tui {
+        println!("Building wrapped link units: {:#?}", wrapped_link_units);
+    }
+
     build_wrapped_link_units(&wrapped_link_units, state).await;
 
     let wrapped_units_archive_path = tmp_dir.path().join("wrapped_units.a");
@@ -457,7 +475,9 @@ async fn handle_gcc_final_link_request(
     );
 
     modified_gcc_args.use_link_group = true;
-    println!("Link: {:#?}", modified_gcc_args.to_args());
+    if state.cli.no_tui {
+        println!("Link: {:#?}", modified_gcc_args.to_args());
+    }
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(modified_gcc_args.to_args())
         .current_dir(&cwd)
@@ -577,15 +597,14 @@ async fn server_thread(state: actix_web::web::Data<State>) {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let addr = format!("127.0.0.1:{}", ccelerate_shared::DEFAULT_PORT);
-    println!("Listening on http://{}", addr);
+    let cli: CLI = clap::Parser::parse();
 
     let db_migrations = Migrations::new(vec![M::up(
         "CREATE TABLE Files(
-                path TEXT NOT NULL PRIMARY KEY,
-                cwd TEXT NOT NULL,
-                binary TEXT NOT NULL,
-                args JSON NOT NULL
+            path TEXT NOT NULL PRIMARY KEY,
+            cwd TEXT NOT NULL,
+            binary TEXT NOT NULL,
+            args JSON NOT NULL
             );",
     )]);
 
@@ -593,21 +612,26 @@ async fn main() -> Result<()> {
     let mut conn = rusqlite::Connection::open(db_path)?;
     db_migrations.to_latest(&mut conn)?;
 
+    let addr = format!("127.0.0.1:{}", cli.port);
     let state = actix_web::web::Data::new(State {
-        address: addr,
+        address: addr.clone(),
         conn: Arc::new(Mutex::new(conn)),
         tasks_logger: TasksLogger::new(),
         tasks_table_state: Arc::new(Mutex::new(TableState::default())),
-        pool: ParallelPool::new(
+        pool: ParallelPool::new(cli.jobs.unwrap_or_else(|| {
             std::thread::available_parallelism()
                 .unwrap_or(NonZeroUsize::new(1).unwrap())
-                .get(),
-        ),
+                .get()
+        })),
+        cli: cli,
     });
 
+    if state.cli.no_tui {
+        println!("Listening on http://{}", addr);
+        server_thread(state.clone()).await;
+        return Ok(());
+    }
     tokio::spawn(server_thread(state.clone()));
-
-    tokio::time::sleep(Duration::from_secs(1000)).await;
 
     let mut terminal = ratatui::init();
 
