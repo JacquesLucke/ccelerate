@@ -65,6 +65,23 @@ impl WrappedBinary {
             _ => None,
         }
     }
+
+    pub fn is_gcc_compatible(&self) -> bool {
+        match self {
+            WrappedBinary::Gcc
+            | WrappedBinary::Gxx
+            | WrappedBinary::Clang
+            | WrappedBinary::Clangxx => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_ar_compatible(&self) -> bool {
+        match self {
+            WrappedBinary::Ar => true,
+            _ => false,
+        }
+    }
 }
 
 impl RunRequestData {

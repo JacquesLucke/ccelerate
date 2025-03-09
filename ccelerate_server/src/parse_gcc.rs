@@ -88,6 +88,11 @@ impl Default for GCCArgs {
 }
 
 impl GCCArgs {
+    pub fn parse_owned(cwd: &Path, raw_args: Vec<OsString>) -> Result<Self> {
+        let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
+        Self::parse(cwd, raw_args.as_slice())
+    }
+
     pub fn parse(cwd: &Path, raw_args: &[&OsStr]) -> Result<Self> {
         let mut args = Self::default();
 

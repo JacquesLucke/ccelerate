@@ -9,7 +9,6 @@ use std::{
 use actix_web::HttpResponse;
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
-use command::CommandArgs;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
 use parse_ar::ArArgs;
@@ -21,7 +20,6 @@ use ratatui::{
 };
 use rusqlite_migration::{M, Migrations};
 
-mod command;
 mod parse_ar;
 mod parse_gcc;
 mod path_utils;
@@ -192,18 +190,6 @@ fn is_gcc_cmakescratch(args: &GCCArgs, cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CMakeScratch")
 }
 
-fn get_command_for_file(path: &Path, conn: &rusqlite::Connection) -> Option<command::Command> {
-    let Some(row) = load_db_file(conn, path) else {
-        return None;
-    };
-    command::Command::new(
-        row.binary,
-        &row.cwd,
-        &row.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>(),
-    )
-    .ok()
-}
-
 fn find_smallest_link_units(
     link_args: &GCCArgs,
     conn: &rusqlite::Connection,
@@ -219,14 +205,19 @@ fn find_smallest_link_units(
                 final_sources.insert(current_path.clone());
             }
             p if p.ends_with(".a") => {
-                let file_command = get_command_for_file(&current_path, conn);
-                if let Some(file_command) = file_command {
-                    match file_command.args {
-                        CommandArgs::Gcc(args) => {
+                let file_row = load_db_file(conn, &current_path);
+                if let Some(file_row) = file_row {
+                    match file_row.binary {
+                        binary if binary.is_gcc_compatible() => {
+                            let args = GCCArgs::parse_owned(&file_row.cwd, file_row.args).unwrap();
                             remaining_paths.extend(args.sources.iter().map(|s| s.path.clone()));
                         }
-                        CommandArgs::Ar(args) => {
+                        binary if binary.is_ar_compatible() => {
+                            let args = ArArgs::parse_owned(&file_row.cwd, file_row.args).unwrap();
                             remaining_paths.extend(args.sources.iter().map(|s| s.clone()));
+                        }
+                        binary => {
+                            panic!("Cannot handle binary: {:?}", binary);
                         }
                     }
                 } else {
