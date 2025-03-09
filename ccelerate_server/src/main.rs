@@ -21,7 +21,7 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
-use tokio::task::JoinHandle;
+use tokio::{io::AsyncWriteExt, task::JoinHandle};
 
 mod parse_ar;
 mod parse_gcc;
@@ -331,7 +331,7 @@ struct SourceCodeLine<'a> {
 
 #[derive(Debug, Clone, Default)]
 struct AnalysePreprocessResult<'a> {
-    proper_direct_headers: HashSet<PathBuf>,
+    proper_direct_headers: Vec<PathBuf>,
     local_code: Vec<SourceCodeLine<'a>>,
 }
 
@@ -382,6 +382,15 @@ impl<'a> GccPreprocessLine<'a> {
     }
 }
 
+fn is_local_header(header: &str) -> bool {
+    header.ends_with("list_sort_impl.h")
+        || header.ends_with("dna_rename_defs.h")
+        || header.ends_with("dna_includes_as_strings.h")
+        || header.ends_with("BLI_strict_flags.h")
+}
+
+static TMP_EXTRA_DEFINES: &[&str] = &["DNA_DEPRECATED_ALLOW", "GHASH_INTERNAL_API"];
+
 fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
     let mut result = AnalysePreprocessResult::default();
     let mut header_stack = vec![];
@@ -393,17 +402,21 @@ fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
             next_line = preprocessor_line.line_number;
             if preprocessor_line.is_start_of_new_file {
                 if header_stack.is_empty() {
-                    result
-                        .proper_direct_headers
-                        .insert(PathBuf::from(preprocessor_line.header_name));
+                    if !is_local_header(&preprocessor_line.header_name) {
+                        let header_path = PathBuf::from(preprocessor_line.header_name);
+                        if !result.proper_direct_headers.contains(&header_path) {
+                            result.proper_direct_headers.push(header_path);
+                        }
+                    }
                 }
                 header_stack.push(preprocessor_line.header_name);
             } else if preprocessor_line.is_return_to_file {
                 header_stack.pop();
             }
         } else {
-            if header_stack.is_empty() {
-                if !line.is_empty() {
+            if !line.is_empty() {
+                let is_local = header_stack.iter().all(|s| is_local_header(s));
+                if is_local {
                     result.local_code.push(SourceCodeLine {
                         line_number: next_line,
                         line: std::str::from_utf8(line)?,
@@ -435,6 +448,9 @@ async fn handle_gcc_without_link_request(
     // Do preprocessing on the provided files. This also generates a depfile that e.g. ninja will use
     // to know which headers an object file depends on.
     let mut modified_gcc_args = request_gcc_args.clone();
+    modified_gcc_args
+        .defines
+        .extend(TMP_EXTRA_DEFINES.iter().map(|s| s.to_string()));
     modified_gcc_args.primary_output = None;
     modified_gcc_args.stop_before_link = false;
     modified_gcc_args.stop_after_preprocessing = true;
@@ -536,6 +552,148 @@ fn osstring_to_osstr_vec(s: &[OsString]) -> Vec<&OsStr> {
     s.iter().map(|s| s.as_ref()).collect()
 }
 
+async fn build_combined_translation_unit(
+    original_object_files: &[&Path],
+    dst_object_file: &Path,
+    state: &Data<State>,
+) {
+    let mut headers: Vec<PathBuf> = Vec::new();
+    let mut preprocess_paths: Vec<PathBuf> = Vec::new();
+
+    let mut unit_binary = WrappedBinary::Gcc;
+    let mut preprocess_headers_gcc_args = GCCArgs {
+        ..Default::default()
+    };
+    let mut compile_gcc_args = GCCArgs {
+        ..Default::default()
+    };
+
+    for original_object_file in original_object_files {
+        let info = load_db_file(&state.conn.lock(), &original_object_file).unwrap();
+        unit_binary = info.binary;
+        let original_gcc_args =
+            GCCArgs::parse(&original_object_file, &osstring_to_osstr_vec(&info.args)).unwrap();
+        for header in &info.headers.unwrap() {
+            if headers.contains(header) {
+                continue;
+            }
+            headers.push(header.clone());
+        }
+        preprocess_paths.push(info.local_code_file.unwrap());
+
+        preprocess_headers_gcc_args
+            .user_includes
+            .extend(original_gcc_args.user_includes.clone());
+        compile_gcc_args
+            .user_includes
+            .extend(original_gcc_args.user_includes);
+
+        preprocess_headers_gcc_args
+            .system_includes
+            .extend(original_gcc_args.system_includes.clone());
+        compile_gcc_args
+            .system_includes
+            .extend(original_gcc_args.system_includes);
+
+        preprocess_headers_gcc_args
+            .f_flags
+            .extend(original_gcc_args.f_flags.clone());
+        compile_gcc_args.f_flags.extend(original_gcc_args.f_flags);
+
+        preprocess_headers_gcc_args
+            .g_flags
+            .extend(original_gcc_args.g_flags.clone());
+        compile_gcc_args.g_flags.extend(original_gcc_args.g_flags);
+
+        preprocess_headers_gcc_args
+            .opt_flags
+            .extend(original_gcc_args.opt_flags.clone());
+        compile_gcc_args
+            .opt_flags
+            .extend(original_gcc_args.opt_flags);
+
+        preprocess_headers_gcc_args
+            .defines
+            .extend(original_gcc_args.defines.clone());
+        compile_gcc_args.defines.extend(original_gcc_args.defines);
+
+        preprocess_headers_gcc_args
+            .machine_args
+            .extend(original_gcc_args.machine_args.clone());
+        compile_gcc_args
+            .machine_args
+            .extend(original_gcc_args.machine_args);
+    }
+
+    let (ext, lang) = if unit_binary == WrappedBinary::Gxx {
+        ("ii", "c++")
+    } else {
+        ("i", "c")
+    };
+
+    let mut headers_code = String::new();
+    for header in headers {
+        headers_code.push_str(&format!("#include \"{}\"\n", header.display()));
+    }
+
+    preprocess_headers_gcc_args.stop_after_preprocessing = true;
+    preprocess_headers_gcc_args
+        .defines
+        .extend(TMP_EXTRA_DEFINES.iter().map(|s| s.to_string()));
+    let mut preprocess_headers_raw_args = preprocess_headers_gcc_args.to_args();
+    preprocess_headers_raw_args.push("-x".into());
+    preprocess_headers_raw_args.push(lang.into());
+    preprocess_headers_raw_args.push("-".into());
+    let mut child = tokio::process::Command::new(unit_binary.to_standard_binary_name())
+        .args(&preprocess_headers_raw_args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(headers_code.as_bytes()).await.unwrap();
+    }
+    let child_result = child.wait_with_output().await.unwrap();
+
+    let mut combined_code: String = "".to_string();
+    combined_code.push_str(std::str::from_utf8(&child_result.stdout).unwrap());
+    combined_code.push_str("\n\n");
+    for path in preprocess_paths {
+        let preprocessed_code = std::fs::read_to_string(&path).unwrap();
+        combined_code.push_str(&preprocessed_code);
+    }
+
+    let unit_file = tempfile::Builder::new().suffix(ext).tempfile().unwrap();
+    let unit_file_path = unit_file.path();
+    tokio::fs::write(unit_file_path, combined_code)
+        .await
+        .unwrap();
+
+    compile_gcc_args.primary_output = Some(dst_object_file.to_owned());
+    compile_gcc_args.sources.push(SourceFile {
+        path: unit_file_path.to_owned(),
+        language: None,
+    });
+    compile_gcc_args.stop_before_link = true;
+
+    let child = tokio::process::Command::new(unit_binary.to_standard_binary_name())
+        .args(&compile_gcc_args.to_args())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let result = child.wait_with_output().await.unwrap();
+    if !result.status.success() {
+        log::error!(
+            "Compile unit failed: {}",
+            std::str::from_utf8(&result.stderr).unwrap()
+        );
+        std::process::exit(1);
+    }
+}
+
 async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &Data<State>) {
     let link_units = link_units.to_vec();
     let handles = link_units
@@ -554,6 +712,13 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &Data<S
             };
             let state_clone = state.clone();
             state.pool.run(async move || {
+                build_combined_translation_unit(
+                    &[&unit.original_object_path],
+                    &unit.wrapped_object_path,
+                    &state_clone,
+                )
+                .await;
+
                 let mut modified_gcc_args = original_gcc_args;
                 modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
                 modified_gcc_args.depfile_generate = false;

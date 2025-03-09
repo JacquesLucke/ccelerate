@@ -34,7 +34,7 @@ pub struct RunResponseData {
     pub status: i32,
 }
 
-#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 pub enum WrappedBinary {
     Gcc,
     Gxx,
