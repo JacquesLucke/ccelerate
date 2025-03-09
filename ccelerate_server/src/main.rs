@@ -724,7 +724,7 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
 
     let vertical = Layout::vertical([Length(1), Min(0)]);
     let [title_area, main_area] = vertical.areas(frame.area());
-    let text = ratatui::text::Text::raw(&state.address);
+    let text = ratatui::text::Text::raw(format!("ccelerate_server at http://{}", state.address));
     frame.render_widget(text, title_area);
 
     let done_style = Style::new().fg(Color::Green);
