@@ -128,6 +128,7 @@ struct DbFilesRow {
     binary: WrappedBinary,
     args: Vec<OsString>,
     local_code_file: Option<PathBuf>,
+    headers: Option<Vec<PathBuf>>,
 }
 
 struct ParallelPool {
@@ -157,7 +158,7 @@ impl ParallelPool {
 fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
     // TODO: Support OsStr in the database.
     conn.execute(
-        "INSERT OR REPLACE INTO Files (binary, path, cwd, args, local_code_file) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR REPLACE INTO Files (binary, path, cwd, args, local_code_file, headers) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![
             row.binary.to_standard_binary_name().to_string_lossy(),
             row.path.to_string_lossy(),
@@ -170,6 +171,9 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
             )
             .unwrap(),
             row.local_code_file.as_ref().map(|s| s.to_string_lossy()),
+            row.headers
+                .as_ref()
+                .map(|h| serde_json::to_string(h).unwrap()),
         ],
     )?;
     Ok(())
@@ -177,7 +181,7 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
 
 fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> {
     conn.query_row(
-        "SELECT binary, cwd, args, local_code_file FROM Files WHERE path = ?",
+        "SELECT binary, cwd, args, local_code_file, headers FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
             // TODO: Support OsStr in the database.
@@ -185,6 +189,7 @@ fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> 
             let cwd = row.get::<usize, String>(1).unwrap();
             let args = row.get::<usize, String>(2).unwrap();
             let local_code_file = row.get::<usize, Option<String>>(3).unwrap();
+            let headers = row.get::<usize, Option<String>>(4).unwrap();
             Ok(DbFilesRow {
                 path: path.to_path_buf(),
                 cwd: Path::new(&cwd).to_path_buf(),
@@ -195,6 +200,7 @@ fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> 
                     .map(OsString::from)
                     .collect(),
                 local_code_file: local_code_file.map(|p| Path::new(&p).to_path_buf()),
+                headers: headers.map(|h| serde_json::from_str::<Vec<PathBuf>>(&h).unwrap()),
             })
         },
     )
@@ -456,10 +462,12 @@ async fn handle_gcc_without_link_request(
         .join(&realized_args_hash_str[..2])
         .join(preprocess_file_name);
     std::fs::create_dir_all(&preprocess_file_path.parent().unwrap()).unwrap();
+    let headers = Arc::new(Mutex::new(Vec::new()));
 
     log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
     {
         let preprocess_file_path = preprocess_file_path.clone();
+        let headers = headers.clone();
         state
             .pool
             .run(async move || {
@@ -474,6 +482,7 @@ async fn handle_gcc_without_link_request(
                     .await
                     .unwrap();
                 let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
+                headers.lock().extend(analysis.proper_direct_headers);
 
                 let mut file = std::fs::File::create(preprocess_file_path).unwrap();
                 let source_file_path = modified_gcc_args.sources.first();
@@ -507,6 +516,7 @@ async fn handle_gcc_without_link_request(
             binary: binary,
             args: request_gcc_args.to_args(),
             local_code_file: Some(preprocess_file_path),
+            headers: Some(headers.lock().clone()),
         },
     )
     .unwrap();
@@ -713,6 +723,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                     binary: request.binary,
                     args: request_ar_args.to_args(),
                     local_code_file: None,
+                    headers: None,
                 },
             )
             .unwrap();
@@ -819,7 +830,8 @@ async fn main() -> Result<()> {
             cwd TEXT NOT NULL,
             binary TEXT NOT NULL,
             args JSON NOT NULL,
-            local_code_file TEXT
+            local_code_file TEXT,
+            headers JSON
         );",
     )]);
 
