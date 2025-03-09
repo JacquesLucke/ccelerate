@@ -334,6 +334,31 @@ async fn handle_gcc_without_link_request(
         },
     )
     .unwrap();
+
+    // Do preprocessing on the provided files. This also generates a depfile that e.g. ninja will use
+    // to know which headers an object file depends on.
+    let mut modified_gcc_args = request_gcc_args.clone();
+    modified_gcc_args.primary_output = None;
+    modified_gcc_args.stop_before_link = false;
+    modified_gcc_args.stop_after_preprocessing = true;
+    log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
+    state
+        .pool
+        .run(async move || {
+            tokio::process::Command::new(binary.to_standard_binary_name())
+                .args(&modified_gcc_args.to_args())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap()
+                .wait_with_output()
+                .await
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
     let dummy_object = ASSETS_DIR.get_file("dummy_object.o").unwrap();
     tokio::fs::write(request_output_path, dummy_object.contents())
         .await
