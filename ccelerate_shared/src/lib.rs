@@ -1,7 +1,6 @@
 use base64::prelude::*;
 use std::{
     ffi::{OsStr, OsString},
-    os::unix::ffi::OsStrExt,
     path::PathBuf,
 };
 
@@ -125,7 +124,7 @@ impl RunResponseData {
 }
 
 fn encode_osstr(s: OsString) -> String {
-    BASE64_STANDARD.encode(s.as_bytes())
+    BASE64_STANDARD.encode(s.as_encoded_bytes())
 }
 
 fn decode_osstr(s: &str) -> Result<OsString, base64::DecodeError> {
