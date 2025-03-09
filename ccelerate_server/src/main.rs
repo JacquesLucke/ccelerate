@@ -38,6 +38,8 @@ struct CLI {
     no_tui: bool,
     #[arg(short, long)]
     jobs: Option<usize>,
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
 }
 
 struct State {
@@ -47,6 +49,7 @@ struct State {
     tasks_table_state: Arc<Mutex<TableState>>,
     pool: ParallelPool,
     cli: CLI,
+    data_dir: PathBuf,
 }
 
 struct TasksLogger {
@@ -750,6 +753,13 @@ impl log::Log for NoTuiLogger {
 async fn main() -> Result<()> {
     let cli: CLI = clap::Parser::parse();
 
+    let data_dir = cli
+        .data_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("./ccelerate_data"));
+
+    std::fs::create_dir_all(&data_dir).unwrap();
+
     let db_migrations = Migrations::new(vec![M::up(
         "CREATE TABLE Files(
             path TEXT NOT NULL PRIMARY KEY,
@@ -759,7 +769,7 @@ async fn main() -> Result<()> {
         );",
     )]);
 
-    let db_path = "./ccelerate.db";
+    let db_path = data_dir.join("ccelerate.db");
     let mut conn = rusqlite::Connection::open(db_path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     db_migrations.to_latest(&mut conn)?;
@@ -776,6 +786,7 @@ async fn main() -> Result<()> {
                 .get()
         })),
         cli: cli,
+        data_dir: data_dir,
     });
 
     if state.cli.no_tui {
