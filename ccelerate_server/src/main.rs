@@ -428,12 +428,6 @@ fn is_local_header(header: &str) -> bool {
         || header.ends_with("glsl_compositor_source_list.h")
 }
 
-static TMP_EXTRA_DEFINES: &[&str] = &[
-    "DNA_DEPRECATED_ALLOW",
-    "GHASH_INTERNAL_API",
-    "AUD_CAPI_IMPLEMENTATION",
-];
-
 fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
     let mut result = AnalysePreprocessResult::default();
     let mut header_stack = vec![];
@@ -491,9 +485,6 @@ async fn handle_gcc_without_link_request(
     // Do preprocessing on the provided files. This also generates a depfile that e.g. ninja will use
     // to know which headers an object file depends on.
     let mut modified_gcc_args = request_gcc_args.clone();
-    modified_gcc_args
-        .defines
-        .extend(TMP_EXTRA_DEFINES.iter().map(|s| s.to_string()));
     modified_gcc_args.primary_output = None;
     modified_gcc_args.stop_before_link = false;
     modified_gcc_args.stop_after_preprocessing = true;
@@ -633,6 +624,8 @@ async fn build_combined_translation_unit(
         ..Default::default()
     };
 
+    let mut global_defines = Vec::new();
+
     for original_object_file in original_object_files {
         let info = load_db_file(&state.conn.lock(), &original_object_file).unwrap();
         unit_binary = info.binary;
@@ -645,6 +638,8 @@ async fn build_combined_translation_unit(
             headers.push(header.clone());
         }
         preprocess_paths.push(info.local_code_file.unwrap());
+
+        global_defines.extend(info.global_defines.unwrap_or_default());
 
         preprocess_headers_gcc_args
             .user_includes
@@ -697,14 +692,14 @@ async fn build_combined_translation_unit(
     };
 
     let mut headers_code = String::new();
+    for define in global_defines {
+        headers_code.push_str(&define);
+    }
     for header in headers {
         headers_code.push_str(&format!("#include \"{}\"\n", header.display()));
     }
 
     preprocess_headers_gcc_args.stop_after_preprocessing = true;
-    preprocess_headers_gcc_args
-        .defines
-        .extend(TMP_EXTRA_DEFINES.iter().map(|s| s.to_string()));
     let mut preprocess_headers_raw_args = preprocess_headers_gcc_args.to_args();
     preprocess_headers_raw_args.push("-x".into());
     preprocess_headers_raw_args.push(lang.into());
