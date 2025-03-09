@@ -129,6 +129,7 @@ struct DbFilesRow {
     args: Vec<OsString>,
     local_code_file: Option<PathBuf>,
     headers: Option<Vec<PathBuf>>,
+    global_defines: Option<Vec<String>>,
 }
 
 struct ParallelPool {
@@ -158,7 +159,7 @@ impl ParallelPool {
 fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
     // TODO: Support OsStr in the database.
     conn.execute(
-        "INSERT OR REPLACE INTO Files (binary, path, cwd, args, local_code_file, headers) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT OR REPLACE INTO Files (binary, path, cwd, args, local_code_file, headers, global_defines) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         rusqlite::params![
             row.binary.to_standard_binary_name().to_string_lossy(),
             row.path.to_string_lossy(),
@@ -174,6 +175,9 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
             row.headers
                 .as_ref()
                 .map(|h| serde_json::to_string(h).unwrap()),
+            row.global_defines
+                .as_ref()
+                .map(|h| serde_json::to_string(h).unwrap()),
         ],
     )?;
     Ok(())
@@ -181,7 +185,7 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
 
 fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> {
     conn.query_row(
-        "SELECT binary, cwd, args, local_code_file, headers FROM Files WHERE path = ?",
+        "SELECT binary, cwd, args, local_code_file, headers, global_defines FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
             // TODO: Support OsStr in the database.
@@ -190,6 +194,7 @@ fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> 
             let args = row.get::<usize, String>(2).unwrap();
             let local_code_file = row.get::<usize, Option<String>>(3).unwrap();
             let headers = row.get::<usize, Option<String>>(4).unwrap();
+            let global_defines = row.get::<usize, Option<String>>(5).unwrap();
             Ok(DbFilesRow {
                 path: path.to_path_buf(),
                 cwd: Path::new(&cwd).to_path_buf(),
@@ -201,6 +206,8 @@ fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> 
                     .collect(),
                 local_code_file: local_code_file.map(|p| Path::new(&p).to_path_buf()),
                 headers: headers.map(|h| serde_json::from_str::<Vec<PathBuf>>(&h).unwrap()),
+                global_defines: global_defines
+                    .map(|h| serde_json::from_str::<Vec<String>>(&h).unwrap()),
             })
         },
     )
@@ -515,11 +522,13 @@ async fn handle_gcc_without_link_request(
         .join(preprocess_file_name);
     std::fs::create_dir_all(&preprocess_file_path.parent().unwrap()).unwrap();
     let headers = Arc::new(Mutex::new(Vec::new()));
+    let global_defines = Arc::new(Mutex::new(Vec::new()));
 
     log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
     {
         let preprocess_file_path = preprocess_file_path.clone();
         let headers = headers.clone();
+        let global_defines = global_defines.clone();
         state
             .pool
             .run(async move || {
@@ -546,11 +555,12 @@ async fn handle_gcc_without_link_request(
                     let source_code = tokio::fs::read_to_string(&source_file_path.path)
                         .await
                         .unwrap();
-                    let header_defines =
-                        find_global_include_extra_defines(&analysis.global_headers, &source_code);
-                    if !header_defines.is_empty() {
-                        log::info!("Found extra defines: {:#?}", header_defines);
-                    }
+                    global_defines
+                        .lock()
+                        .extend(find_global_include_extra_defines(
+                            &analysis.global_headers,
+                            &source_code,
+                        ));
                 }
 
                 headers.lock().extend(analysis.global_headers);
@@ -587,6 +597,7 @@ async fn handle_gcc_without_link_request(
             args: request_gcc_args.to_args(),
             local_code_file: Some(preprocess_file_path),
             headers: Some(headers.lock().clone()),
+            global_defines: Some(global_defines.lock().clone()),
         },
     )
     .unwrap();
@@ -916,6 +927,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                     args: request_ar_args.to_args(),
                     local_code_file: None,
                     headers: None,
+                    global_defines: None,
                 },
             )
             .unwrap();
@@ -1023,7 +1035,8 @@ async fn main() -> Result<()> {
             binary TEXT NOT NULL,
             args JSON NOT NULL,
             local_code_file TEXT,
-            headers JSON
+            headers JSON,
+            global_defines JSON
         );",
     )]);
 
