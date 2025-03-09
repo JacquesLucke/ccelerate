@@ -19,6 +19,7 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
+use tokio::task::JoinHandle;
 
 mod parse_ar;
 mod parse_gcc;
@@ -108,6 +109,30 @@ struct DbFilesRow {
     cwd: PathBuf,
     binary: WrappedBinary,
     args: Vec<OsString>,
+}
+
+struct ParallelPool {
+    semaphore: Arc<tokio::sync::Semaphore>,
+}
+
+impl ParallelPool {
+    fn new(num: usize) -> Self {
+        Self {
+            semaphore: Arc::new(tokio::sync::Semaphore::new(num)),
+        }
+    }
+
+    fn run<F, Fut>(&self, f: F) -> JoinHandle<()>
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        let permit = self.semaphore.clone().acquire_owned();
+        tokio::task::spawn(async move {
+            let _permit = permit.await.unwrap();
+            f().await;
+        })
+    }
 }
 
 fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
@@ -315,7 +340,7 @@ fn osstring_to_osstr_vec(s: &[OsString]) -> Vec<&OsStr> {
 
 async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State) {
     let link_units = link_units.to_vec();
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(24));
+    let pool = ParallelPool::new(24);
     let handles = link_units
         .into_iter()
         .map(|unit| {
@@ -330,9 +355,7 @@ async fn build_wrapped_link_units(link_units: &[WrappedLinkUnit], state: &State)
             ) else {
                 panic!("Cannot parse original gcc arguments");
             };
-            let permit = semaphore.clone().acquire_owned();
-            tokio::task::spawn(async move {
-                let _permit = permit.await.unwrap();
+            pool.run(async move || {
                 let mut modified_gcc_args = original_gcc_args;
                 modified_gcc_args.primary_output = Some(unit.wrapped_object_path.clone());
                 modified_gcc_args.depfile_generate = false;
