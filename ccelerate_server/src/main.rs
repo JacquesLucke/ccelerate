@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
     io::Write,
     num::NonZeroUsize,
@@ -50,6 +50,13 @@ struct State {
     pool: ParallelPool,
     cli: CLI,
     data_dir: PathBuf,
+    header_type_cache: Arc<Mutex<HashMap<PathBuf, HeaderType>>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderType {
+    Local,
+    Global,
 }
 
 struct TasksLogger {
@@ -366,6 +373,12 @@ fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &str) -> 
     for captures in DEFINE_RE.captures_iter(&code[..last_global_include_index]) {
         result.push(captures.get(0).unwrap().as_str().to_string());
     }
+    if code.contains("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION") {
+        result.push("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION".to_string());
+    }
+    if code.contains("#  define NANOVDB_USE_OPENVDB") {
+        result.push("#define NANOVDB_USE_OPENVDB".to_string());
+    }
     result
 }
 
@@ -416,44 +429,144 @@ impl<'a> GccPreprocessLine<'a> {
     }
 }
 
-fn is_local_header(header: &str) -> bool {
-    header.ends_with("list_sort_impl.h")
-        || header.ends_with("dna_rename_defs.h")
-        || header.ends_with("dna_includes_as_strings.h")
-        || header.ends_with("BLI_strict_flags.h")
-        || header.ends_with("RNA_enum_items.hh")
-        || header.ends_with("UI_icons.hh")
-        || header.ends_with(".cc")
-        || header.ends_with(".c")
-        || header.ends_with("glsl_compositor_source_list.h")
-        || header.ends_with("BLI_kdtree_impl.h")
-        || header.ends_with("kdtree_impl.h")
-        || header.ends_with("state_template.h")
-        || header.ends_with("shadow_state_template.h")
+fn has_known_include_guard(code: &[u8]) -> bool {
+    let mut i = 0;
+    while i < code.len() {
+        let rest = &code[i..];
+        if rest.starts_with(b"#pragma once") {
+            return true;
+        }
+        if rest.starts_with(b"#ifndef") {
+            return true;
+        }
+        if rest.starts_with(b"#include") {
+            /* The include guard has to come before the first include. */
+            return false;
+        }
+        if rest.starts_with(b"//") {
+            i += rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len()) + 1;
+            continue;
+        }
+        if rest.starts_with(b"/*") {
+            i += rest
+                .windows(2)
+                .position(|w| w == b"*/")
+                .unwrap_or(rest.len())
+                + 2;
+            continue;
+        }
+        if b" \t\n".contains(&rest[0]) {
+            i += 1;
+            continue;
+        }
+        return false;
+    }
+    false
 }
 
-fn analyse_preprocessed_file(code: &[u8]) -> Result<AnalysePreprocessResult> {
+async fn is_local_header(header_path: &Path) -> bool {
+    // if header_path.starts_with("/usr") {
+    //     return false;
+    // }
+    // let Ok(code) = tokio::fs::read_to_string(header_path).await else {
+    //     return false;
+    // };
+    // !has_known_include_guard(&code.as_bytes())
+    header_path.ends_with("list_sort_impl.h")
+        || header_path.ends_with("dna_rename_defs.h")
+        || header_path.ends_with("dna_includes_as_strings.h")
+        || header_path.ends_with("BLI_strict_flags.h")
+        || header_path.ends_with("RNA_enum_items.hh")
+        || header_path.ends_with("UI_icons.hh")
+        || header_path.ends_with(".cc")
+        || header_path.ends_with(".c")
+        || header_path.ends_with("glsl_compositor_source_list.h")
+        || header_path.ends_with("BLI_kdtree_impl.h")
+        || header_path.ends_with("kdtree_impl.h")
+        || header_path.ends_with("state_template.h")
+        || header_path.ends_with("shadow_state_template.h")
+        || header_path.ends_with("gpu_shader_create_info_list.hh")
+        || header_path.ends_with("generic_alloc_impl.h")
+        || header_path.ends_with("glsl_draw_source_list.h")
+        || header_path.ends_with("compositor_shader_create_info_list.hh")
+        || header_path.ends_with("glsl_gpu_source_list.h")
+        || header_path.ends_with("glsl_osd_source_list.h")
+        || header_path
+            .as_os_str()
+            .to_string_lossy()
+            .contains("shaders/infos")
+}
+
+async fn is_local_header_with_cache(header_path: &Path, state: &Data<State>) -> bool {
+    if let Some(header_type) = state.header_type_cache.lock().get(header_path) {
+        return *header_type == HeaderType::Local;
+    }
+    let result = is_local_header(header_path).await;
+    state.header_type_cache.lock().insert(
+        header_path.to_owned(),
+        if result {
+            HeaderType::Local
+        } else {
+            HeaderType::Global
+        },
+    );
+    result
+}
+
+#[tokio::test]
+async fn test_is_local_header() {
+    assert!(
+        is_local_header(&Path::new(
+            "/home/jacques/blender/blender/source/blender/blenlib/intern/list_sort_impl.h"
+        ))
+        .await
+    );
+    assert!(
+        is_local_header(&Path::new(
+            "/home/jacques/blender/blender/source/blender/gpu/intern/gpu_shader_create_info_list.hh"
+        ))
+        .await
+    );
+    assert!(
+        !is_local_header(&Path::new(
+            "/home/jacques/blender/blender/source/blender/blenlib/BLI_path_utils.hh"
+        ))
+        .await
+    );
+    assert!(!is_local_header(&Path::new("/usr/include/c++/14/cstddef")).await);
+}
+
+async fn analyse_preprocessed_file<'a>(
+    code: &'a [u8],
+    state: &Data<State>,
+) -> Result<AnalysePreprocessResult<'a>> {
     let mut result = AnalysePreprocessResult::default();
     let mut header_stack: Vec<&str> = vec![];
+    let mut local_depth = 0;
     let mut next_line = 0;
 
     for line in code.split(|&b| b == b'\n') {
-        let is_local = header_stack.iter().all(|s| is_local_header(s));
+        let is_local = header_stack.len() == local_depth;
         if line.starts_with(b"# ") {
             let preprocessor_line = GccPreprocessLine::parse(line)?;
             next_line = preprocessor_line.line_number;
             if preprocessor_line.is_start_of_new_file {
                 if is_local {
-                    if !is_local_header(&preprocessor_line.header_name) {
+                    if !is_local_header_with_cache(&Path::new(preprocessor_line.header_name), state)
+                        .await
+                    {
                         let header_path = PathBuf::from(preprocessor_line.header_name);
                         if !result.global_headers.contains(&header_path) {
                             result.global_headers.push(header_path);
                         }
+                    } else {
+                        local_depth += 1;
                     }
                 }
                 header_stack.push(preprocessor_line.header_name);
             } else if preprocessor_line.is_return_to_file {
                 header_stack.pop();
+                local_depth = local_depth.min(header_stack.len());
             }
         } else {
             if !line.is_empty() {
@@ -524,6 +637,7 @@ async fn handle_gcc_without_link_request(
         let preprocess_file_path = preprocess_file_path.clone();
         let headers = headers.clone();
         let global_defines = global_defines.clone();
+        let state_clone = state.clone();
         state
             .pool
             .run(async move || {
@@ -544,7 +658,9 @@ async fn handle_gcc_without_link_request(
                     );
                     std::process::exit(1);
                 }
-                let analysis = analyse_preprocessed_file(&result.stdout).unwrap();
+                let analysis = analyse_preprocessed_file(&result.stdout, &state_clone)
+                    .await
+                    .unwrap();
                 let source_file_path = modified_gcc_args.sources.first();
                 if let Some(source_file_path) = source_file_path {
                     if let Ok(source_code) = tokio::fs::read_to_string(&source_file_path.path).await
@@ -1057,6 +1173,7 @@ async fn main() -> Result<()> {
         })),
         cli: cli,
         data_dir: data_dir,
+        header_type_cache: Arc::new(Mutex::new(HashMap::new())),
     });
 
     if state.cli.no_tui {
