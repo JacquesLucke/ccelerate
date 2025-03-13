@@ -491,6 +491,13 @@ async fn is_local_header(header_path: &Path) -> bool {
         || header_path.ends_with("compositor_shader_create_info_list.hh")
         || header_path.ends_with("glsl_gpu_source_list.h")
         || header_path.ends_with("glsl_osd_source_list.h")
+        || header_path.ends_with("glsl_ocio_source_list.h")
+        || header_path.ends_with("draw_debug_info.hh")
+        || header_path.ends_with("draw_fullscreen_info.hh")
+        || header_path.ends_with("draw_hair_refine_info.hh")
+        || header_path.ends_with("draw_object_infos_info.hh")
+        || header_path.ends_with("draw_view_info.hh")
+        || header_path.ends_with("subdiv_info.hh")
         || header_path
             .as_os_str()
             .to_string_lossy()
@@ -1056,9 +1063,20 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
             let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
                 return HttpResponse::NotImplemented().body("Cannot parse gcc arguments");
             };
+            let eager_paths = vec![
+                "/home/jacques/blender/blender/extern/lzma/Threads.c",
+                "/home/jacques/blender/blender/extern/quadriflow/src/localsat.cpp",
+                "/home/jacques/blender/blender/extern/audaspace/bindings/python/PySound.cpp",
+            ];
             if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
                 || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
                 || request_gcc_args.primary_output.is_none()
+                || eager_paths.iter().any(|p| {
+                    request_gcc_args.sources.contains(&SourceFile {
+                        path: PathBuf::from(p),
+                        language: None,
+                    })
+                })
             {
                 return handle_eager_gcc_request(
                     request.binary,
