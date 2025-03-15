@@ -134,7 +134,7 @@ struct DbFilesRow {
     data: DbFilesRowData,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 struct DbFilesRowData {
     cwd: PathBuf,
     binary: WrappedBinary,
@@ -142,6 +142,79 @@ struct DbFilesRowData {
     local_code_file: Option<PathBuf>,
     headers: Option<Vec<PathBuf>>,
     global_defines: Option<Vec<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DbFilesRowDataStorage {
+    cwd: OsString,
+    binary: WrappedBinary,
+    args: Vec<OsString>,
+    local_code_file: Option<OsString>,
+    headers: Option<Vec<OsString>>,
+    global_defines: Option<Vec<String>>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DbFilesRowDataDebug {
+    cwd: String,
+    binary: WrappedBinary,
+    args: Vec<String>,
+    local_code_file: Option<String>,
+    headers: Option<Vec<String>>,
+    global_defines: Option<Vec<String>>,
+}
+
+impl DbFilesRowDataStorage {
+    fn from_data(data: &DbFilesRowData) -> Self {
+        Self {
+            cwd: data.cwd.clone().into(),
+            binary: data.binary,
+            args: data.args.clone(),
+            local_code_file: data.local_code_file.clone().map(|s| s.into()),
+            headers: data
+                .headers
+                .clone()
+                .map(|h| h.iter().map(|s| s.clone().into()).collect()),
+            global_defines: data.global_defines.clone(),
+        }
+    }
+
+    fn to_data(&self) -> DbFilesRowData {
+        DbFilesRowData {
+            cwd: self.cwd.clone().into(),
+            binary: self.binary,
+            args: self.args.clone(),
+            local_code_file: self.local_code_file.clone().map(|s| s.into()),
+            headers: self
+                .headers
+                .clone()
+                .map(|h| h.iter().map(|s| s.clone().into()).collect()),
+            global_defines: self.global_defines.clone(),
+        }
+    }
+}
+
+impl DbFilesRowDataDebug {
+    fn from_data(data: &DbFilesRowData) -> Self {
+        Self {
+            cwd: data.cwd.to_string_lossy().to_string(),
+            binary: data.binary,
+            args: data
+                .args
+                .iter()
+                .map(|s| s.to_string_lossy().to_string())
+                .collect(),
+            local_code_file: data
+                .local_code_file
+                .as_ref()
+                .map(|s| s.to_string_lossy().to_string()),
+            headers: data
+                .headers
+                .as_ref()
+                .map(|h| h.iter().map(|s| s.to_string_lossy().to_string()).collect()),
+            global_defines: data.global_defines.clone(),
+        }
+    }
 }
 
 struct ParallelPool {
@@ -169,12 +242,12 @@ impl ParallelPool {
 }
 
 fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
-    // TODO: Support OsStr in the database.
     conn.execute(
-        "INSERT OR REPLACE INTO Files (path, data) VALUES (?1, ?2)",
+        "INSERT OR REPLACE INTO Files (path, data_debug, data) VALUES (?1, ?2, ?3)",
         rusqlite::params![
             row.path.to_string_lossy(),
-            serde_json::to_string(&row.data).unwrap(),
+            serde_json::to_string_pretty(&DbFilesRowDataDebug::from_data(&row.data)).unwrap(),
+            serde_json::to_string(&DbFilesRowDataStorage::from_data(&row.data)).unwrap(),
         ],
     )?;
     Ok(())
@@ -189,7 +262,9 @@ fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> 
             let data = row.get::<usize, String>(0).unwrap();
             Ok(DbFilesRow {
                 path: path.to_path_buf(),
-                data: serde_json::from_str::<DbFilesRowData>(&data).unwrap(),
+                data: serde_json::from_str::<DbFilesRowDataStorage>(&data)
+                    .unwrap()
+                    .to_data(),
             })
         },
     )
@@ -1170,7 +1245,8 @@ async fn main() -> Result<()> {
     let db_migrations = Migrations::new(vec![M::up(
         "CREATE TABLE Files(
             path TEXT NOT NULL PRIMARY KEY,
-            data TEXT NOT NULL
+            data TEXT NOT NULL,
+            data_debug TEXT NOT NULL
         );",
     )]);
 
