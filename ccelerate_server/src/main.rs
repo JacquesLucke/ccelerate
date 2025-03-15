@@ -131,6 +131,11 @@ impl Drop for TaskLogHandle {
 
 struct DbFilesRow {
     path: PathBuf,
+    data: DbFilesRowData,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct DbFilesRowData {
     cwd: PathBuf,
     binary: WrappedBinary,
     args: Vec<OsString>,
@@ -166,25 +171,10 @@ impl ParallelPool {
 fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
     // TODO: Support OsStr in the database.
     conn.execute(
-        "INSERT OR REPLACE INTO Files (binary, path, cwd, args, local_code_file, headers, global_defines) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT OR REPLACE INTO Files (path, data) VALUES (?1, ?2)",
         rusqlite::params![
-            row.binary.to_standard_binary_name().to_string_lossy(),
             row.path.to_string_lossy(),
-            row.cwd.to_string_lossy(),
-            serde_json::to_string(
-                &row.args
-                    .iter()
-                    .map(|s| s.to_string_lossy())
-                    .collect::<Vec<_>>()
-            )
-            .unwrap(),
-            row.local_code_file.as_ref().map(|s| s.to_string_lossy()),
-            row.headers
-                .as_ref()
-                .map(|h| serde_json::to_string(h).unwrap()),
-            row.global_defines
-                .as_ref()
-                .map(|h| serde_json::to_string(h).unwrap()),
+            serde_json::to_string(&row.data).unwrap(),
         ],
     )?;
     Ok(())
@@ -192,29 +182,14 @@ fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Res
 
 fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> {
     conn.query_row(
-        "SELECT binary, cwd, args, local_code_file, headers, global_defines FROM Files WHERE path = ?",
+        "SELECT data FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
             // TODO: Support OsStr in the database.
-            let binary = row.get::<usize, String>(0).unwrap();
-            let cwd = row.get::<usize, String>(1).unwrap();
-            let args = row.get::<usize, String>(2).unwrap();
-            let local_code_file = row.get::<usize, Option<String>>(3).unwrap();
-            let headers = row.get::<usize, Option<String>>(4).unwrap();
-            let global_defines = row.get::<usize, Option<String>>(5).unwrap();
+            let data = row.get::<usize, String>(0).unwrap();
             Ok(DbFilesRow {
                 path: path.to_path_buf(),
-                cwd: Path::new(&cwd).to_path_buf(),
-                binary: WrappedBinary::from_standard_binary_name(OsStr::new(&binary)).unwrap(),
-                args: serde_json::from_str::<Vec<String>>(&args)
-                    .unwrap()
-                    .into_iter()
-                    .map(OsString::from)
-                    .collect(),
-                local_code_file: local_code_file.map(|p| Path::new(&p).to_path_buf()),
-                headers: headers.map(|h| serde_json::from_str::<Vec<PathBuf>>(&h).unwrap()),
-                global_defines: global_defines
-                    .map(|h| serde_json::from_str::<Vec<String>>(&h).unwrap()),
+                data: serde_json::from_str::<DbFilesRowData>(&data).unwrap(),
             })
         },
     )
@@ -270,13 +245,15 @@ fn find_smallest_link_units(
             p if p.ends_with(".a") => {
                 let file_row = load_db_file(conn, &current_path);
                 if let Some(file_row) = file_row {
-                    match file_row.binary {
+                    match file_row.data.binary {
                         binary if binary.is_gcc_compatible() => {
-                            let args = GCCArgs::parse_owned(&file_row.cwd, file_row.args).unwrap();
+                            let args = GCCArgs::parse_owned(&file_row.data.cwd, file_row.data.args)
+                                .unwrap();
                             remaining_paths.extend(args.sources.iter().map(|s| s.path.clone()));
                         }
                         binary if binary.is_ar_compatible() => {
-                            let args = ArArgs::parse_owned(&file_row.cwd, file_row.args).unwrap();
+                            let args = ArArgs::parse_owned(&file_row.data.cwd, file_row.data.args)
+                                .unwrap();
                             remaining_paths.extend(args.sources.iter().map(|s| s.clone()));
                         }
                         binary => {
@@ -710,12 +687,14 @@ async fn handle_gcc_without_link_request(
         &state.conn.lock(),
         &DbFilesRow {
             path: request_output_path.clone(),
-            cwd: cwd.to_path_buf(),
-            binary: binary,
-            args: request_gcc_args.to_args(),
-            local_code_file: Some(preprocess_file_path),
-            headers: Some(headers.lock().clone()),
-            global_defines: Some(global_defines.lock().clone()),
+            data: DbFilesRowData {
+                cwd: cwd.to_path_buf(),
+                binary: binary,
+                args: request_gcc_args.to_args(),
+                local_code_file: Some(preprocess_file_path),
+                headers: Some(headers.lock().clone()),
+                global_defines: Some(global_defines.lock().clone()),
+            },
         },
     )
     .unwrap();
@@ -762,18 +741,21 @@ async fn build_combined_translation_unit(
             return;
         };
 
-        unit_binary = info.binary;
-        let original_gcc_args =
-            GCCArgs::parse(&original_object_file, &osstring_to_osstr_vec(&info.args)).unwrap();
-        for header in &info.headers.unwrap() {
+        unit_binary = info.data.binary;
+        let original_gcc_args = GCCArgs::parse(
+            &original_object_file,
+            &osstring_to_osstr_vec(&info.data.args),
+        )
+        .unwrap();
+        for header in &info.data.headers.unwrap() {
             if headers.contains(header) {
                 continue;
             }
             headers.push(header.clone());
         }
-        preprocess_paths.push(info.local_code_file.unwrap());
+        preprocess_paths.push(info.data.local_code_file.unwrap());
 
-        global_defines.extend(info.global_defines.unwrap_or_default());
+        global_defines.extend(info.data.global_defines.unwrap_or_default());
 
         preprocess_headers_gcc_args
             .user_includes
@@ -1051,12 +1033,14 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 &state.conn.lock(),
                 &DbFilesRow {
                     path: request_output_path.clone(),
-                    cwd: request.cwd.clone(),
-                    binary: request.binary,
-                    args: request_ar_args.to_args(),
-                    local_code_file: None,
-                    headers: None,
-                    global_defines: None,
+                    data: DbFilesRowData {
+                        cwd: request.cwd.clone(),
+                        binary: request.binary,
+                        args: request_ar_args.to_args(),
+                        local_code_file: None,
+                        headers: None,
+                        global_defines: None,
+                    },
                 },
             )
             .unwrap();
@@ -1186,12 +1170,7 @@ async fn main() -> Result<()> {
     let db_migrations = Migrations::new(vec![M::up(
         "CREATE TABLE Files(
             path TEXT NOT NULL PRIMARY KEY,
-            cwd TEXT NOT NULL,
-            binary TEXT NOT NULL,
-            args JSON NOT NULL,
-            local_code_file TEXT,
-            headers JSON,
-            global_defines JSON
+            data TEXT NOT NULL
         );",
     )]);
 
