@@ -13,7 +13,6 @@ use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
-use parse_ar::ArArgs;
 use parse_gcc::GCCArgs;
 use ratatui::{
     layout::Layout,
@@ -26,6 +25,7 @@ use tokio::task::JoinHandle;
 mod parse_ar;
 mod parse_gcc;
 mod path_utils;
+mod request_ar;
 mod request_gcc_eager;
 mod request_gcc_final_link;
 mod request_gcc_without_link;
@@ -310,36 +310,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
     match request.binary {
         WrappedBinary::Ar => {
-            let Ok(request_ar_args) = ArArgs::parse(&request.cwd, &request_args_ref) else {
-                return HttpResponse::NotImplemented().body("Cannot parse ar arguments");
-            };
-            let Some(request_output_path) = request_ar_args.output.as_ref() else {
-                return HttpResponse::NotImplemented().body("Expected output path");
-            };
-            let _task_handle = state.tasks_logger.start_task(&format!(
-                "Prepare: {}",
-                request_output_path.file_name().unwrap().to_string_lossy()
-            ));
-            store_db_file(
-                &state.conn.lock(),
-                &DbFilesRow {
-                    path: request_output_path.clone(),
-                    data: DbFilesRowData {
-                        cwd: request.cwd.clone(),
-                        binary: request.binary,
-                        args: request_ar_args.to_args(),
-                        local_code_file: None,
-                        headers: None,
-                        global_defines: None,
-                    },
-                },
-            )
-            .unwrap();
-            let dummy_archive = ASSETS_DIR.get_file("dummy_archive.a").unwrap();
-            std::fs::write(request_output_path, dummy_archive.contents()).unwrap();
-            return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
-                ..Default::default()
-            });
+            return request_ar::handle_ar_request(request, &state).await;
         }
         WrappedBinary::Gcc | WrappedBinary::Gxx | WrappedBinary::Clang | WrappedBinary::Clangxx => {
             let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
