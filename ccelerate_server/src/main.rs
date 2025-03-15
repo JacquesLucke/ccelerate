@@ -429,7 +429,7 @@ impl<'a> GccPreprocessLine<'a> {
     }
 }
 
-fn has_known_include_guard(code: &[u8]) -> bool {
+fn _has_known_include_guard(code: &[u8]) -> bool {
     let mut i = 0;
     while i < code.len() {
         let rest = &code[i..];
