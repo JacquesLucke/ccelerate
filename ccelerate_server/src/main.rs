@@ -754,7 +754,14 @@ async fn build_combined_translation_unit(
     let mut global_defines = Vec::new();
 
     for original_object_file in original_object_files {
-        let info = load_db_file(&state.conn.lock(), &original_object_file).unwrap();
+        let Some(info) = load_db_file(&state.conn.lock(), &original_object_file) else {
+            assert!(original_object_files.len() == 1);
+            tokio::fs::copy(original_object_file, dst_object_file)
+                .await
+                .unwrap();
+            return;
+        };
+
         unit_binary = info.binary;
         let original_gcc_args =
             GCCArgs::parse(&original_object_file, &osstring_to_osstr_vec(&info.args)).unwrap();
@@ -1064,18 +1071,33 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 return HttpResponse::NotImplemented().body("Cannot parse gcc arguments");
             };
             let eager_paths = vec![
-                "/home/jacques/blender/blender/extern/lzma/Threads.c",
-                "/home/jacques/blender/blender/extern/quadriflow/src/localsat.cpp",
-                "/home/jacques/blender/blender/extern/audaspace/bindings/python/PySound.cpp",
+                "/home/jacques/blender/blender/source/blender/imbuf/movie",
+                "/home/jacques/blender/blender/source/blender/python/intern/bpy_app_ffmpeg.cc",
+                "wayland_dynload",
+                "audaspace",
+                "quadriflow",
+                "lzma",
+                "ghost",
+                "intern/cycles",
+                "xxhash.c",
+                "/home/jacques/blender/blender/source/blender/editors/curve/editcurve.cc",
+                "/home/jacques/blender/blender/source/blender/blenkernel/intern/curve_decimate.cc",
+                "editcurve_paint.cc",
+                "curves_draw.cc",
+                "grease_pencil_geom.cc",
             ];
             if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
                 || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
                 || request_gcc_args.primary_output.is_none()
                 || eager_paths.iter().any(|p| {
-                    request_gcc_args.sources.contains(&SourceFile {
-                        path: PathBuf::from(p),
-                        language: None,
-                    })
+                    request_gcc_args
+                        .sources
+                        .first()
+                        .unwrap()
+                        .path
+                        .to_str()
+                        .unwrap()
+                        .contains(p)
                 })
             {
                 return handle_eager_gcc_request(
