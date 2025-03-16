@@ -26,7 +26,7 @@ fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &str) -> 
     let code = code.replace("\\\n", " ");
 
     static INCLUDE_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r#"(?m)^#include[ \t]+["<](.*)[">]"#).unwrap()
+        regex::Regex::new(r#"(?m)^#include[ \t]+["<](.*)[">]"#).expect("should be valid")
     });
     let mut last_global_include_index = 0;
     for captures in INCLUDE_RE.captures_iter(&code) {
@@ -36,15 +36,22 @@ fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &str) -> 
         if !global_headers.iter().any(|h| h.ends_with(header_name)) {
             continue;
         }
-        last_global_include_index = captures.get(0).unwrap().start();
+        last_global_include_index = captures.get(0).expect("group should exist").start();
     }
 
-    static DEFINE_RE: once_cell::sync::Lazy<regex::Regex> =
-        once_cell::sync::Lazy::new(|| regex::Regex::new(r#"(?m)^#define.*$"#).unwrap());
+    static DEFINE_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
+        regex::Regex::new(r#"(?m)^#define.*$"#).expect("should be valid")
+    });
 
     let mut result = vec![];
     for captures in DEFINE_RE.captures_iter(&code[..last_global_include_index]) {
-        result.push(captures.get(0).unwrap().as_str().to_string());
+        result.push(
+            captures
+                .get(0)
+                .expect("group should exist")
+                .as_str()
+                .to_string(),
+        );
     }
     if code.contains("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION") {
         result.push("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION".to_string());
@@ -70,18 +77,25 @@ impl<'a> GccPreprocessLine<'a> {
         let line = std::str::from_utf8(line)?;
         let err = || anyhow::anyhow!("Failed to parse line: {:?}", line);
         static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-            regex::Regex::new(r#"# (\d+) "(.*)"\s*(\d?)\s*(\d?)\s*(\d?)\s*(\d?)"#).unwrap()
+            regex::Regex::new(r#"# (\d+) "(.*)"\s*(\d?)\s*(\d?)\s*(\d?)\s*(\d?)"#)
+                .expect("should be valid")
         });
         let Some(captures) = RE.captures(line) else {
             return Err(err());
         };
-        let Some(line_number) = captures.get(1).unwrap().as_str().parse::<usize>().ok() else {
+        let Some(line_number) = captures
+            .get(1)
+            .expect("group should exist")
+            .as_str()
+            .parse::<usize>()
+            .ok()
+        else {
             return Err(err());
         };
-        let name = captures.get(2).unwrap().as_str();
+        let name = captures.get(2).expect("group should exist").as_str();
         let mut numbers = vec![];
         for i in 3..=6 {
-            let number_str = captures.get(i).unwrap().as_str();
+            let number_str = captures.get(i).expect("group should exist").as_str();
             if number_str.is_empty() {
                 continue;
             }
@@ -270,11 +284,13 @@ pub async fn handle_gcc_without_link_request(
     let Some(request_output_path) = request_gcc_args.primary_output.as_ref() else {
         return HttpResponse::NotImplemented().body("Expected output path");
     };
-    let request_output_path_clone = request_output_path.clone();
+    let Some(request_output_name) = request_output_path.file_name() else {
+        return HttpResponse::BadRequest().body("Expected output path to have a file name");
+    };
 
     let _log_handle = state.tasks_logger.start_task(&format!(
         "Prepare: {:?}",
-        request_output_path.file_name().unwrap().to_string_lossy()
+        request_output_name.to_string_lossy()
     ));
 
     // Do preprocessing on the provided files. This also generates a depfile that e.g. ninja will use
@@ -295,17 +311,20 @@ pub async fn handle_gcc_without_link_request(
     let preprocess_file_name = format!(
         "{}_{}.ii",
         &realized_args_hash_str,
-        request_output_path_clone
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
+        request_output_name.to_string_lossy()
     );
-    let preprocess_file_path = state
+    let preprocess_file_dir = state
         .data_dir
         .join("preprocessed")
-        .join(&realized_args_hash_str[..2])
-        .join(preprocess_file_name);
-    std::fs::create_dir_all(preprocess_file_path.parent().unwrap()).unwrap();
+        .join(&realized_args_hash_str[..2]);
+    let preprocess_file_path = preprocess_file_dir.join(preprocess_file_name);
+    match std::fs::create_dir_all(preprocess_file_dir) {
+        Ok(()) => {}
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .body(format!("Failed to create preprocess file directory: {e}"));
+        }
+    }
     let headers = Arc::new(Mutex::new(Vec::new()));
     let global_defines = Arc::new(Mutex::new(Vec::new()));
 
@@ -371,12 +390,21 @@ pub async fn handle_gcc_without_link_request(
             .unwrap();
     }
 
-    let dummy_object = crate::ASSETS_DIR.get_file("dummy_object.o").unwrap();
-    tokio::fs::write(request_output_path, dummy_object.contents())
-        .await
-        .unwrap();
+    let dummy_object = crate::ASSETS_DIR
+        .get_file("dummy_object.o")
+        .expect("file should exist");
+    match tokio::fs::write(request_output_path, dummy_object.contents()).await {
+        Ok(_) => {}
+        Err(e) => {
+            return HttpResponse::InternalServerError().body(format!(
+                "Failed to write dummy object to {}: {}",
+                request_output_path.display(),
+                e
+            ));
+        }
+    }
 
-    crate::store_db_file(
+    let Ok(_) = crate::store_db_file(
         &state.conn.lock(),
         &DbFilesRow {
             path: request_output_path.clone(),
@@ -389,8 +417,9 @@ pub async fn handle_gcc_without_link_request(
                 global_defines: Some(global_defines.lock().clone()),
             },
         },
-    )
-    .unwrap();
+    ) else {
+        return HttpResponse::InternalServerError().body("Failed to store db file");
+    };
 
     HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
         ..Default::default()
