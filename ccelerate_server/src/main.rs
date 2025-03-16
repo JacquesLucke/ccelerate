@@ -34,7 +34,7 @@ static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST
 
 #[derive(clap::Parser, Debug)]
 #[command(name = "ccelerate_server")]
-struct CLI {
+struct Cli {
     #[arg(long, default_value_t = ccelerate_shared::DEFAULT_PORT)]
     port: u16,
     #[arg(long)]
@@ -51,7 +51,7 @@ struct State {
     tasks_logger: TasksLogger,
     tasks_table_state: Arc<Mutex<TableState>>,
     pool: ParallelPool,
-    cli: CLI,
+    cli: Cli,
     data_dir: PathBuf,
     header_type_cache: Arc<Mutex<HashMap<PathBuf, HeaderType>>>,
 }
@@ -81,7 +81,7 @@ impl TasksLogger {
             end_time: end_time.clone(),
         };
         self.tasks.lock().push(task);
-        TaskLogHandle { end_time: end_time }
+        TaskLogHandle { end_time }
     }
 
     fn get_for_print(&self) -> Vec<TaskLogPrint> {
@@ -117,7 +117,7 @@ impl TaskLog {
     fn duration(&self) -> Duration {
         self.end_time
             .lock()
-            .unwrap_or_else(|| Instant::now())
+            .unwrap_or_else(Instant::now)
             .duration_since(self.start_time)
     }
 }
@@ -310,7 +310,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
     match request.binary {
         WrappedBinary::Ar => {
-            return request_ar::handle_ar_request(request, &state).await;
+            return request_ar::handle_ar_request(request, state).await;
         }
         WrappedBinary::Gcc | WrappedBinary::Gxx | WrappedBinary::Clang | WrappedBinary::Clangxx => {
             let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
@@ -420,7 +420,7 @@ impl log::Log for NoTuiLogger {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli: CLI = clap::Parser::parse();
+    let cli: Cli = clap::Parser::parse();
 
     let data_dir = cli
         .data_dir
@@ -453,8 +453,8 @@ async fn main() -> Result<()> {
                 .unwrap_or(NonZeroUsize::new(1).unwrap())
                 .get()
         })),
-        cli: cli,
-        data_dir: data_dir,
+        cli,
+        data_dir,
         header_type_cache: Arc::new(Mutex::new(HashMap::new())),
     });
 
