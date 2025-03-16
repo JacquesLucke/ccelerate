@@ -34,7 +34,7 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     .unwrap();
     let dummy_archive = crate::ASSETS_DIR.get_file("dummy_archive.a").unwrap();
     std::fs::write(request_output_path, dummy_archive.contents()).unwrap();
-    return HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
+    HttpResponse::Ok().json(ccelerate_shared::RunResponseDataWire {
         ..Default::default()
-    });
+    })
 }
