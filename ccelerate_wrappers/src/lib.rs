@@ -14,7 +14,7 @@ pub fn wrap_command(wrapped_binary: ccelerate_shared::WrappedBinary) {
         .json(
             &ccelerate_shared::RunRequestData {
                 binary: wrapped_binary,
-                args: args,
+                args,
                 cwd: std::env::current_dir().unwrap(),
             }
             .to_wire(),
