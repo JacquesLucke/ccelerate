@@ -151,8 +151,8 @@ async fn is_local_header(header_path: &Path) -> bool {
         || header_path.ends_with("BLI_strict_flags.h")
         || header_path.ends_with("RNA_enum_items.hh")
         || header_path.ends_with("UI_icons.hh")
-        || header_path.ends_with(".cc")
-        || header_path.ends_with(".c")
+        || header_path.extension().is_some_and(|ext| ext == "cc")
+        || header_path.extension().is_some_and(|ext| ext == "c")
         || header_path.ends_with("glsl_compositor_source_list.h")
         || header_path.ends_with("BLI_kdtree_impl.h")
         || header_path.ends_with("kdtree_impl.h")
@@ -196,24 +196,24 @@ async fn is_local_header_with_cache(header_path: &Path, state: &Data<State>) -> 
 #[tokio::test]
 async fn test_is_local_header() {
     assert!(
-        is_local_header(&Path::new(
+        is_local_header(Path::new(
             "/home/jacques/blender/blender/source/blender/blenlib/intern/list_sort_impl.h"
         ))
         .await
     );
     assert!(
-        is_local_header(&Path::new(
+        is_local_header(Path::new(
             "/home/jacques/blender/blender/source/blender/gpu/intern/gpu_shader_create_info_list.hh"
         ))
         .await
     );
     assert!(
-        !is_local_header(&Path::new(
+        !is_local_header(Path::new(
             "/home/jacques/blender/blender/source/blender/blenlib/BLI_path_utils.hh"
         ))
         .await
     );
-    assert!(!is_local_header(&Path::new("/usr/include/c++/14/cstddef")).await);
+    assert!(!is_local_header(Path::new("/usr/include/c++/14/cstddef")).await);
 }
 
 async fn analyse_preprocessed_file<'a>(
@@ -232,7 +232,7 @@ async fn analyse_preprocessed_file<'a>(
             next_line = preprocessor_line.line_number;
             if preprocessor_line.is_start_of_new_file {
                 if is_local {
-                    if !is_local_header_with_cache(&Path::new(preprocessor_line.header_name), state)
+                    if !is_local_header_with_cache(Path::new(preprocessor_line.header_name), state)
                         .await
                     {
                         let header_path = PathBuf::from(preprocessor_line.header_name);
@@ -249,13 +249,11 @@ async fn analyse_preprocessed_file<'a>(
                 local_depth = local_depth.min(header_stack.len());
             }
         } else {
-            if !line.is_empty() {
-                if is_local {
-                    result.local_code.push(SourceCodeLine {
-                        line_number: next_line,
-                        line: std::str::from_utf8(line)?,
-                    });
-                }
+            if !line.is_empty() && is_local {
+                result.local_code.push(SourceCodeLine {
+                    line_number: next_line,
+                    line: std::str::from_utf8(line)?,
+                });
             }
             next_line += 1;
         }
@@ -289,9 +287,8 @@ pub async fn handle_gcc_without_link_request(
     let realized_args = modified_gcc_args.to_args();
     let realized_args_buffer = realized_args
         .iter()
-        .map(|s| s.as_encoded_bytes())
-        .flatten()
-        .map(|b| *b)
+        .flat_map(|s| s.as_encoded_bytes())
+        .copied()
         .collect::<Vec<_>>();
     let realized_args_hash = twox_hash::XxHash64::oneshot(0, &realized_args_buffer);
     let realized_args_hash_str = format!("{:x}", realized_args_hash);
@@ -308,7 +305,7 @@ pub async fn handle_gcc_without_link_request(
         .join("preprocessed")
         .join(&realized_args_hash_str[..2])
         .join(preprocess_file_name);
-    std::fs::create_dir_all(&preprocess_file_path.parent().unwrap()).unwrap();
+    std::fs::create_dir_all(preprocess_file_path.parent().unwrap()).unwrap();
     let headers = Arc::new(Mutex::new(Vec::new()));
     let global_defines = Arc::new(Mutex::new(Vec::new()));
 
@@ -385,7 +382,7 @@ pub async fn handle_gcc_without_link_request(
             path: request_output_path.clone(),
             data: DbFilesRowData {
                 cwd: cwd.to_path_buf(),
-                binary: binary,
+                binary,
                 args: request_gcc_args.to_args(),
                 local_code_file: Some(preprocess_file_path),
                 headers: Some(headers.lock().clone()),
