@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use anyhow::Result;
 use std::{
     ffi::{OsStr, OsString},
@@ -6,7 +8,7 @@ use std::{
 
 use crate::path_utils::make_absolute;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct GCCArgs {
     pub sources: Vec<SourceFile>,
     pub primary_output: Option<PathBuf>,
@@ -48,45 +50,6 @@ pub struct SourceFile {
     pub language: Option<String>,
 }
 
-impl Default for GCCArgs {
-    fn default() -> Self {
-        Self {
-            sources: vec![],
-            primary_output: None,
-            user_includes: vec![],
-            system_includes: vec![],
-            defines: vec![],
-            warnings: vec![],
-            machine_args: vec![],
-            pipe: false,
-            f_flags: vec![],
-            g_flags: vec![],
-            opt_flags: vec![],
-            lang_std: None,
-            depfile_generate: false,
-            depfile_output_path: None,
-            depfile_target_name: None,
-            stop_before_link: false,
-            stop_before_assemble: false,
-            stop_after_preprocessing: false,
-            shared: false,
-            libraries: vec![],
-            no_pie: false,
-            link_dirs: vec![],
-            linker_args: vec![],
-            print_sysroot: false,
-            flag_v: false,
-            include_files: vec![],
-            aa_flag: false,
-            target_flags: vec![],
-            cxx_flag: false,
-            ecxx_flag: false,
-            openmp_flag: false,
-            use_link_group: false,
-        }
-    }
-}
-
 impl GCCArgs {
     pub fn parse_owned(cwd: &Path, raw_args: Vec<OsString>) -> Result<Self> {
         let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
@@ -106,19 +69,18 @@ impl GCCArgs {
                     raw_arg.to_string_lossy()
                 )
             })?;
-            if arg_str.starts_with("-D") {
-                args.defines.push(arg_str[2..].to_string());
-            } else if arg_str.starts_with("-I") {
-                args.user_includes
-                    .push(make_absolute(cwd, Path::new(&arg_str[2..])));
+            if let Some(definition) = arg_str.strip_prefix("-D") {
+                args.defines.push(definition.to_string());
+            } else if let Some(path) = arg_str.strip_prefix("-I") {
+                args.user_includes.push(make_absolute(cwd, Path::new(path)));
             } else if arg_str.starts_with("-isystem") {
                 let path = raw_args_iter
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("Missing path after -isystem"))?;
                 args.system_includes
                     .push(make_absolute(cwd, Path::new(path)));
-            } else if arg_str.starts_with("-Wl,") {
-                let mut arg_split = arg_str[4..].split(",");
+            } else if let Some(linker_arg) = arg_str.strip_prefix("-Wl,") {
+                let mut arg_split = linker_arg.split(",");
                 for linker_arg in arg_split.by_ref() {
                     args.linker_args.push(linker_arg.into());
                 }
@@ -194,13 +156,12 @@ impl GCCArgs {
                 args.stop_after_preprocessing = true;
             } else if arg_str.starts_with("-g") {
                 args.g_flags.push(arg_str.to_string());
-            } else if arg_str.starts_with("-l") {
-                args.libraries.push(arg_str[2..].to_string());
+            } else if let Some(library) = arg_str.strip_prefix("-l") {
+                args.libraries.push(library.to_string());
             } else if arg_str == "-no-pie" {
                 args.no_pie = true;
-            } else if arg_str.starts_with("-L") {
-                args.link_dirs
-                    .push(make_absolute(cwd, Path::new(&arg_str[2..])));
+            } else if let Some(link_dir) = arg_str.strip_prefix("-L") {
+                args.link_dirs.push(make_absolute(cwd, Path::new(link_dir)));
             } else if arg_str.starts_with("-Xlinker") {
                 let arg = raw_args_iter.next().ok_or_else(|| {
                     anyhow::anyhow!("Missing argument for -Xlinker flag: {}", arg_str)
@@ -442,11 +403,10 @@ mod test {
         let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
 
         let args = GCCArgs::parse(
-            &Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
+            Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
             &raw_args,
-        );
-        assert!(args.is_ok());
-        let args = args.unwrap();
+        )
+        .expect("should be valid");
         assert_eq!(
             args.sources,
             vec![SourceFile {
@@ -476,18 +436,16 @@ mod test {
         );
         assert_eq!(
         args.user_includes,
-        vec![
-            "/home/jacques/blender/blender/source/blender/makesdna",
-            "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/makesdna/intern",
+        ["/home/jacques/blender/blender/source/blender/makesdna",
+         "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/makesdna/intern",
             "/home/jacques/blender/blender/source/blender/blenlib",
             "/home/jacques/blender/blender/source/blender/imbuf",
             "/home/jacques/blender/blender/source/blender/imbuf/movie",
             "/home/jacques/blender/blender/intern/atomic/.",
             "/home/jacques/blender/blender/intern/guardedalloc",
-            "/home/jacques/blender/blender/extern/fmtlib/include",
-        ]
+            "/home/jacques/blender/blender/extern/fmtlib/include"]
         .iter()
-        .map(|s| PathBuf::from(s))
+        .map(PathBuf::from)
         .collect::<Vec<_>>()
     );
         assert_eq!(
@@ -587,27 +545,24 @@ mod test {
         let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
 
         let args = GCCArgs::parse(
-            &Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
+            Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
             &raw_args,
-        );
-        assert!(args.is_ok());
-        let args = args.unwrap();
+        )
+        .expect("should be valid");
 
         assert!(args.shared);
         assert_eq!(
         args.sources,
-        vec![
-            "/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/common.cpp.o",
+        ["/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/common.cpp.o",
             "/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/decoder.cpp.o",
             "/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/encoder.cpp.o",
-            "/home/jacques/Documents/ccelerate_test/build_blender/lib/libdraco.a",
-        ].iter().map(|s| SourceFile {
+            "/home/jacques/Documents/ccelerate_test/build_blender/lib/libdraco.a"].iter().map(|s| SourceFile {
             path: Path::new(s).to_path_buf(),
             language: None
         }).collect::<Vec<_>>()
     );
-        assert_eq!(args.stop_before_link, false);
-        assert_eq!(args.depfile_generate, false);
+        assert!(!args.stop_before_link);
+        assert!(!args.depfile_generate);
         assert_eq!(
             args.primary_output,
             Some(PathBuf::from(
@@ -693,11 +648,10 @@ mod test {
         let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
 
         let args = GCCArgs::parse(
-            &Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
+            Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
             &raw_args,
-        );
-        assert!(args.is_ok());
-        let args = args.unwrap();
+        )
+        .expect("should be valid");
 
         assert!(args.no_pie);
         assert_eq!(
@@ -1271,21 +1225,20 @@ mod test {
 
     fn test_round_trip(args: &[&OsStr]) {
         let parse1 = GCCArgs::parse(
-            &Path::new("/first/path"),
-            args.iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-        let parse1_to_args = parse1.as_ref().unwrap().to_args();
+            Path::new("/first/path"),
+            args.iter().map(|s| &**s).collect::<Vec<_>>().as_slice(),
+        )
+        .expect("should be valid");
+        let parse1_to_args = parse1.to_args();
         let parse2 = GCCArgs::parse(
-            &Path::new("/second/path"),
+            Path::new("/second/path"),
             parse1_to_args
                 .iter()
                 .map(|s| s.as_ref())
                 .collect::<Vec<_>>()
                 .as_slice(),
-        );
-        assert_eq!(parse2.unwrap(), parse1.unwrap());
+        )
+        .expect("should be valid");
+        assert_eq!(parse2, parse1);
     }
 }
