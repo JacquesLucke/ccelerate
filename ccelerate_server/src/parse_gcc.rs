@@ -47,7 +47,82 @@ pub struct GCCArgs {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SourceFile {
     pub path: PathBuf,
-    pub language: Option<String>,
+    pub language_override: Option<Language>,
+}
+
+impl SourceFile {
+    pub fn language(&self) -> Result<Language> {
+        if let Some(language) = self.language_override {
+            return Ok(language);
+        }
+        let ext = self
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .ok_or_else(|| anyhow::anyhow!("Failed to get extension"))?;
+        Language::from_ext(ext)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum Language {
+    // C code.
+    C,
+    // C++ code.
+    Cxx,
+    // Preprocessed C code.
+    I,
+    // Preprocessed C++ code.
+    II,
+}
+
+impl Language {
+    pub fn from_ext(ext: &str) -> Result<Self> {
+        match ext {
+            "c" => Ok(Self::C),
+            "cc" | "cp" | "cpp" | "cxx" | "c++" => Ok(Self::Cxx),
+            "i" => Ok(Self::I),
+            "ii" => Ok(Self::II),
+            _ => Err(anyhow::anyhow!("Unknown language extension: {}", ext)),
+        }
+    }
+
+    pub fn to_valid_ext(self) -> &'static str {
+        match self {
+            Self::C => "c",
+            Self::Cxx => "cc",
+            Self::I => "i",
+            Self::II => "ii",
+        }
+    }
+
+    pub fn from_x_arg(arg: &str) -> Result<Option<Self>> {
+        match arg {
+            "c" => Ok(Some(Self::C)),
+            "c++" => Ok(Some(Self::Cxx)),
+            "cpp-output" => Ok(Some(Self::I)),
+            "c++-cpp-output" => Ok(Some(Self::II)),
+            "none" => Ok(None),
+            _ => Err(anyhow::anyhow!("Unknown language {}", arg)),
+        }
+    }
+
+    pub fn to_x_arg(self) -> &'static str {
+        match self {
+            Self::C => "c",
+            Self::Cxx => "c++",
+            Self::I => "cpp-output",
+            Self::II => "c++-cpp-output",
+        }
+    }
+
+    pub fn to_preprocessed(self) -> Result<Language> {
+        match self {
+            Self::C => Ok(Self::I),
+            Self::Cxx => Ok(Self::II),
+            _ => Err(anyhow::anyhow!("Cannot preprocess language {:?}", self)),
+        }
+    }
 }
 
 impl GCCArgs {
@@ -111,18 +186,14 @@ impl GCCArgs {
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
                 let name = name.to_string_lossy().to_string();
-                if name == "none" {
-                    last_language = None;
-                } else {
-                    last_language = Some(name);
-                }
+                last_language = Language::from_x_arg(&name)?;
             } else if arg_str == "-include" {
                 let path = raw_args_iter
                     .next()
                     .ok_or_else(|| anyhow::anyhow!("Missing path for -include flag"))?;
                 args.include_files.push(SourceFile {
                     path: make_absolute(cwd, Path::new(path)),
-                    language: last_language.clone(),
+                    language_override: last_language,
                 });
             } else if arg_str.starts_with("-f") {
                 args.f_flags.push(arg_str.to_string());
@@ -173,7 +244,7 @@ impl GCCArgs {
                 let path = make_absolute(cwd, Path::new(raw_arg));
                 args.sources.push(SourceFile {
                     path,
-                    language: last_language.clone(),
+                    language_override: last_language,
                 });
             }
         }
@@ -282,7 +353,7 @@ impl GCCArgs {
         let mut last_language = None;
 
         for arg in &self.include_files {
-            self.to_args_update_language(&mut last_language, &arg.language, &mut args);
+            self.to_args_update_language(&mut last_language, &arg.language_override, &mut args);
             args.push("-include".into());
             args.push(arg.path.as_os_str().into());
         }
@@ -294,7 +365,7 @@ impl GCCArgs {
             args.push("-Wl,--start-group".into());
         }
         for arg in &self.sources {
-            self.to_args_update_language(&mut last_language, &arg.language, &mut args);
+            self.to_args_update_language(&mut last_language, &arg.language_override, &mut args);
             args.push(arg.path.as_os_str().into());
         }
         if self.use_link_group {
@@ -305,18 +376,18 @@ impl GCCArgs {
 
     fn to_args_update_language(
         &self,
-        last_language: &mut Option<String>,
-        new_language: &Option<String>,
+        last_language: &mut Option<Language>,
+        new_language: &Option<Language>,
         args: &mut Vec<OsString>,
     ) {
         if last_language != new_language {
             args.push("-x".into());
             if let Some(language) = &new_language {
-                args.push(language.into());
+                args.push(language.to_x_arg().into());
             } else {
                 args.push("none".into());
             }
-            *last_language = new_language.clone();
+            *last_language = *new_language;
         }
     }
 }
@@ -413,7 +484,7 @@ mod test {
                 path: PathBuf::from(
                     "/home/jacques/blender/blender/source/blender/blenlib/intern/BLI_mempool.cc"
                 ),
-                language: None
+                language_override: None
             }]
         );
         assert_eq!(
@@ -558,7 +629,7 @@ mod test {
             "/home/jacques/Documents/ccelerate_test/build_blender/extern/draco/CMakeFiles/extern_draco.dir/src/encoder.cpp.o",
             "/home/jacques/Documents/ccelerate_test/build_blender/lib/libdraco.a"].iter().map(|s| SourceFile {
             path: Path::new(s).to_path_buf(),
-            language: None
+            language_override: None
         }).collect::<Vec<_>>()
     );
         assert!(!args.stop_before_link);
@@ -685,7 +756,7 @@ mod test {
                 "/home/jacques/Documents/ccelerate_test/build_blender/lib/libbf_intern_libc_compat.a"
             ].iter().map(|s| SourceFile {
                 path: Path::new(s).to_path_buf(),
-                language: None
+                language_override: None
             }).collect::<Vec<_>>()
         );
 

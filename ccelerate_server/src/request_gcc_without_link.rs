@@ -1,14 +1,22 @@
+#![deny(clippy::unwrap_used)]
+
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
+use bstr::{BStr, ByteSlice};
 use ccelerate_shared::WrappedBinary;
 use parking_lot::Mutex;
 use std::{
+    ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
+    process::ExitStatus,
     sync::Arc,
 };
 
-use crate::{DbFilesRow, DbFilesRowData, HeaderType, State, parse_gcc::GCCArgs};
+use crate::{
+    DbFilesRow, DbFilesRowData, HeaderType, State,
+    parse_gcc::{GCCArgs, Language, SourceFile},
+};
 
 #[derive(Debug, Clone, Default)]
 struct SourceCodeLine<'a> {
@@ -22,15 +30,20 @@ struct AnalysePreprocessResult<'a> {
     local_code: Vec<SourceCodeLine<'a>>,
 }
 
-fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &str) -> Vec<String> {
-    let code = code.replace("\\\n", " ");
+fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &BStr) -> Vec<String> {
+    let code = code.replace(b"\\\n", b" ");
+    let code = code.as_bstr();
 
-    static INCLUDE_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r#"(?m)^#include[ \t]+["<](.*)[">]"#).expect("should be valid")
-    });
+    static INCLUDE_RE: once_cell::sync::Lazy<regex::bytes::Regex> =
+        once_cell::sync::Lazy::new(|| {
+            regex::bytes::Regex::new(r#"(?m)^#include[ \t]+["<](.*)[">]"#).expect("should be valid")
+        });
     let mut last_global_include_index = 0;
-    for captures in INCLUDE_RE.captures_iter(&code) {
-        let Some(header_name) = captures.get(1).map(|m| m.as_str()) else {
+    for captures in INCLUDE_RE.captures_iter(code) {
+        let Some(header_name) = captures.get(1).map(|m| m.as_bytes()) else {
+            continue;
+        };
+        let Ok(header_name) = header_name.to_str() else {
             continue;
         };
         if !global_headers.iter().any(|h| h.ends_with(header_name)) {
@@ -39,24 +52,25 @@ fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &str) -> 
         last_global_include_index = captures.get(0).expect("group should exist").start();
     }
 
-    static DEFINE_RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
-        regex::Regex::new(r#"(?m)^#define.*$"#).expect("should be valid")
-    });
+    static DEFINE_RE: once_cell::sync::Lazy<regex::bytes::Regex> =
+        once_cell::sync::Lazy::new(|| {
+            regex::bytes::Regex::new(r#"(?m)^#define.*$"#).expect("should be valid")
+        });
 
     let mut result = vec![];
     for captures in DEFINE_RE.captures_iter(&code[..last_global_include_index]) {
-        result.push(
-            captures
-                .get(0)
-                .expect("group should exist")
-                .as_str()
-                .to_string(),
-        );
+        let Some(define) = captures.get(0).map(|m| m.as_bytes()) else {
+            continue;
+        };
+        let Ok(define) = define.to_str() else {
+            continue;
+        };
+        result.push(define.to_owned());
     }
-    if code.contains("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION") {
+    if code.contains_str(b"#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION") {
         result.push("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION".to_string());
     }
-    if code.contains("#  define NANOVDB_USE_OPENVDB") {
+    if code.contains_str(b"#  define NANOVDB_USE_OPENVDB") {
         result.push("#define NANOVDB_USE_OPENVDB".to_string());
     }
     result
@@ -275,49 +289,202 @@ async fn analyse_preprocessed_file<'a>(
     Ok(result)
 }
 
+struct PreprocessFileResult {
+    source_file: SourceFile,
+    preprocessed_language: Language,
+    local_code: Vec<u8>,
+    headers: Vec<PathBuf>,
+    header_defines: Vec<String>,
+    original_obj_output: PathBuf,
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+enum PreprocessFileError {
+    MissingPrimaryOutput,
+    FailedToSpawn,
+    FailedToWaitForChild,
+    MultipleSourceFiles,
+    NoSourceFile,
+    FailedToReadSourceFile {
+        path: PathBuf,
+        err: tokio::io::Error,
+    },
+    AnalysisFailed,
+    FailedToDetermineLanguage,
+    CannotPreprocessLanguage,
+    PreprocessorFailed {
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+        status: ExitStatus,
+    },
+}
+
+fn update_gcc_args_for_preprocessing(build_object_file_args: GCCArgs) -> GCCArgs {
+    // Do not disable generating depfiles which are used by Ninja.
+    let mut result = build_object_file_args;
+    result.primary_output = None;
+    result.stop_before_link = false;
+    result.stop_after_preprocessing = true;
+    result
+}
+
+async fn preprocess_file(
+    binary: WrappedBinary,
+    build_object_file_args: &GCCArgs,
+    cwd: &Path,
+    state: &Data<State>,
+) -> Result<PreprocessFileResult, PreprocessFileError> {
+    if build_object_file_args.sources.len() >= 2 {
+        return Err(PreprocessFileError::MultipleSourceFiles);
+    }
+    let Some(source_file) = build_object_file_args.sources.first() else {
+        return Err(PreprocessFileError::NoSourceFile);
+    };
+    let source_file_code = match tokio::fs::read(&source_file.path).await {
+        Ok(code) => code,
+        Err(err) => {
+            return Err(PreprocessFileError::FailedToReadSourceFile {
+                path: source_file.path.clone(),
+                err,
+            });
+        }
+    };
+    let Ok(source_file_language) = source_file.language() else {
+        return Err(PreprocessFileError::FailedToDetermineLanguage);
+    };
+    let Ok(preprocessed_language) = source_file_language.to_preprocessed() else {
+        return Err(PreprocessFileError::CannotPreprocessLanguage);
+    };
+    let Some(obj_path) = build_object_file_args.primary_output.as_ref() else {
+        return Err(PreprocessFileError::MissingPrimaryOutput);
+    };
+
+    let _log_handle = state
+        .tasks_logger
+        .start_task(&format!("Preprocess: {}", source_file.path.display()));
+
+    let preprocessing_args = update_gcc_args_for_preprocessing(build_object_file_args.clone());
+
+    let Ok(child) = tokio::process::Command::new(binary.to_standard_binary_name())
+        .args(preprocessing_args.to_args())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .current_dir(cwd)
+        .spawn()
+    else {
+        return Err(PreprocessFileError::FailedToSpawn);
+    };
+    let Ok(child_result) = child.wait_with_output().await else {
+        return Err(PreprocessFileError::FailedToWaitForChild);
+    };
+    if !child_result.status.success() {
+        return Err(PreprocessFileError::PreprocessorFailed {
+            stdout: child_result.stdout,
+            stderr: child_result.stderr,
+            status: child_result.status,
+        });
+    }
+    let preprocessed_code = child_result.stdout;
+    let Ok(analysis) = analyse_preprocessed_file(&preprocessed_code, state).await else {
+        return Err(PreprocessFileError::AnalysisFailed);
+    };
+    let defines =
+        find_global_include_extra_defines(&analysis.global_headers, source_file_code.as_bstr());
+
+    let mut local_code: Vec<u8> = Vec::new();
+    for line in analysis.local_code {
+        writeln!(
+            local_code,
+            "# {} \"{}\"",
+            line.line_number,
+            source_file.path.display()
+        )
+        .expect("should never fail");
+        writeln!(local_code, "{}", line.line).expect("should never fail");
+    }
+
+    Ok(PreprocessFileResult {
+        source_file: source_file.clone(),
+        preprocessed_language,
+        local_code,
+        headers: analysis.global_headers,
+        header_defines: defines,
+        original_obj_output: obj_path.clone(),
+    })
+}
+
 pub async fn handle_gcc_without_link_request(
     binary: WrappedBinary,
-    request_gcc_args: &GCCArgs,
+    build_object_file_args: &GCCArgs,
     cwd: &Path,
     state: &Data<State>,
 ) -> HttpResponse {
-    let Some(request_output_path) = request_gcc_args.primary_output.as_ref() else {
-        return HttpResponse::NotImplemented().body("Expected output path");
+    let preprocess_result = Arc::new(Mutex::new(None));
+    {
+        let cwd = cwd.to_owned();
+        let build_object_file_args = build_object_file_args.clone();
+        let preprocess_result = preprocess_result.clone();
+        let state_clone = state.clone();
+        let Ok(_) = state
+            .pool
+            .run(async move || {
+                let result =
+                    preprocess_file(binary, &build_object_file_args, &cwd, &state_clone).await;
+                preprocess_result.lock().replace(result);
+            })
+            .await
+        else {
+            return HttpResponse::InternalServerError().body("Failed to await preprocessing");
+        };
+    }
+    let preprocess_result = match preprocess_result.lock().take() {
+        Some(Ok(result)) => result,
+        Some(Err(PreprocessFileError::PreprocessorFailed {
+            stdout,
+            stderr,
+            status,
+        })) => {
+            return HttpResponse::Ok().json(
+                ccelerate_shared::RunResponseData {
+                    stdout,
+                    stderr,
+                    status: status.code().unwrap_or(1),
+                }
+                .to_wire(),
+            );
+        }
+        Some(Err(e)) => {
+            return HttpResponse::BadRequest().body(format!("Failed to preprocess file: {:?}", e));
+        }
+        None => {
+            return HttpResponse::InternalServerError().body("Failed to preprocess file");
+        }
     };
-    let Some(request_output_name) = request_output_path.file_name() else {
-        return HttpResponse::BadRequest().body("Expected output path to have a file name");
-    };
 
-    let _log_handle = state.tasks_logger.start_task(&format!(
-        "Prepare: {:?}",
-        request_output_name.to_string_lossy()
-    ));
-
-    // Do preprocessing on the provided files. This also generates a depfile that e.g. ninja will use
-    // to know which headers an object file depends on.
-    let mut modified_gcc_args = request_gcc_args.clone();
-    modified_gcc_args.primary_output = None;
-    modified_gcc_args.stop_before_link = false;
-    modified_gcc_args.stop_after_preprocessing = true;
-
-    let realized_args = modified_gcc_args.to_args();
-    let realized_args_buffer = realized_args
-        .iter()
-        .flat_map(|s| s.as_encoded_bytes())
-        .copied()
-        .collect::<Vec<_>>();
-    let realized_args_hash = twox_hash::XxHash64::oneshot(0, &realized_args_buffer);
-    let realized_args_hash_str = format!("{:x}", realized_args_hash);
-    let preprocess_file_name = format!(
-        "{}_{}.ii",
-        &realized_args_hash_str,
-        request_output_name.to_string_lossy()
+    let local_code_hash_str = format!(
+        "{:x}",
+        twox_hash::XxHash64::oneshot(0, &preprocess_result.local_code)
     );
+    let debug_name = preprocess_result
+        .source_file
+        .path
+        .file_name()
+        .unwrap_or(OsStr::new("unknown"))
+        .to_string_lossy();
+    let local_code_file_name = format!(
+        "{}_{}.{}",
+        local_code_hash_str,
+        debug_name,
+        preprocess_result.preprocessed_language.to_valid_ext()
+    );
+
     let preprocess_file_dir = state
         .data_dir
         .join("preprocessed")
-        .join(&realized_args_hash_str[..2]);
-    let preprocess_file_path = preprocess_file_dir.join(preprocess_file_name);
+        .join(&local_code_hash_str[..2]);
+    let preprocess_file_path = preprocess_file_dir.join(local_code_file_name);
     match std::fs::create_dir_all(preprocess_file_dir) {
         Ok(()) => {}
         Err(e) => {
@@ -325,96 +492,41 @@ pub async fn handle_gcc_without_link_request(
                 .body(format!("Failed to create preprocess file directory: {e}"));
         }
     }
-    let headers = Arc::new(Mutex::new(Vec::new()));
-    let global_defines = Arc::new(Mutex::new(Vec::new()));
-
-    log::info!("Preprocess: {:#?}", modified_gcc_args.to_args());
-    {
-        let preprocess_file_path = preprocess_file_path.clone();
-        let headers = headers.clone();
-        let global_defines = global_defines.clone();
-        let state_clone = state.clone();
-        state
-            .pool
-            .run(async move || {
-                let result = tokio::process::Command::new(binary.to_standard_binary_name())
-                    .args(&realized_args)
-                    .stdin(std::process::Stdio::null())
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .spawn()
-                    .unwrap()
-                    .wait_with_output()
-                    .await
-                    .unwrap();
-                if !result.stderr.is_empty() {
-                    log::error!(
-                        "Preprocess failed: {}",
-                        std::str::from_utf8(&result.stderr).unwrap()
-                    );
-                    std::process::exit(1);
-                }
-                let analysis = analyse_preprocessed_file(&result.stdout, &state_clone)
-                    .await
-                    .unwrap();
-                let source_file_path = modified_gcc_args.sources.first();
-                if let Some(source_file_path) = source_file_path {
-                    if let Ok(source_code) = tokio::fs::read_to_string(&source_file_path.path).await
-                    {
-                        global_defines
-                            .lock()
-                            .extend(find_global_include_extra_defines(
-                                &analysis.global_headers,
-                                &source_code,
-                            ));
-                    }
-                }
-
-                headers.lock().extend(analysis.global_headers);
-
-                let mut file = std::fs::File::create(preprocess_file_path).unwrap();
-                for line in analysis.local_code {
-                    if let Some(source_file_path) = source_file_path {
-                        writeln!(
-                            file,
-                            "# {} \"{}\"",
-                            line.line_number,
-                            source_file_path.path.display()
-                        )
-                        .unwrap();
-                    }
-                    writeln!(file, "{}", line.line).unwrap();
-                }
-            })
-            .await
-            .unwrap();
-    }
 
     let dummy_object = crate::ASSETS_DIR
         .get_file("dummy_object.o")
         .expect("file should exist");
-    match tokio::fs::write(request_output_path, dummy_object.contents()).await {
+    match tokio::fs::write(
+        &preprocess_result.original_obj_output,
+        dummy_object.contents(),
+    )
+    .await
+    {
         Ok(_) => {}
         Err(e) => {
             return HttpResponse::InternalServerError().body(format!(
                 "Failed to write dummy object to {}: {}",
-                request_output_path.display(),
+                preprocess_result.original_obj_output.display(),
                 e
             ));
         }
     }
 
+    let Ok(_) = tokio::fs::write(&preprocess_file_path, &preprocess_result.local_code).await else {
+        return HttpResponse::InternalServerError().body("Failed to write local code");
+    };
+
     let Ok(_) = crate::store_db_file(
         &state.conn.lock(),
         &DbFilesRow {
-            path: request_output_path.clone(),
+            path: preprocess_result.original_obj_output,
             data: DbFilesRowData {
                 cwd: cwd.to_path_buf(),
                 binary,
-                args: request_gcc_args.to_args(),
+                args: build_object_file_args.to_args(),
                 local_code_file: Some(preprocess_file_path),
-                headers: Some(headers.lock().clone()),
-                global_defines: Some(global_defines.lock().clone()),
+                headers: Some(preprocess_result.headers),
+                global_defines: Some(preprocess_result.header_defines),
             },
         },
     ) else {

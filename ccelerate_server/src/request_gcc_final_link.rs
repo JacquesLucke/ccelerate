@@ -216,7 +216,7 @@ async fn build_combined_translation_unit(
     compile_gcc_args.primary_output = Some(dst_object_file.to_owned());
     compile_gcc_args.sources.push(SourceFile {
         path: unit_file_path.to_owned(),
-        language: None,
+        language_override: None,
     });
     compile_gcc_args.stop_before_link = true;
 
@@ -326,14 +326,14 @@ pub async fn handle_gcc_final_link_request(
     modified_gcc_args.sources = vec![];
     modified_gcc_args.sources.push(SourceFile {
         path: wrapped_units_archive_path.clone(),
-        language: None,
+        language_override: None,
     });
     modified_gcc_args.sources.extend(
         unmodified_link_units
             .iter()
             .map(|w| SourceFile {
                 path: w.clone(),
-                language: None,
+                language_override: None,
             })
             .collect::<Vec<_>>(),
     );
