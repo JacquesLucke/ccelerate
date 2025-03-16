@@ -25,7 +25,7 @@ pub async fn handle_eager_gcc_request(
     ));
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(request_gcc_args.to_args())
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -37,7 +37,7 @@ pub async fn handle_eager_gcc_request(
         return HttpResponse::InternalServerError().body("Failed to wait on child");
     };
     HttpResponse::Ok().json(
-        &ccelerate_shared::RunResponseData {
+        ccelerate_shared::RunResponseData {
             stdout: child_result.stdout,
             stderr: child_result.stderr,
             status: child_result.status.code().unwrap_or(1),
