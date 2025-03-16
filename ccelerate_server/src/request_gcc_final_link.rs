@@ -40,7 +40,7 @@ fn find_smallest_link_units(
                         binary if binary.is_ar_compatible() => {
                             let args = ArArgs::parse_owned(&file_row.data.cwd, file_row.data.args)
                                 .unwrap();
-                            remaining_paths.extend(args.sources.iter().map(|s| s.clone()));
+                            remaining_paths.extend(args.sources.iter().cloned());
                         }
                         binary => {
                             panic!("Cannot handle binary: {:?}", binary);
@@ -90,7 +90,7 @@ async fn build_combined_translation_unit(
     let mut global_defines = Vec::new();
 
     for original_object_file in original_object_files {
-        let Some(info) = load_db_file(&state.conn.lock(), &original_object_file) else {
+        let Some(info) = load_db_file(&state.conn.lock(), original_object_file) else {
             assert!(original_object_files.len() == 1);
             tokio::fs::copy(original_object_file, dst_object_file)
                 .await
@@ -100,7 +100,7 @@ async fn build_combined_translation_unit(
 
         unit_binary = info.data.binary;
         let original_gcc_args = GCCArgs::parse(
-            &original_object_file,
+            original_object_file,
             &osstring_to_osstr_vec(&info.data.args),
         )
         .unwrap();
@@ -221,7 +221,7 @@ async fn build_combined_translation_unit(
     compile_gcc_args.stop_before_link = true;
 
     let child = tokio::process::Command::new(unit_binary.to_standard_binary_name())
-        .args(&compile_gcc_args.to_args())
+        .args(compile_gcc_args.to_args())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -271,7 +271,7 @@ pub async fn handle_gcc_final_link_request(
     state: &Data<State>,
 ) -> HttpResponse {
     let tmp_dir = tempfile::tempdir().unwrap();
-    let Ok(smallest_link_units) = find_smallest_link_units(&request_gcc_args, &state.conn.lock())
+    let Ok(smallest_link_units) = find_smallest_link_units(request_gcc_args, &state.conn.lock())
     else {
         return HttpResponse::InternalServerError().body("Failed to find link sources");
     };
@@ -283,7 +283,7 @@ pub async fn handle_gcc_final_link_request(
                 original_object_path: link_unit.clone(),
                 wrapped_object_path: tmp_dir.path().join(format!(
                     "{}_{}",
-                    uuid::Uuid::new_v4().to_string(),
+                    uuid::Uuid::new_v4(),
                     link_unit.file_name().unwrap().to_string_lossy()
                 )),
             });
@@ -314,7 +314,7 @@ pub async fn handle_gcc_final_link_request(
         ));
         tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
             .args(wrapped_units_archive_args.to_args())
-            .current_dir(&cwd)
+            .current_dir(cwd)
             .spawn()
             .unwrap()
             .wait_with_output()
@@ -351,7 +351,7 @@ pub async fn handle_gcc_final_link_request(
     log::info!("Link: {:#?}", modified_gcc_args.to_args());
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(modified_gcc_args.to_args())
-        .current_dir(&cwd)
+        .current_dir(cwd)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -363,7 +363,7 @@ pub async fn handle_gcc_final_link_request(
         return HttpResponse::InternalServerError().body("Failed to wait on child");
     };
     HttpResponse::Ok().json(
-        &ccelerate_shared::RunResponseData {
+        ccelerate_shared::RunResponseData {
             stdout: child_result.stdout,
             stderr: child_result.stderr,
             status: child_result.status.code().unwrap_or(1),
