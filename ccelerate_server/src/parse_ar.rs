@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use std::{
     ffi::{OsStr, OsString},
     path::{Path, PathBuf},
@@ -7,7 +9,7 @@ use anyhow::Result;
 
 use crate::path_utils::make_absolute;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct ArArgs {
     pub flag_q: bool,
     pub flag_c: bool,
@@ -15,19 +17,6 @@ pub struct ArArgs {
     pub thin_archive: bool,
     pub output: Option<PathBuf>,
     pub sources: Vec<PathBuf>,
-}
-
-impl Default for ArArgs {
-    fn default() -> Self {
-        Self {
-            flag_q: false,
-            flag_c: false,
-            flag_s: false,
-            thin_archive: false,
-            output: None,
-            sources: vec![],
-        }
-    }
 }
 
 impl ArArgs {
@@ -51,7 +40,7 @@ impl ArArgs {
                 _ => return Err(anyhow::anyhow!("Unknown ar flag: {}", c)),
             }
         }
-        while let Some(raw_arg) = raw_args_iter.next() {
+        for raw_arg in raw_args_iter {
             let abs_path = make_absolute(cwd, Path::new(raw_arg));
             if args.output.is_none() {
                 args.output = Some(abs_path);
@@ -94,7 +83,7 @@ mod test {
 
     #[test]
     fn test_parse_ar() {
-        let raw_args = vec![
+        let raw_args = [
             "qc",
             "lib/libbf_io_grease_pencil.a",
             "source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io.cc.o",
@@ -105,13 +94,13 @@ mod test {
         let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
 
         let args = ArArgs::parse(
-            &Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
+            Path::new("/home/jacques/Documents/ccelerate_test/build_blender"),
             &raw_args,
         );
         assert!(args.is_ok());
-        let args = args.unwrap();
-        assert_eq!(args.flag_q, true);
-        assert_eq!(args.flag_c, true);
+        let args = args.expect("Passed in args should be valid");
+        assert!(args.flag_q);
+        assert!(args.flag_c);
         assert_eq!(
             args.output,
             Some(PathBuf::from(
@@ -120,12 +109,10 @@ mod test {
         );
         assert_eq!(
             args.sources,
-            vec![
-                "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io.cc.o",
+            ["/home/jacques/Documents/ccelerate_test/build_blender/source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io.cc.o",
                 "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io_import_svg.cc.o",
                 "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io_export_svg.cc.o",
-                "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io_export_pdf.cc.o",
-            ].iter().map(|s| Path::new(s)).collect::<Vec<_>>()
+                "/home/jacques/Documents/ccelerate_test/build_blender/source/blender/io/grease_pencil/CMakeFiles/bf_io_grease_pencil.dir/intern/grease_pencil_io_export_pdf.cc.o"].iter().map(Path::new).collect::<Vec<_>>()
         );
 
         test_round_trip(&raw_args);
@@ -133,21 +120,20 @@ mod test {
 
     fn test_round_trip(args: &[&OsStr]) {
         let parse1 = ArArgs::parse(
-            &Path::new("/first/path"),
-            args.iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
-        let parse1_to_args = parse1.as_ref().unwrap().to_args();
+            Path::new("/first/path"),
+            args.iter().map(|s| &**s).collect::<Vec<_>>().as_slice(),
+        )
+        .expect("should be valid");
+        let parse1_to_args = parse1.to_args();
         let parse2 = ArArgs::parse(
-            &Path::new("/second/path"),
+            Path::new("/second/path"),
             parse1_to_args
                 .iter()
                 .map(|s| s.as_ref())
                 .collect::<Vec<_>>()
                 .as_slice(),
-        );
-        assert_eq!(parse2.unwrap(), parse1.unwrap());
+        )
+        .expect("should be valid");
+        assert_eq!(parse2, parse1);
     }
 }
