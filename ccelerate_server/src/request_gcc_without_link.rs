@@ -1,11 +1,13 @@
 #![deny(clippy::unwrap_used)]
 
-use actix_web::{HttpResponse, web::Data};
+use actix_web::{HttpResponse, http::header, web::Data};
 use anyhow::Result;
-use bstr::{BStr, ByteSlice};
+use bstr::{BStr, BString, ByteSlice};
 use ccelerate_shared::WrappedBinary;
 use parking_lot::Mutex;
+use ratatui::symbols::line;
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
@@ -17,6 +19,73 @@ use crate::{
     DbFilesRow, DbFilesRowData, HeaderType, State,
     parse_gcc::{GCCArgs, Language, SourceFile},
 };
+
+#[derive(Debug, Default)]
+struct ParsePreprocessResult {
+    // Preprocessed code of the source file without any of the headers.
+    local_code: BString,
+    // Global headers that are included in this file. Generally, all these headers
+    // should have include guards and their include order should not matter.
+    // This also includes standard library headers.
+    global_includes: Vec<PathBuf>,
+    // Headers that are included in this file and that affect warnings in the entire file.
+    // E.g. `BLI_strict_flags.h` in Blender.
+    config_includes: Vec<PathBuf>,
+    // Sometimes, implementation files define values that affect headers that are typically global.
+    // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
+    include_defines: Vec<BString>,
+}
+
+async fn parse_preprocessed_source(
+    code: &BStr,
+    source_file_path: &Path,
+    include_define_names: &HashSet<BString>,
+    state: &Data<State>,
+) -> Result<ParsePreprocessResult> {
+    let mut result = ParsePreprocessResult::default();
+
+    let mut header_stack: Vec<&Path> = Vec::new();
+    let mut local_depth = 0;
+
+    for line in code.split(|&b| b == b'\n') {
+        let is_local = header_stack.len() == local_depth;
+        let line = line.as_bstr();
+        if let Some(_definition) = line.strip_prefix(b"#define ") {
+            todo!();
+        } else if let Some(_undef) = line.strip_prefix(b"#undef ") {
+            todo!();
+        } else if line.starts_with(b"# ") {
+            let line_marker = GccLinemarker::parse(line)?;
+            let header_path = Path::new(line_marker.header_name);
+            if line_marker.is_start_of_new_file {
+                if is_local {
+                    if is_local_header_with_cache(header_path, state).await {
+                        local_depth += 1;
+                        writeln!(result.local_code, "{}", line)?;
+                    } else {
+                        result.global_includes.push(header_path.to_owned());
+                    }
+                }
+                header_stack.push(header_path);
+            } else if line_marker.is_return_to_file {
+                header_stack.pop();
+                local_depth = local_depth.min(header_stack.len());
+                if header_stack.len() == local_depth {
+                    let file_path = header_stack.last().unwrap_or(&source_file_path);
+                    writeln!(
+                        result.local_code,
+                        "# {} \"{}\"",
+                        line_marker.line_number,
+                        file_path.display()
+                    )?;
+                }
+            }
+        } else {
+            writeln!(result.local_code, "{}", line)?;
+        }
+    }
+    Ok(result)
+}
 
 #[derive(Debug, Clone, Default)]
 struct SourceCodeLine<'a> {
@@ -77,7 +146,7 @@ fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &BStr) ->
 }
 
 #[derive(Debug, Clone, Default)]
-struct GccPreprocessLine<'a> {
+struct GccLinemarker<'a> {
     line_number: usize,
     header_name: &'a str,
     is_start_of_new_file: bool,
@@ -86,8 +155,8 @@ struct GccPreprocessLine<'a> {
     _next_is_extern_c: bool,
 }
 
-impl<'a> GccPreprocessLine<'a> {
-    fn parse(line: &'a [u8]) -> Result<Self> {
+impl<'a> GccLinemarker<'a> {
+    fn parse(line: &'a BStr) -> Result<Self> {
         let line = std::str::from_utf8(line)?;
         let err = || anyhow::anyhow!("Failed to parse line: {:?}", line);
         static RE: once_cell::sync::Lazy<regex::Regex> = once_cell::sync::Lazy::new(|| {
@@ -119,7 +188,7 @@ impl<'a> GccPreprocessLine<'a> {
             numbers.push(number);
         }
 
-        Ok(GccPreprocessLine {
+        Ok(GccLinemarker {
             line_number,
             header_name: name,
             is_start_of_new_file: numbers.contains(&1),
@@ -158,7 +227,7 @@ async fn analyse_preprocessed_file<'a>(
     for line in code.split(|&b| b == b'\n') {
         let is_local = header_stack.len() == local_depth;
         if line.starts_with(b"# ") {
-            let preprocessor_line = GccPreprocessLine::parse(line)?;
+            let preprocessor_line = GccLinemarker::parse(line.as_bstr())?;
             next_line = preprocessor_line.line_number;
             if preprocessor_line.is_start_of_new_file {
                 if is_local {
@@ -228,6 +297,7 @@ fn update_gcc_args_for_preprocessing(build_object_file_args: GCCArgs) -> GCCArgs
     result.primary_output = None;
     result.stop_before_link = false;
     result.stop_after_preprocessing = true;
+    result.preprocess_keep_defines = true;
     result
 }
 

@@ -42,6 +42,7 @@ pub struct GCCArgs {
     pub ecxx_flag: bool,
     pub openmp_flag: bool,
     pub use_link_group: bool,
+    pub preprocess_keep_defines: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -181,6 +182,8 @@ impl GCCArgs {
                 args.ecxx_flag = true;
             } else if arg_str == "--openmp" {
                 args.openmp_flag = true;
+            } else if arg_str == "-dD" {
+                args.preprocess_keep_defines = true;
             } else if arg_str == "-x" {
                 let name = raw_args_iter
                     .next()
@@ -270,6 +273,9 @@ impl GCCArgs {
         }
         if self.no_pie {
             args.push("-no-pie".into());
+        }
+        if self.preprocess_keep_defines {
+            args.push("-dD".into());
         }
         if self.print_sysroot {
             args.push("-print-sysroot".into());
