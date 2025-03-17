@@ -130,86 +130,11 @@ impl<'a> GccPreprocessLine<'a> {
     }
 }
 
-fn _has_known_include_guard(code: &[u8]) -> bool {
-    let mut i = 0;
-    while i < code.len() {
-        let rest = &code[i..];
-        if rest.starts_with(b"#pragma once") {
-            return true;
-        }
-        if rest.starts_with(b"#ifndef") {
-            return true;
-        }
-        if rest.starts_with(b"#include") {
-            /* The include guard has to come before the first include. */
-            return false;
-        }
-        if rest.starts_with(b"//") {
-            i += rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len()) + 1;
-            continue;
-        }
-        if rest.starts_with(b"/*") {
-            i += rest
-                .windows(2)
-                .position(|w| w == b"*/")
-                .unwrap_or(rest.len())
-                + 2;
-            continue;
-        }
-        if b" \t\n".contains(&rest[0]) {
-            i += 1;
-            continue;
-        }
-        return false;
-    }
-    false
-}
-
-async fn is_local_header(header_path: &Path) -> bool {
-    // if header_path.starts_with("/usr") {
-    //     return false;
-    // }
-    // let Ok(code) = tokio::fs::read_to_string(header_path).await else {
-    //     return false;
-    // };
-    // !has_known_include_guard(&code.as_bytes())
-    header_path.ends_with("list_sort_impl.h")
-        || header_path.ends_with("dna_rename_defs.h")
-        || header_path.ends_with("dna_includes_as_strings.h")
-        || header_path.ends_with("BLI_strict_flags.h")
-        || header_path.ends_with("RNA_enum_items.hh")
-        || header_path.ends_with("UI_icons.hh")
-        || header_path.extension().is_some_and(|ext| ext == "cc")
-        || header_path.extension().is_some_and(|ext| ext == "c")
-        || header_path.ends_with("glsl_compositor_source_list.h")
-        || header_path.ends_with("BLI_kdtree_impl.h")
-        || header_path.ends_with("kdtree_impl.h")
-        || header_path.ends_with("state_template.h")
-        || header_path.ends_with("shadow_state_template.h")
-        || header_path.ends_with("gpu_shader_create_info_list.hh")
-        || header_path.ends_with("generic_alloc_impl.h")
-        || header_path.ends_with("glsl_draw_source_list.h")
-        || header_path.ends_with("compositor_shader_create_info_list.hh")
-        || header_path.ends_with("glsl_gpu_source_list.h")
-        || header_path.ends_with("glsl_osd_source_list.h")
-        || header_path.ends_with("glsl_ocio_source_list.h")
-        || header_path.ends_with("draw_debug_info.hh")
-        || header_path.ends_with("draw_fullscreen_info.hh")
-        || header_path.ends_with("draw_hair_refine_info.hh")
-        || header_path.ends_with("draw_object_infos_info.hh")
-        || header_path.ends_with("draw_view_info.hh")
-        || header_path.ends_with("subdiv_info.hh")
-        || header_path
-            .as_os_str()
-            .to_string_lossy()
-            .contains("shaders/infos")
-}
-
 async fn is_local_header_with_cache(header_path: &Path, state: &Data<State>) -> bool {
     if let Some(header_type) = state.header_type_cache.lock().get(header_path) {
         return *header_type == HeaderType::Local;
     }
-    let result = is_local_header(header_path).await;
+    let result = state.config.lock().is_local_header(header_path);
     state.header_type_cache.lock().insert(
         header_path.to_owned(),
         if result {
@@ -219,29 +144,6 @@ async fn is_local_header_with_cache(header_path: &Path, state: &Data<State>) -> 
         },
     );
     result
-}
-
-#[tokio::test]
-async fn test_is_local_header() {
-    assert!(
-        is_local_header(Path::new(
-            "/home/jacques/blender/blender/source/blender/blenlib/intern/list_sort_impl.h"
-        ))
-        .await
-    );
-    assert!(
-        is_local_header(Path::new(
-            "/home/jacques/blender/blender/source/blender/gpu/intern/gpu_shader_create_info_list.hh"
-        ))
-        .await
-    );
-    assert!(
-        !is_local_header(Path::new(
-            "/home/jacques/blender/blender/source/blender/blenlib/BLI_path_utils.hh"
-        ))
-        .await
-    );
-    assert!(!is_local_header(Path::new("/usr/include/c++/14/cstddef")).await);
 }
 
 async fn analyse_preprocessed_file<'a>(

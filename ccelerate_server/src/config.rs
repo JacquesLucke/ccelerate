@@ -21,6 +21,7 @@ struct FolderConfig {
 #[derive(Deserialize, Debug)]
 struct ConfigFile {
     eager_patterns: Vec<String>,
+    local_header_patterns: Vec<String>,
 }
 
 impl Config {
@@ -31,6 +32,23 @@ impl Config {
             }
             for pattern in folder_config.config.eager_patterns.iter() {
                 if path.to_string_lossy().contains(pattern) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn is_local_header(&self, path: &Path) -> bool {
+        if matches!(path.extension(), Some(ext) if ext == "cc" || ext == "c") {
+            return true;
+        }
+        if path.as_os_str().to_string_lossy().contains("shaders/infos") {
+            return true;
+        }
+        for folder_config in self.folder_configs.iter() {
+            for pattern in folder_config.config.local_header_patterns.iter() {
+                if path.ends_with(pattern) {
                     return true;
                 }
             }
@@ -57,6 +75,7 @@ impl Config {
 
     fn load_config_file(&mut self, path: &Path) -> Result<()> {
         let config: ConfigFile = toml::from_str(std::fs::read_to_string(path)?.as_str())?;
+        log::info!("Loaded: {:#?}", config);
         let folder_config = FolderConfig {
             dir: path
                 .canonicalize()?
