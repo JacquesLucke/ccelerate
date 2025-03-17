@@ -11,6 +11,7 @@ use std::{
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
+use config::Config;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parking_lot::Mutex;
 use parse_gcc::GCCArgs;
@@ -22,6 +23,7 @@ use ratatui::{
 use rusqlite_migration::{M, Migrations};
 use tokio::task::JoinHandle;
 
+mod config;
 mod parse_ar;
 mod parse_gcc;
 mod path_utils;
@@ -54,6 +56,7 @@ struct State {
     cli: Cli,
     data_dir: PathBuf,
     header_type_cache: Arc<Mutex<HashMap<PathBuf, HeaderType>>>,
+    config: Arc<Mutex<Config>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -316,35 +319,25 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
             let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
                 return HttpResponse::NotImplemented().body("Cannot parse gcc arguments");
             };
-            let eager_paths = vec![
-                "/home/jacques/blender/blender/source/blender/imbuf/movie",
-                "/home/jacques/blender/blender/source/blender/python/intern/bpy_app_ffmpeg.cc",
-                "wayland_dynload",
-                "audaspace",
-                "quadriflow",
-                "lzma",
-                "ghost",
-                "intern/cycles",
-                "xxhash.c",
-                "/home/jacques/blender/blender/source/blender/editors/curve/editcurve.cc",
-                "/home/jacques/blender/blender/source/blender/blenkernel/intern/curve_decimate.cc",
-                "editcurve_paint.cc",
-                "curves_draw.cc",
-                "grease_pencil_geom.cc",
-            ];
+            {
+                let mut config = state.config.lock();
+                for source in request_gcc_args.sources.iter() {
+                    match config.ensure_configs(&source.path) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            return HttpResponse::BadRequest()
+                                .body(format!("Error reading config file: {}", e));
+                        }
+                    }
+                }
+            }
             if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
                 || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
                 || request_gcc_args.primary_output.is_none()
-                || eager_paths.iter().any(|p| {
-                    request_gcc_args
-                        .sources
-                        .first()
-                        .unwrap()
-                        .path
-                        .to_str()
-                        .unwrap()
-                        .contains(p)
-                })
+                || request_gcc_args
+                    .sources
+                    .iter()
+                    .any(|p| state.config.lock().is_eager_path(&p.path))
             {
                 return request_gcc_eager::handle_eager_gcc_request(
                     request.binary,
@@ -456,6 +449,7 @@ async fn main() -> Result<()> {
         cli,
         data_dir,
         header_type_cache: Arc::new(Mutex::new(HashMap::new())),
+        config: Arc::new(Mutex::new(Config::default())),
     });
 
     if state.cli.no_tui {
