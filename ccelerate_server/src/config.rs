@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bstr::BStr;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
@@ -22,6 +23,9 @@ struct FolderConfig {
 struct ConfigFile {
     eager_patterns: Vec<String>,
     local_header_patterns: Vec<String>,
+    include_defines: Vec<String>,
+    config_header_patterns: Vec<String>,
+    pure_c_header_patterns: Vec<String>,
 }
 
 impl Config {
@@ -49,6 +53,39 @@ impl Config {
         for folder_config in self.folder_configs.iter() {
             for pattern in folder_config.config.local_header_patterns.iter() {
                 if path.ends_with(pattern) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn is_include_define(&self, name: &BStr) -> bool {
+        for folder_config in self.folder_configs.iter() {
+            for pattern in folder_config.config.include_defines.iter() {
+                if name == pattern {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn is_config_header(&self, path: &Path) -> bool {
+        for folder_config in self.folder_configs.iter() {
+            for pattern in folder_config.config.config_header_patterns.iter() {
+                if path.ends_with(pattern) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn is_pure_c_header(&self, path: &Path) -> bool {
+        for folder_config in self.folder_configs.iter() {
+            for pattern in folder_config.config.pure_c_header_patterns.iter() {
+                if path.to_string_lossy().contains(pattern) {
                     return true;
                 }
             }

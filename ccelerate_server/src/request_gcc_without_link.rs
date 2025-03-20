@@ -28,18 +28,15 @@ struct ParsePreprocessResult {
     // should have include guards and their include order should not matter.
     // This also includes standard library headers.
     global_includes: Vec<PathBuf>,
-    // Headers that are included in this file and that affect warnings in the entire file.
-    // E.g. `BLI_strict_flags.h` in Blender.
-    config_includes: Vec<PathBuf>,
     // Sometimes, implementation files define values that affect headers that are typically global.
     // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
     include_defines: Vec<BString>,
+    config_includes: Vec<PathBuf>,
 }
 
 async fn parse_preprocessed_source(
     code: &BStr,
     source_file_path: &Path,
-    include_define_names: &HashSet<BString>,
     state: &Data<State>,
 ) -> Result<ParsePreprocessResult> {
     let mut result = ParsePreprocessResult::default();
@@ -47,21 +44,29 @@ async fn parse_preprocessed_source(
     let mut header_stack: Vec<&Path> = Vec::new();
     let mut local_depth = 0;
 
+    let mut revertable_previous_line_start = None;
+    let write_line_markers = true;
+
     for line in code.split(|&b| b == b'\n') {
         let is_local = header_stack.len() == local_depth;
         let line = line.as_bstr();
         if let Some(_definition) = line.strip_prefix(b"#define ") {
-            todo!();
+            if is_local && state.config.lock().is_include_define(line) {
+                result.include_defines.push(line.to_owned());
+            }
         } else if let Some(_undef) = line.strip_prefix(b"#undef ") {
-            todo!();
+            continue;
         } else if line.starts_with(b"# ") {
-            let line_marker = GccLinemarker::parse(line)?;
+            let Ok(line_marker) = GccLinemarker::parse(line) else {
+                continue;
+            };
             let header_path = Path::new(line_marker.header_name);
             if line_marker.is_start_of_new_file {
                 if is_local {
-                    if is_local_header_with_cache(header_path, state).await {
+                    if state.config.lock().is_config_header(header_path) {
+                        result.config_includes.push(header_path.to_owned());
+                    } else if state.config.lock().is_local_header(header_path) {
                         local_depth += 1;
-                        writeln!(result.local_code, "{}", line)?;
                     } else {
                         result.global_includes.push(header_path.to_owned());
                     }
@@ -70,33 +75,35 @@ async fn parse_preprocessed_source(
             } else if line_marker.is_return_to_file {
                 header_stack.pop();
                 local_depth = local_depth.min(header_stack.len());
-                if header_stack.len() == local_depth {
-                    let file_path = header_stack.last().unwrap_or(&source_file_path);
-                    writeln!(
-                        result.local_code,
-                        "# {} \"{}\"",
-                        line_marker.line_number,
-                        file_path.display()
-                    )?;
-                }
             }
-        } else {
+            if write_line_markers && header_stack.len() == local_depth {
+                if let Some(len) = revertable_previous_line_start {
+                    // Remove the previously written line marker because it does not have a purpose
+                    // oi the next line contains a line marker as well.
+                    result.local_code.truncate(len);
+                }
+                let file_path = header_stack.last().unwrap_or(&source_file_path);
+                revertable_previous_line_start = Some(result.local_code.len());
+                writeln!(
+                    result.local_code,
+                    "# {} \"{}\"",
+                    line_marker.line_number,
+                    file_path.display()
+                )?;
+            }
+        } else if is_local {
             writeln!(result.local_code, "{}", line)?;
+            if !line.trim_ascii().is_empty() {
+                revertable_previous_line_start = None;
+            }
         }
     }
     Ok(result)
 }
 
 #[derive(Debug, Clone, Default)]
-struct SourceCodeLine<'a> {
-    line_number: usize,
-    line: &'a str,
-}
-
-#[derive(Debug, Clone, Default)]
-struct AnalysePreprocessResult<'a> {
+struct AnalysePreprocessResult {
     global_headers: Vec<PathBuf>,
-    local_code: Vec<SourceCodeLine<'a>>,
 }
 
 fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &BStr) -> Vec<String> {
@@ -215,10 +222,10 @@ async fn is_local_header_with_cache(header_path: &Path, state: &Data<State>) -> 
     result
 }
 
-async fn analyse_preprocessed_file<'a>(
-    code: &'a [u8],
+async fn analyse_preprocessed_file(
+    code: &[u8],
     state: &Data<State>,
-) -> Result<AnalysePreprocessResult<'a>> {
+) -> Result<AnalysePreprocessResult> {
     let mut result = AnalysePreprocessResult::default();
     let mut header_stack: Vec<&str> = vec![];
     let mut local_depth = 0;
@@ -248,12 +255,7 @@ async fn analyse_preprocessed_file<'a>(
                 local_depth = local_depth.min(header_stack.len());
             }
         } else {
-            if !line.is_empty() && is_local {
-                result.local_code.push(SourceCodeLine {
-                    line_number: next_line,
-                    line: std::str::from_utf8(line)?,
-                });
-            }
+            if !line.is_empty() && is_local {}
             next_line += 1;
         }
     }
@@ -263,7 +265,7 @@ async fn analyse_preprocessed_file<'a>(
 struct PreprocessFileResult {
     source_file: SourceFile,
     preprocessed_language: Language,
-    local_code: Vec<u8>,
+    local_code: BString,
     headers: Vec<PathBuf>,
     header_defines: Vec<String>,
     original_obj_output: PathBuf,
@@ -359,28 +361,21 @@ async fn preprocess_file(
         });
     }
     let preprocessed_code = child_result.stdout;
+    let Ok(data) =
+        parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, state).await
+    else {
+        return Err(PreprocessFileError::AnalysisFailed);
+    };
     let Ok(analysis) = analyse_preprocessed_file(&preprocessed_code, state).await else {
         return Err(PreprocessFileError::AnalysisFailed);
     };
     let defines =
         find_global_include_extra_defines(&analysis.global_headers, source_file_code.as_bstr());
 
-    let mut local_code: Vec<u8> = Vec::new();
-    for line in analysis.local_code {
-        writeln!(
-            local_code,
-            "# {} \"{}\"",
-            line.line_number,
-            source_file.path.display()
-        )
-        .expect("should never fail");
-        writeln!(local_code, "{}", line.line).expect("should never fail");
-    }
-
     Ok(PreprocessFileResult {
         source_file: source_file.clone(),
         preprocessed_language,
-        local_code,
+        local_code: data.local_code,
         headers: analysis.global_headers,
         header_defines: defines,
         original_obj_output: obj_path.clone(),
