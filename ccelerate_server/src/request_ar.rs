@@ -30,8 +30,8 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
                 binary: request.binary,
                 args: request_ar_args.to_args(),
                 local_code_file: None,
-                headers: None,
-                global_defines: None,
+                global_includes: None,
+                include_defines: None,
             },
         },
     ) else {

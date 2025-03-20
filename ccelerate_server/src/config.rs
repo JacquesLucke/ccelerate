@@ -24,7 +24,6 @@ struct ConfigFile {
     eager_patterns: Vec<String>,
     local_header_patterns: Vec<String>,
     include_defines: Vec<String>,
-    config_header_patterns: Vec<String>,
     pure_c_header_patterns: Vec<String>,
 }
 
@@ -64,17 +63,6 @@ impl Config {
         for folder_config in self.folder_configs.iter() {
             for pattern in folder_config.config.include_defines.iter() {
                 if name == pattern {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub fn is_config_header(&self, path: &Path) -> bool {
-        for folder_config in self.folder_configs.iter() {
-            for pattern in folder_config.config.config_header_patterns.iter() {
-                if path.ends_with(pattern) {
                     return true;
                 }
             }

@@ -1,13 +1,11 @@
 #![deny(clippy::unwrap_used)]
 
-use actix_web::{HttpResponse, http::header, web::Data};
+use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use bstr::{BStr, BString, ByteSlice};
 use ccelerate_shared::WrappedBinary;
 use parking_lot::Mutex;
-use ratatui::symbols::line;
 use std::{
-    collections::HashSet,
     ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
@@ -16,7 +14,7 @@ use std::{
 };
 
 use crate::{
-    DbFilesRow, DbFilesRowData, HeaderType, State,
+    DbFilesRow, DbFilesRowData, State,
     parse_gcc::{GCCArgs, Language, SourceFile},
 };
 
@@ -31,7 +29,6 @@ struct ParsePreprocessResult {
     // Sometimes, implementation files define values that affect headers that are typically global.
     // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
     include_defines: Vec<BString>,
-    config_includes: Vec<PathBuf>,
 }
 
 async fn parse_preprocessed_source(
@@ -50,9 +47,13 @@ async fn parse_preprocessed_source(
     for line in code.split(|&b| b == b'\n') {
         let is_local = header_stack.len() == local_depth;
         let line = line.as_bstr();
-        if let Some(_definition) = line.strip_prefix(b"#define ") {
-            if is_local && state.config.lock().is_include_define(line) {
-                result.include_defines.push(line.to_owned());
+        if line.starts_with(b"#define ") {
+            if is_local {
+                if let Ok(macro_def) = MacroDefinition::parse(line) {
+                    if state.config.lock().is_include_define(macro_def.name) {
+                        result.include_defines.push(line.to_owned());
+                    }
+                }
             }
         } else if let Some(_undef) = line.strip_prefix(b"#undef ") {
             continue;
@@ -63,9 +64,7 @@ async fn parse_preprocessed_source(
             let header_path = Path::new(line_marker.header_name);
             if line_marker.is_start_of_new_file {
                 if is_local {
-                    if state.config.lock().is_config_header(header_path) {
-                        result.config_includes.push(header_path.to_owned());
-                    } else if state.config.lock().is_local_header(header_path) {
+                    if state.config.lock().is_local_header(header_path) {
                         local_depth += 1;
                     } else {
                         result.global_includes.push(header_path.to_owned());
@@ -101,55 +100,35 @@ async fn parse_preprocessed_source(
     Ok(result)
 }
 
-#[derive(Debug, Clone, Default)]
-struct AnalysePreprocessResult {
-    global_headers: Vec<PathBuf>,
+#[derive(Debug, Clone)]
+struct MacroDefinition<'a> {
+    name: &'a BStr,
+    _value: &'a BStr,
 }
 
-fn find_global_include_extra_defines(global_headers: &[PathBuf], code: &BStr) -> Vec<String> {
-    let code = code.replace(b"\\\n", b" ");
-    let code = code.as_bstr();
-
-    static INCLUDE_RE: once_cell::sync::Lazy<regex::bytes::Regex> =
-        once_cell::sync::Lazy::new(|| {
-            regex::bytes::Regex::new(r#"(?m)^#include[ \t]+["<](.*)[">]"#).expect("should be valid")
+impl<'a> MacroDefinition<'a> {
+    fn parse(line: &'a BStr) -> Result<Self> {
+        static RE: once_cell::sync::Lazy<regex::bytes::Regex> = once_cell::sync::Lazy::new(|| {
+            regex::bytes::Regex::new(r#"(?m)^#define\s+(\w+)(.*)$"#).expect("should be valid")
         });
-    let mut last_global_include_index = 0;
-    for captures in INCLUDE_RE.captures_iter(code) {
-        let Some(header_name) = captures.get(1).map(|m| m.as_bytes()) else {
-            continue;
+        let Some(captures) = RE.captures(line) else {
+            return Err(anyhow::anyhow!("Failed to parse line: {:?}", line));
         };
-        let Ok(header_name) = header_name.to_str() else {
-            continue;
-        };
-        if !global_headers.iter().any(|h| h.ends_with(header_name)) {
-            continue;
-        }
-        last_global_include_index = captures.get(0).expect("group should exist").start();
+        let name = captures
+            .get(1)
+            .expect("group should exist")
+            .as_bytes()
+            .as_bstr();
+        let value = captures
+            .get(2)
+            .expect("group should exist")
+            .as_bytes()
+            .as_bstr();
+        Ok(MacroDefinition {
+            name,
+            _value: value,
+        })
     }
-
-    static DEFINE_RE: once_cell::sync::Lazy<regex::bytes::Regex> =
-        once_cell::sync::Lazy::new(|| {
-            regex::bytes::Regex::new(r#"(?m)^#define.*$"#).expect("should be valid")
-        });
-
-    let mut result = vec![];
-    for captures in DEFINE_RE.captures_iter(&code[..last_global_include_index]) {
-        let Some(define) = captures.get(0).map(|m| m.as_bytes()) else {
-            continue;
-        };
-        let Ok(define) = define.to_str() else {
-            continue;
-        };
-        result.push(define.to_owned());
-    }
-    if code.contains_str(b"#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION") {
-        result.push("#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION".to_string());
-    }
-    if code.contains_str(b"#  define NANOVDB_USE_OPENVDB") {
-        result.push("#define NANOVDB_USE_OPENVDB".to_string());
-    }
-    result
 }
 
 #[derive(Debug, Clone, Default)]
@@ -206,69 +185,11 @@ impl<'a> GccLinemarker<'a> {
     }
 }
 
-async fn is_local_header_with_cache(header_path: &Path, state: &Data<State>) -> bool {
-    if let Some(header_type) = state.header_type_cache.lock().get(header_path) {
-        return *header_type == HeaderType::Local;
-    }
-    let result = state.config.lock().is_local_header(header_path);
-    state.header_type_cache.lock().insert(
-        header_path.to_owned(),
-        if result {
-            HeaderType::Local
-        } else {
-            HeaderType::Global
-        },
-    );
-    result
-}
-
-async fn analyse_preprocessed_file(
-    code: &[u8],
-    state: &Data<State>,
-) -> Result<AnalysePreprocessResult> {
-    let mut result = AnalysePreprocessResult::default();
-    let mut header_stack: Vec<&str> = vec![];
-    let mut local_depth = 0;
-    let mut next_line = 0;
-
-    for line in code.split(|&b| b == b'\n') {
-        let is_local = header_stack.len() == local_depth;
-        if line.starts_with(b"# ") {
-            let preprocessor_line = GccLinemarker::parse(line.as_bstr())?;
-            next_line = preprocessor_line.line_number;
-            if preprocessor_line.is_start_of_new_file {
-                if is_local {
-                    if !is_local_header_with_cache(Path::new(preprocessor_line.header_name), state)
-                        .await
-                    {
-                        let header_path = PathBuf::from(preprocessor_line.header_name);
-                        if !result.global_headers.contains(&header_path) {
-                            result.global_headers.push(header_path);
-                        }
-                    } else {
-                        local_depth += 1;
-                    }
-                }
-                header_stack.push(preprocessor_line.header_name);
-            } else if preprocessor_line.is_return_to_file {
-                header_stack.pop();
-                local_depth = local_depth.min(header_stack.len());
-            }
-        } else {
-            if !line.is_empty() && is_local {}
-            next_line += 1;
-        }
-    }
-    Ok(result)
-}
-
 struct PreprocessFileResult {
     source_file: SourceFile,
     preprocessed_language: Language,
-    local_code: BString,
-    headers: Vec<PathBuf>,
-    header_defines: Vec<String>,
     original_obj_output: PathBuf,
+    analysis: ParsePreprocessResult,
 }
 
 #[allow(dead_code)]
@@ -315,15 +236,6 @@ async fn preprocess_file(
     let Some(source_file) = build_object_file_args.sources.first() else {
         return Err(PreprocessFileError::NoSourceFile);
     };
-    let source_file_code = match tokio::fs::read(&source_file.path).await {
-        Ok(code) => code,
-        Err(err) => {
-            return Err(PreprocessFileError::FailedToReadSourceFile {
-                path: source_file.path.clone(),
-                err,
-            });
-        }
-    };
     let Ok(source_file_language) = source_file.language() else {
         return Err(PreprocessFileError::FailedToDetermineLanguage);
     };
@@ -361,24 +273,17 @@ async fn preprocess_file(
         });
     }
     let preprocessed_code = child_result.stdout;
-    let Ok(data) =
+    let Ok(analysis) =
         parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, state).await
     else {
         return Err(PreprocessFileError::AnalysisFailed);
     };
-    let Ok(analysis) = analyse_preprocessed_file(&preprocessed_code, state).await else {
-        return Err(PreprocessFileError::AnalysisFailed);
-    };
-    let defines =
-        find_global_include_extra_defines(&analysis.global_headers, source_file_code.as_bstr());
 
     Ok(PreprocessFileResult {
         source_file: source_file.clone(),
         preprocessed_language,
-        local_code: data.local_code,
-        headers: analysis.global_headers,
-        header_defines: defines,
         original_obj_output: obj_path.clone(),
+        analysis,
     })
 }
 
@@ -432,7 +337,7 @@ pub async fn handle_gcc_without_link_request(
 
     let local_code_hash_str = format!(
         "{:x}",
-        twox_hash::XxHash64::oneshot(0, &preprocess_result.local_code)
+        twox_hash::XxHash64::oneshot(0, &preprocess_result.analysis.local_code)
     );
     let debug_name = preprocess_result
         .source_file
@@ -479,7 +384,12 @@ pub async fn handle_gcc_without_link_request(
         }
     }
 
-    let Ok(_) = tokio::fs::write(&preprocess_file_path, &preprocess_result.local_code).await else {
+    let Ok(_) = tokio::fs::write(
+        &preprocess_file_path,
+        &preprocess_result.analysis.local_code,
+    )
+    .await
+    else {
         return HttpResponse::InternalServerError().body("Failed to write local code");
     };
 
@@ -492,8 +402,8 @@ pub async fn handle_gcc_without_link_request(
                 binary,
                 args: build_object_file_args.to_args(),
                 local_code_file: Some(preprocess_file_path),
-                headers: Some(preprocess_result.headers),
-                global_defines: Some(preprocess_result.header_defines),
+                global_includes: Some(preprocess_result.analysis.global_includes),
+                include_defines: Some(preprocess_result.analysis.include_defines),
             },
         },
     ) else {

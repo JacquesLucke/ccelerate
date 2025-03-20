@@ -1,9 +1,11 @@
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
+use bstr::BString;
 use ccelerate_shared::WrappedBinary;
 use std::{
     collections::HashSet,
     ffi::{OsStr, OsString},
+    io::Write,
     path::{Path, PathBuf},
 };
 use tokio::io::AsyncWriteExt;
@@ -104,7 +106,7 @@ async fn build_combined_translation_unit(
             &osstring_to_osstr_vec(&info.data.args),
         )
         .unwrap();
-        for header in &info.data.headers.unwrap() {
+        for header in &info.data.global_includes.unwrap() {
             if headers.contains(header) {
                 continue;
             }
@@ -112,7 +114,7 @@ async fn build_combined_translation_unit(
         }
         preprocess_paths.push(info.data.local_code_file.unwrap());
 
-        global_defines.extend(info.data.global_defines.unwrap_or_default());
+        global_defines.extend(info.data.include_defines.unwrap_or_default());
 
         preprocess_headers_gcc_args
             .user_includes
@@ -164,12 +166,19 @@ async fn build_combined_translation_unit(
         ("i", "c")
     };
 
-    let mut headers_code = String::new();
+    let mut headers_code = BString::new(Vec::new());
     for define in global_defines {
-        headers_code.push_str(&define);
+        writeln!(headers_code, "{}", define).unwrap();
     }
     for header in headers {
-        headers_code.push_str(&format!("#include \"{}\"\n", header.display()));
+        let needs_extern_c = lang == "c++" && state.config.lock().is_pure_c_header(&header);
+        if needs_extern_c {
+            writeln!(headers_code, "extern \"C\" {{").unwrap();
+        }
+        writeln!(headers_code, "#include \"{}\"", header.display()).unwrap();
+        if needs_extern_c {
+            writeln!(headers_code, "}}").unwrap();
+        }
     }
 
     preprocess_headers_gcc_args.stop_after_preprocessing = true;
@@ -185,7 +194,7 @@ async fn build_combined_translation_unit(
         .spawn()
         .unwrap();
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(headers_code.as_bytes()).await.unwrap();
+        stdin.write_all(&headers_code).await.unwrap();
     }
     let child_result = {
         log::info!("Preprocess Header: {:?}", dst_object_file.file_name());

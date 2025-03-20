@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     ffi::{OsStr, OsString},
     io::Write,
     num::NonZeroUsize,
@@ -10,6 +9,7 @@ use std::{
 
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
+use bstr::BString;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use config::Config;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
@@ -55,14 +55,7 @@ struct State {
     pool: ParallelPool,
     cli: Cli,
     data_dir: PathBuf,
-    header_type_cache: Arc<Mutex<HashMap<PathBuf, HeaderType>>>,
     config: Arc<Mutex<Config>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HeaderType {
-    Local,
-    Global,
 }
 
 struct TasksLogger {
@@ -146,8 +139,8 @@ struct DbFilesRowData {
     binary: WrappedBinary,
     args: Vec<OsString>,
     local_code_file: Option<PathBuf>,
-    headers: Option<Vec<PathBuf>>,
-    global_defines: Option<Vec<String>>,
+    global_includes: Option<Vec<PathBuf>>,
+    include_defines: Option<Vec<BString>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -156,8 +149,8 @@ struct DbFilesRowDataStorage {
     binary: WrappedBinary,
     args: Vec<OsString>,
     local_code_file: Option<OsString>,
-    headers: Option<Vec<OsString>>,
-    global_defines: Option<Vec<String>>,
+    global_includes: Option<Vec<OsString>>,
+    include_defines: Option<Vec<BString>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -166,8 +159,8 @@ struct DbFilesRowDataDebug {
     binary: WrappedBinary,
     args: Vec<String>,
     local_code_file: Option<String>,
-    headers: Option<Vec<String>>,
-    global_defines: Option<Vec<String>>,
+    global_includes: Option<Vec<String>>,
+    include_defines: Option<Vec<String>>,
 }
 
 impl DbFilesRowDataStorage {
@@ -177,11 +170,11 @@ impl DbFilesRowDataStorage {
             binary: data.binary,
             args: data.args.clone(),
             local_code_file: data.local_code_file.clone().map(|s| s.into()),
-            headers: data
-                .headers
+            global_includes: data
+                .global_includes
                 .clone()
                 .map(|h| h.iter().map(|s| s.clone().into()).collect()),
-            global_defines: data.global_defines.clone(),
+            include_defines: data.include_defines.clone(),
         }
     }
 
@@ -191,11 +184,11 @@ impl DbFilesRowDataStorage {
             binary: self.binary,
             args: self.args.clone(),
             local_code_file: self.local_code_file.clone().map(|s| s.into()),
-            headers: self
-                .headers
+            global_includes: self
+                .global_includes
                 .clone()
                 .map(|h| h.iter().map(|s| s.clone().into()).collect()),
-            global_defines: self.global_defines.clone(),
+            include_defines: self.include_defines.clone(),
         }
     }
 }
@@ -214,11 +207,14 @@ impl DbFilesRowDataDebug {
                 .local_code_file
                 .as_ref()
                 .map(|s| s.to_string_lossy().to_string()),
-            headers: data
-                .headers
+            global_includes: data
+                .global_includes
                 .as_ref()
                 .map(|h| h.iter().map(|s| s.to_string_lossy().to_string()).collect()),
-            global_defines: data.global_defines.clone(),
+            include_defines: data
+                .global_includes
+                .as_ref()
+                .map(|h| h.iter().map(|s| s.to_string_lossy().to_string()).collect()),
         }
     }
 }
@@ -448,7 +444,6 @@ async fn main() -> Result<()> {
         })),
         cli,
         data_dir,
-        header_type_cache: Arc::new(Mutex::new(HashMap::new())),
         config: Arc::new(Mutex::new(Config::default())),
     });
 
