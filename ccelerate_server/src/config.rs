@@ -43,7 +43,8 @@ impl Config {
     }
 
     pub fn is_local_header(&self, path: &Path) -> bool {
-        if matches!(path.extension(), Some(ext) if ext == "cc" || ext == "c") {
+        if matches!(path.extension(), Some(ext) if ext == "cc" || ext == "c" || ext == "cpp" || ext == "cxx" || ext =="c++")
+        {
             return true;
         }
         if path.as_os_str().to_string_lossy().contains("shaders/infos") {

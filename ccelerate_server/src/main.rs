@@ -212,9 +212,9 @@ impl DbFilesRowDataDebug {
                 .as_ref()
                 .map(|h| h.iter().map(|s| s.to_string_lossy().to_string()).collect()),
             include_defines: data
-                .global_includes
+                .include_defines
                 .as_ref()
-                .map(|h| h.iter().map(|s| s.to_string_lossy().to_string()).collect()),
+                .map(|h| h.iter().map(|s| s.to_string()).collect()),
         }
     }
 }
