@@ -14,7 +14,7 @@ use std::{
 };
 
 use crate::{
-    DbFilesRow, DbFilesRowData, State,
+    DbFilesRow, DbFilesRowData, State, log_file,
     parse_gcc::{GCCArgs, Language, SourceFile},
 };
 
@@ -273,6 +273,13 @@ async fn preprocess_file(
         });
     }
     let preprocessed_code = child_result.stdout;
+    let _ = log_file(
+        state,
+        &format!("Preprocessed {}", obj_path.display()),
+        &preprocessed_code,
+        preprocessed_language.to_valid_ext(),
+    )
+    .await;
     let Ok(analysis) =
         parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, state).await
     else {
@@ -357,7 +364,7 @@ pub async fn handle_gcc_without_link_request(
         .join("preprocessed")
         .join(&local_code_hash_str[..2]);
     let preprocess_file_path = preprocess_file_dir.join(local_code_file_name);
-    match std::fs::create_dir_all(preprocess_file_dir) {
+    match tokio::fs::create_dir_all(preprocess_file_dir).await {
         Ok(()) => {}
         Err(e) => {
             return HttpResponse::InternalServerError()

@@ -363,6 +363,24 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
     };
 }
 
+async fn log_file(state: &Data<State>, name: &str, data: &[u8], ext: &str) -> Result<()> {
+    let data_hash = twox_hash::XxHash64::oneshot(0, data);
+    let data_hash_str = format!("{:x}", data_hash);
+    let file_name = format!("{}.{}", data_hash_str, ext);
+    let file_dir = state.data_dir.join("log_files").join(&data_hash_str[..2]);
+    let file_path = file_dir.join(file_name);
+    tokio::fs::create_dir_all(file_dir).await?;
+    tokio::fs::write(&file_path, data).await?;
+
+    let time: chrono::DateTime<chrono::Utc> = chrono::Utc::now();
+    state.conn.lock().execute(
+        "INSERT OR REPLACE INTO LogFiles (name, path, time) VALUES (?1, ?2, ?3)",
+        rusqlite::params![name, file_path.to_string_lossy(), time.to_rfc3339()],
+    )?;
+
+    Ok(())
+}
+
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestDataWire>,
@@ -419,11 +437,19 @@ async fn main() -> Result<()> {
     std::fs::create_dir_all(&data_dir).unwrap();
 
     let db_migrations = Migrations::new(vec![M::up(
-        "CREATE TABLE Files(
+        "
+        CREATE TABLE Files(
             path TEXT NOT NULL PRIMARY KEY,
             data TEXT NOT NULL,
             data_debug TEXT NOT NULL
-        );",
+        );
+        CREATE TABLE LogFiles(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            time TEXT NOT NULL
+        );
+        ",
     )]);
 
     let db_path = data_dir.join("ccelerate.db");
