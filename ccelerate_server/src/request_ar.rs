@@ -5,7 +5,11 @@ use std::ffi::OsStr;
 use actix_web::{HttpResponse, web::Data};
 use ccelerate_shared::RunRequestData;
 
-use crate::{DbFilesRow, DbFilesRowData, State, parse_ar::ArArgs, store_db_file};
+use crate::{
+    State,
+    database::{DbFilesRow, DbFilesRowData, store_db_file},
+    parse_ar::ArArgs,
+};
 
 pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();

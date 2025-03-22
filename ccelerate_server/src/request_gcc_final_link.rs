@@ -11,7 +11,8 @@ use std::{
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    State, load_db_file,
+    State,
+    database::load_db_file,
     parse_ar::ArArgs,
     parse_gcc::{GCCArgs, SourceFile},
 };
