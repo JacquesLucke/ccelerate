@@ -7,7 +7,7 @@ use anyhow::Result;
 use bstr::BString;
 use ccelerate_shared::WrappedBinary;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileRecord {
     pub cwd: PathBuf,
     pub binary: WrappedBinary,
