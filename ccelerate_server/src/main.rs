@@ -13,6 +13,7 @@ use bstr::BString;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use config::Config;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
 use parse_gcc::GCCArgs;
 use ratatui::{
@@ -21,9 +22,9 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
-use tokio::task::JoinHandle;
 
 mod config;
+mod parallel_pool;
 mod parse_ar;
 mod parse_gcc;
 mod path_utils;
@@ -216,30 +217,6 @@ impl DbFilesRowDataDebug {
                 .as_ref()
                 .map(|h| h.iter().map(|s| s.to_string()).collect()),
         }
-    }
-}
-
-struct ParallelPool {
-    semaphore: Arc<tokio::sync::Semaphore>,
-}
-
-impl ParallelPool {
-    fn new(num: usize) -> Self {
-        Self {
-            semaphore: Arc::new(tokio::sync::Semaphore::new(num)),
-        }
-    }
-
-    fn run<F, Fut>(&self, f: F) -> JoinHandle<()>
-    where
-        F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
-    {
-        let permit = self.semaphore.clone().acquire_owned();
-        tokio::task::spawn(async move {
-            let _permit = permit.await.unwrap();
-            f().await;
-        })
     }
 }
 
