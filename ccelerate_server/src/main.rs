@@ -11,15 +11,10 @@ use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use config::Config;
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
 use parse_gcc::GCCArgs;
-use ratatui::{
-    layout::Layout,
-    style::{Color, Style},
-    widgets::TableState,
-};
+use ratatui::widgets::TableState;
 use task_periods::TaskPeriods;
 
 mod config;
@@ -33,6 +28,7 @@ mod request_gcc_eager;
 mod request_gcc_final_link;
 mod request_gcc_without_link;
 mod task_periods;
+mod tui;
 
 static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
 
@@ -246,78 +242,8 @@ async fn main() -> Result<()> {
         server_thread(state.clone()).await;
         return Ok(());
     }
+    // Run the server in the background and the tui on the main thread.
     tokio::spawn(server_thread(state.clone()));
-
-    let mut terminal = ratatui::init();
-
-    loop {
-        let state_clone = state.clone();
-        state_clone.tasks_table_state.lock().select_last();
-        terminal
-            .draw(|frame| {
-                draw_terminal(frame, state_clone);
-            })
-            .expect("failed to draw terminal");
-        if crossterm::event::poll(std::time::Duration::from_millis(100)).unwrap() {
-            match crossterm::event::read().unwrap() {
-                Event::Key(KeyEvent {
-                    code: KeyCode::Char('q'),
-                    ..
-                })
-                | Event::Key(KeyEvent {
-                    code: KeyCode::Esc, ..
-                })
-                | Event::Key(KeyEvent {
-                    code: KeyCode::Char('c'),
-                    modifiers: KeyModifiers::CONTROL,
-                    ..
-                }) => {
-                    break;
-                }
-                _ => {}
-            }
-        }
-    }
-    ratatui::restore();
-
+    tui::run_tui(&state);
     Ok(())
-}
-
-fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>) {
-    use ratatui::layout::Constraint::*;
-
-    let mut tasks = state.task_periods.get_periods();
-    tasks.sort_by_key(|t| {
-        (
-            t.active,
-            if t.active {
-                (t.duration.as_secs_f64() * 100f64) as u64
-            } else {
-                0
-            },
-        )
-    });
-
-    let mut tasks_table_state = state.tasks_table_state.lock();
-
-    let vertical = Layout::vertical([Length(1), Min(0)]);
-    let [title_area, main_area] = vertical.areas(frame.area());
-    let text = ratatui::text::Text::raw(format!("ccelerate_server at http://{}", state.address));
-    frame.render_widget(text, title_area);
-
-    let done_style = Style::new().fg(Color::Green);
-    let not_done_style = Style::new().fg(Color::Blue);
-
-    let table = ratatui::widgets::Table::new(
-        tasks.iter().map(|t| {
-            ratatui::widgets::Row::new([
-                ratatui::text::Text::raw(format!("{:3.1}s", t.duration.as_secs_f64())),
-                ratatui::text::Text::raw(&t.name),
-            ])
-            .style(if t.active { not_done_style } else { done_style })
-        }),
-        [Length(10), Percentage(100)],
-    );
-
-    frame.render_stateful_widget(table, main_area, &mut tasks_table_state);
 }
