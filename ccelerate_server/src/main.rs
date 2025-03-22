@@ -4,7 +4,7 @@ use std::{
     num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::Arc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use actix_web::{HttpResponse, web::Data};
@@ -22,6 +22,7 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
+use task_periods::TasksLogger;
 
 mod config;
 mod parallel_pool;
@@ -32,6 +33,7 @@ mod request_ar;
 mod request_gcc_eager;
 mod request_gcc_final_link;
 mod request_gcc_without_link;
+mod task_periods;
 
 static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
 
@@ -57,76 +59,6 @@ struct State {
     cli: Cli,
     data_dir: PathBuf,
     config: Arc<Mutex<Config>>,
-}
-
-struct TasksLogger {
-    tasks: Arc<Mutex<Vec<TaskLog>>>,
-}
-
-impl TasksLogger {
-    fn new() -> Self {
-        Self {
-            tasks: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    fn start_task(&self, name: &str) -> TaskLogHandle {
-        let end_time = Arc::new(Mutex::new(None));
-        let task = TaskLog {
-            name: name.to_string(),
-            start_time: Instant::now(),
-            end_time: end_time.clone(),
-        };
-        self.tasks.lock().push(task);
-        TaskLogHandle { end_time }
-    }
-
-    fn get_for_print(&self) -> Vec<TaskLogPrint> {
-        self.tasks
-            .lock()
-            .iter()
-            .map(|t| TaskLogPrint {
-                name: t.name.clone(),
-                duration: t.duration(),
-                active: t.is_running(),
-            })
-            .collect()
-    }
-}
-
-struct TaskLog {
-    name: String,
-    start_time: Instant,
-    end_time: Arc<Mutex<Option<Instant>>>,
-}
-
-struct TaskLogPrint {
-    name: String,
-    duration: Duration,
-    active: bool,
-}
-
-impl TaskLog {
-    fn is_running(&self) -> bool {
-        self.end_time.lock().is_none()
-    }
-
-    fn duration(&self) -> Duration {
-        self.end_time
-            .lock()
-            .unwrap_or_else(Instant::now)
-            .duration_since(self.start_time)
-    }
-}
-
-struct TaskLogHandle {
-    end_time: Arc<Mutex<Option<Instant>>>,
-}
-
-impl Drop for TaskLogHandle {
-    fn drop(&mut self) {
-        *self.end_time.lock() = Some(Instant::now());
-    }
 }
 
 struct DbFilesRow {
