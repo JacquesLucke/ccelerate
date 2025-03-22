@@ -18,6 +18,7 @@ use crate::{
     database::{FileRecord, store_file_record},
     log_file,
     parse_gcc::{GCCArgs, Language, SourceFile},
+    task_log::{TaskInfo, log_task},
 };
 
 #[derive(Debug, Default)]
@@ -248,9 +249,12 @@ async fn preprocess_file(
         return Err(PreprocessFileError::MissingPrimaryOutput);
     };
 
-    let _task_period = state
-        .task_periods
-        .start(&format!("Preprocess: {}", source_file.path.display()));
+    let _task_period = log_task(
+        &PreprocessTranslationUnitTaskInfo {
+            dst_object_file: obj_path.clone(),
+        },
+        state,
+    );
 
     let preprocessing_args = update_gcc_args_for_preprocessing(build_object_file_args.clone());
 
@@ -282,6 +286,13 @@ async fn preprocess_file(
         preprocessed_language.to_valid_ext(),
     )
     .await;
+
+    let _task_period = log_task(
+        &HandlePreprocessedTranslationUnitTaskInfo {
+            dst_object_file: obj_path.clone(),
+        },
+        state,
+    );
     let Ok(analysis) =
         parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, state).await
     else {
@@ -420,4 +431,47 @@ pub async fn handle_gcc_without_link_request(
     HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
         ..Default::default()
     })
+}
+
+struct PreprocessTranslationUnitTaskInfo {
+    dst_object_file: PathBuf,
+}
+
+impl TaskInfo for PreprocessTranslationUnitTaskInfo {
+    fn short_name(&self) -> String {
+        format!(
+            "Preprocess: {}",
+            self.dst_object_file
+                .file_name()
+                .unwrap_or(OsStr::new("unknown"))
+                .to_string_lossy()
+        )
+    }
+
+    fn log(&self) {
+        log::info!("Preprocess: {}", self.dst_object_file.to_string_lossy());
+    }
+}
+
+struct HandlePreprocessedTranslationUnitTaskInfo {
+    dst_object_file: PathBuf,
+}
+
+impl TaskInfo for HandlePreprocessedTranslationUnitTaskInfo {
+    fn short_name(&self) -> String {
+        format!(
+            "Handle preprocessed: {}",
+            self.dst_object_file
+                .file_name()
+                .unwrap_or(OsStr::new("unknown"))
+                .to_string_lossy()
+        )
+    }
+
+    fn log(&self) {
+        log::info!(
+            "Handle preprocessed: {}",
+            self.dst_object_file.to_string_lossy()
+        );
+    }
 }

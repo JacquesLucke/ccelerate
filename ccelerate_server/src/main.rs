@@ -29,6 +29,7 @@ mod request_gcc_eager;
 mod request_gcc_final_link;
 mod request_gcc_without_link;
 mod state;
+mod task_log;
 mod task_periods;
 mod tui;
 

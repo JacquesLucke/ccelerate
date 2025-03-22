@@ -1,6 +1,7 @@
 use base64::prelude::*;
 use std::{
     ffi::{OsStr, OsString},
+    fmt,
     path::PathBuf,
 };
 
@@ -74,6 +75,12 @@ impl WrappedBinary {
 
     pub fn is_ar_compatible(&self) -> bool {
         matches!(self, WrappedBinary::Ar)
+    }
+}
+
+impl fmt::Display for WrappedBinary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_standard_binary_name().to_string_lossy())
     }
 }
 
