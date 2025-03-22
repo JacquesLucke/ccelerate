@@ -7,7 +7,7 @@ use ccelerate_shared::RunRequestData;
 
 use crate::{
     State,
-    database::{DbFilesRowData, store_db_file},
+    database::{FileRecord, store_file_record},
     parse_ar::ArArgs,
 };
 
@@ -25,10 +25,10 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     let _task_period = state
         .task_periods
         .start(&format!("Prepare: {}", output_file_name.to_string_lossy()));
-    let Ok(_) = store_db_file(
+    let Ok(_) = store_file_record(
         &state.conn.lock(),
         request_output_path,
-        &DbFilesRowData {
+        &FileRecord {
             cwd: request.cwd.clone(),
             binary: request.binary,
             args: request_ar_args.to_args(),

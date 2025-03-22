@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
     State,
-    database::{DbFilesRowData, store_db_file},
+    database::{FileRecord, store_file_record},
     log_file,
     parse_gcc::{GCCArgs, Language, SourceFile},
 };
@@ -402,10 +402,10 @@ pub async fn handle_gcc_without_link_request(
         return HttpResponse::InternalServerError().body("Failed to write local code");
     };
 
-    let Ok(_) = store_db_file(
+    let Ok(_) = store_file_record(
         &state.conn.lock(),
         &preprocess_result.original_obj_output,
-        &DbFilesRowData {
+        &FileRecord {
             cwd: cwd.to_path_buf(),
             binary,
             args: build_object_file_args.to_args(),

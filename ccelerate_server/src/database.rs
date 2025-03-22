@@ -8,7 +8,7 @@ use bstr::BString;
 use ccelerate_shared::WrappedBinary;
 
 #[derive(Debug)]
-pub struct DbFilesRowData {
+pub struct FileRecord {
     pub cwd: PathBuf,
     pub binary: WrappedBinary,
     pub args: Vec<OsString>,
@@ -18,7 +18,7 @@ pub struct DbFilesRowData {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct DbFilesRowDataStorage {
+struct FileRecordStorage {
     cwd: OsString,
     binary: WrappedBinary,
     args: Vec<OsString>,
@@ -28,7 +28,7 @@ struct DbFilesRowDataStorage {
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-struct DbFilesRowDataDebug {
+struct FileRecordDebug {
     cwd: String,
     binary: WrappedBinary,
     args: Vec<String>,
@@ -37,8 +37,8 @@ struct DbFilesRowDataDebug {
     include_defines: Option<Vec<String>>,
 }
 
-impl DbFilesRowDataStorage {
-    fn from_data(data: &DbFilesRowData) -> Self {
+impl FileRecordStorage {
+    fn from_record(data: &FileRecord) -> Self {
         Self {
             cwd: data.cwd.clone().into(),
             binary: data.binary,
@@ -52,8 +52,8 @@ impl DbFilesRowDataStorage {
         }
     }
 
-    fn to_data(&self) -> DbFilesRowData {
-        DbFilesRowData {
+    fn to_record(&self) -> FileRecord {
+        FileRecord {
             cwd: self.cwd.clone().into(),
             binary: self.binary,
             args: self.args.clone(),
@@ -67,8 +67,8 @@ impl DbFilesRowDataStorage {
     }
 }
 
-impl DbFilesRowDataDebug {
-    fn from_data(data: &DbFilesRowData) -> Self {
+impl FileRecordDebug {
+    fn from_record(data: &FileRecord) -> Self {
         Self {
             cwd: data.cwd.to_string_lossy().to_string(),
             binary: data.binary,
@@ -93,32 +93,31 @@ impl DbFilesRowDataDebug {
     }
 }
 
-pub fn store_db_file(
+pub fn store_file_record(
     conn: &rusqlite::Connection,
     path: &Path,
-    data: &DbFilesRowData,
+    data: &FileRecord,
 ) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO Files (path, data_debug, data) VALUES (?1, ?2, ?3)",
         rusqlite::params![
             path.to_string_lossy(),
-            serde_json::to_string_pretty(&DbFilesRowDataDebug::from_data(data)).unwrap(),
-            serde_json::to_string(&DbFilesRowDataStorage::from_data(data)).unwrap(),
+            serde_json::to_string_pretty(&FileRecordDebug::from_record(data)).unwrap(),
+            serde_json::to_string(&FileRecordStorage::from_record(data)).unwrap(),
         ],
     )?;
     Ok(())
 }
 
-pub fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRowData> {
+pub fn load_file_record(conn: &rusqlite::Connection, path: &Path) -> Option<FileRecord> {
     conn.query_row(
         "SELECT data FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
-            // TODO: Support OsStr in the database.
             let data = row.get::<usize, String>(0).unwrap();
-            Ok(serde_json::from_str::<DbFilesRowDataStorage>(&data)
+            Ok(serde_json::from_str::<FileRecordStorage>(&data)
                 .unwrap()
-                .to_data())
+                .to_record())
         },
     )
     .ok()
