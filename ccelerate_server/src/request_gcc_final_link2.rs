@@ -1,7 +1,8 @@
 #![deny(clippy::unwrap_used)]
 
 use std::{
-    ffi::OsStr,
+    collections::HashMap,
+    ffi::{OsStr, OsString},
     path::{Path, PathBuf},
 };
 
@@ -16,6 +17,7 @@ use crate::{
     state::State,
 };
 
+#[derive(Debug)]
 struct OriginalLinkSource {
     path: PathBuf,
     record: Option<FileRecord>,
@@ -53,14 +55,10 @@ fn find_smallest_link_sources(
                             current_source.display()
                         ));
                     }
-                    let gcc_args = GCCArgs::parse_owned(&record.cwd, record.args)?;
-                    if gcc_args.sources.len() != 1 {
-                        return Err(anyhow::anyhow!(
-                            "Object file has more than one source: {}",
-                            current_source.display()
-                        ));
-                    }
-                    remaining_sources.push(gcc_args.sources[0].path.clone());
+                    smallest_link_sources.push(OriginalLinkSource {
+                        path: current_source,
+                        record: Some(record),
+                    });
                     continue;
                 }
             }
@@ -78,16 +76,44 @@ async fn build_final_link_sources(
     original_sources: &[OriginalLinkSource],
 ) -> Result<Vec<PathBuf>> {
     let mut final_link_sources = Vec::new();
-    let mut remaining_sources = Vec::new();
+    let mut remaining_source_args = Vec::new();
     for original_source in original_sources {
         if let Some(record) = &original_source.record {
             if original_source.path.extension() == Some(OsStr::new("o")) {
-                remaining_sources.push(record.clone());
+                if let Ok(gcc_args) =
+                    GCCArgs::parse_owned(&original_source.path, record.args.clone())
+                {
+                    remaining_source_args.push(gcc_args);
+                }
                 continue;
             }
         }
         final_link_sources.push(original_source.path.clone());
     }
+
+    let mut possible_compile_groups: HashMap<OsString, Vec<GCCArgs>> = HashMap::new();
+    for source_args in remaining_source_args {
+        // Todo: Take header defines into account for grouping.
+        let mut stripped_source_args = source_args.clone();
+        stripped_source_args.sources.clear();
+        stripped_source_args.primary_output = None;
+        stripped_source_args.depfile_output_path = None;
+        stripped_source_args.depfile_target_name = None;
+        stripped_source_args.depfile_generate = false;
+        let stripped_args = stripped_source_args.to_args().join(OsStr::new(" "));
+        possible_compile_groups
+            .entry(stripped_args)
+            .or_default()
+            .push(source_args);
+    }
+
+    for (stripped_args, compile_group) in possible_compile_groups {
+        println!("Compile group: {:?}", stripped_args);
+        for compile_args in compile_group {
+            println!("  {:?}", compile_args.sources);
+        }
+    }
+
     Ok(final_link_sources)
 }
 
@@ -116,5 +142,5 @@ pub async fn handle_gcc_final_link_request2(
         })
         .collect();
     final_link_args.use_link_group = true;
-    todo!();
+    HttpResponse::Ok().body("todo")
 }

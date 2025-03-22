@@ -130,6 +130,13 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 )
                 .await;
             }
+            request_gcc_final_link2::handle_gcc_final_link_request2(
+                request.binary,
+                &request_gcc_args,
+                &request.cwd,
+                state,
+            )
+            .await;
             return request_gcc_final_link::handle_gcc_final_link_request(
                 request.binary,
                 &request_gcc_args,
