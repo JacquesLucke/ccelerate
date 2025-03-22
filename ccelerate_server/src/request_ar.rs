@@ -7,7 +7,7 @@ use ccelerate_shared::RunRequestData;
 
 use crate::{
     State,
-    database::{DbFilesRow, DbFilesRowData, store_db_file},
+    database::{DbFilesRowData, store_db_file},
     parse_ar::ArArgs,
 };
 
@@ -27,16 +27,14 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
         .start(&format!("Prepare: {}", output_file_name.to_string_lossy()));
     let Ok(_) = store_db_file(
         &state.conn.lock(),
-        &DbFilesRow {
-            path: request_output_path.clone(),
-            data: DbFilesRowData {
-                cwd: request.cwd.clone(),
-                binary: request.binary,
-                args: request_ar_args.to_args(),
-                local_code_file: None,
-                global_includes: None,
-                include_defines: None,
-            },
+        request_output_path,
+        &DbFilesRowData {
+            cwd: request.cwd.clone(),
+            binary: request.binary,
+            args: request_ar_args.to_args(),
+            local_code_file: None,
+            global_includes: None,
+            include_defines: None,
         },
     ) else {
         return HttpResponse::InternalServerError().body("Failed to store db file");

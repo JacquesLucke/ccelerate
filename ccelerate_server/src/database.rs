@@ -6,11 +6,6 @@ use std::{
 use bstr::BString;
 use ccelerate_shared::WrappedBinary;
 
-pub struct DbFilesRow {
-    pub path: PathBuf,
-    pub data: DbFilesRowData,
-}
-
 #[derive(Debug)]
 pub struct DbFilesRowData {
     pub cwd: PathBuf,
@@ -97,31 +92,32 @@ impl DbFilesRowDataDebug {
     }
 }
 
-pub fn store_db_file(conn: &rusqlite::Connection, row: &DbFilesRow) -> rusqlite::Result<()> {
+pub fn store_db_file(
+    conn: &rusqlite::Connection,
+    path: &Path,
+    data: &DbFilesRowData,
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO Files (path, data_debug, data) VALUES (?1, ?2, ?3)",
         rusqlite::params![
-            row.path.to_string_lossy(),
-            serde_json::to_string_pretty(&DbFilesRowDataDebug::from_data(&row.data)).unwrap(),
-            serde_json::to_string(&DbFilesRowDataStorage::from_data(&row.data)).unwrap(),
+            path.to_string_lossy(),
+            serde_json::to_string_pretty(&DbFilesRowDataDebug::from_data(data)).unwrap(),
+            serde_json::to_string(&DbFilesRowDataStorage::from_data(data)).unwrap(),
         ],
     )?;
     Ok(())
 }
 
-pub fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRow> {
+pub fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesRowData> {
     conn.query_row(
         "SELECT data FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
             // TODO: Support OsStr in the database.
             let data = row.get::<usize, String>(0).unwrap();
-            Ok(DbFilesRow {
-                path: path.to_path_buf(),
-                data: serde_json::from_str::<DbFilesRowDataStorage>(&data)
-                    .unwrap()
-                    .to_data(),
-            })
+            Ok(serde_json::from_str::<DbFilesRowDataStorage>(&data)
+                .unwrap()
+                .to_data())
         },
     )
     .ok()

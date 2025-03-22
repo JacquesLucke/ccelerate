@@ -32,17 +32,15 @@ fn find_smallest_link_units(
                 final_sources.insert(current_path.clone());
             }
             p if p.ends_with(".a") => {
-                let file_row = load_db_file(conn, &current_path);
-                if let Some(file_row) = file_row {
-                    match file_row.data.binary {
+                let data = load_db_file(conn, &current_path);
+                if let Some(data) = data {
+                    match data.binary {
                         binary if binary.is_gcc_compatible() => {
-                            let args = GCCArgs::parse_owned(&file_row.data.cwd, file_row.data.args)
-                                .unwrap();
+                            let args = GCCArgs::parse_owned(&data.cwd, data.args).unwrap();
                             remaining_paths.extend(args.sources.iter().map(|s| s.path.clone()));
                         }
                         binary if binary.is_ar_compatible() => {
-                            let args = ArArgs::parse_owned(&file_row.data.cwd, file_row.data.args)
-                                .unwrap();
+                            let args = ArArgs::parse_owned(&data.cwd, data.args).unwrap();
                             remaining_paths.extend(args.sources.iter().cloned());
                         }
                         binary => {
@@ -93,7 +91,7 @@ async fn build_combined_translation_unit(
     let mut global_defines = Vec::new();
 
     for original_object_file in original_object_files {
-        let Some(info) = load_db_file(&state.conn.lock(), original_object_file) else {
+        let Some(data) = load_db_file(&state.conn.lock(), original_object_file) else {
             assert!(original_object_files.len() == 1);
             tokio::fs::copy(original_object_file, dst_object_file)
                 .await
@@ -101,21 +99,18 @@ async fn build_combined_translation_unit(
             return;
         };
 
-        unit_binary = info.data.binary;
-        let original_gcc_args = GCCArgs::parse(
-            original_object_file,
-            &osstring_to_osstr_vec(&info.data.args),
-        )
-        .unwrap();
-        for header in &info.data.global_includes.unwrap() {
+        unit_binary = data.binary;
+        let original_gcc_args =
+            GCCArgs::parse(original_object_file, &osstring_to_osstr_vec(&data.args)).unwrap();
+        for header in &data.global_includes.unwrap() {
             if headers.contains(header) {
                 continue;
             }
             headers.push(header.clone());
         }
-        preprocess_paths.push(info.data.local_code_file.unwrap());
+        preprocess_paths.push(data.local_code_file.unwrap());
 
-        global_defines.extend(info.data.include_defines.unwrap_or_default());
+        global_defines.extend(data.include_defines.unwrap_or_default());
 
         preprocess_headers_gcc_args
             .user_includes

@@ -15,7 +15,7 @@ use std::{
 
 use crate::{
     State,
-    database::{DbFilesRow, DbFilesRowData, store_db_file},
+    database::{DbFilesRowData, store_db_file},
     log_file,
     parse_gcc::{GCCArgs, Language, SourceFile},
 };
@@ -404,16 +404,14 @@ pub async fn handle_gcc_without_link_request(
 
     let Ok(_) = store_db_file(
         &state.conn.lock(),
-        &DbFilesRow {
-            path: preprocess_result.original_obj_output,
-            data: DbFilesRowData {
-                cwd: cwd.to_path_buf(),
-                binary,
-                args: build_object_file_args.to_args(),
-                local_code_file: Some(preprocess_file_path),
-                global_includes: Some(preprocess_result.analysis.global_includes),
-                include_defines: Some(preprocess_result.analysis.include_defines),
-            },
+        &preprocess_result.original_obj_output,
+        &DbFilesRowData {
+            cwd: cwd.to_path_buf(),
+            binary,
+            args: build_object_file_args.to_args(),
+            local_code_file: Some(preprocess_file_path),
+            global_includes: Some(preprocess_result.analysis.global_includes),
+            include_defines: Some(preprocess_result.analysis.include_defines),
         },
     ) else {
         return HttpResponse::InternalServerError().body("Failed to store db file");
