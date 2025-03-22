@@ -15,6 +15,7 @@ use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
 use parse_gcc::GCCArgs;
 use ratatui::widgets::TableState;
+use state::State;
 use task_periods::TaskPeriods;
 
 mod config;
@@ -27,6 +28,7 @@ mod request_ar;
 mod request_gcc_eager;
 mod request_gcc_final_link;
 mod request_gcc_without_link;
+mod state;
 mod task_periods;
 mod tui;
 
@@ -43,17 +45,6 @@ struct Cli {
     jobs: Option<usize>,
     #[arg(long)]
     data_dir: Option<PathBuf>,
-}
-
-struct State {
-    address: String,
-    conn: Arc<Mutex<rusqlite::Connection>>,
-    task_periods: TaskPeriods,
-    tasks_table_state: Arc<Mutex<TableState>>,
-    pool: ParallelPool,
-    cli: Cli,
-    data_dir: PathBuf,
-    config: Arc<Mutex<Config>>,
 }
 
 #[actix_web::get("/")]
