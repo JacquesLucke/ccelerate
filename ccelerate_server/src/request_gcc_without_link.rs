@@ -279,13 +279,15 @@ async fn preprocess_file(
         });
     }
     let preprocessed_code = child_result.stdout;
-    let _ = log_file(
-        state,
-        &format!("Preprocessed {}", obj_path.display()),
-        &preprocessed_code,
-        preprocessed_language.to_valid_ext(),
-    )
-    .await;
+    if state.cli.log_files {
+        let _ = log_file(
+            state,
+            &format!("Preprocessed {}", obj_path.display()),
+            &preprocessed_code,
+            preprocessed_language.to_valid_ext(),
+        )
+        .await;
+    }
 
     let _task_period = log_task(
         &HandlePreprocessedTranslationUnitTaskInfo {

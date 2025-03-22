@@ -46,6 +46,8 @@ struct Cli {
     jobs: Option<usize>,
     #[arg(long)]
     data_dir: Option<PathBuf>,
+    #[arg(long)]
+    log_files: bool,
 }
 
 #[actix_web::get("/")]
