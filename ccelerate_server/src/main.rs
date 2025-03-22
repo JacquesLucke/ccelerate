@@ -20,7 +20,6 @@ use ratatui::{
     style::{Color, Style},
     widgets::TableState,
 };
-use rusqlite_migration::{M, Migrations};
 use task_periods::TaskPeriods;
 
 mod config;
@@ -221,30 +220,8 @@ async fn main() -> Result<()> {
         .data_dir
         .clone()
         .unwrap_or_else(|| PathBuf::from("./ccelerate_data"));
-
-    std::fs::create_dir_all(&data_dir).unwrap();
-
-    let db_migrations = Migrations::new(vec![M::up(
-        "
-        CREATE TABLE Files(
-            path TEXT NOT NULL PRIMARY KEY,
-            data TEXT NOT NULL,
-            data_debug TEXT NOT NULL
-        );
-        CREATE TABLE LogFiles(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            path TEXT NOT NULL,
-            time TEXT NOT NULL
-        );
-        ",
-    )]);
-
     let db_path = data_dir.join("ccelerate.db");
-    let mut conn = rusqlite::Connection::open(db_path)?;
-    conn.pragma_update(None, "journal_mode", "WAL")?;
-    db_migrations.to_latest(&mut conn)?;
-
+    let conn = database::load_or_create_db(&db_path)?;
     let addr = format!("127.0.0.1:{}", cli.port);
     let state = actix_web::web::Data::new(State {
         address: addr.clone(),

@@ -3,6 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use anyhow::Result;
 use bstr::BString;
 use ccelerate_shared::WrappedBinary;
 
@@ -121,4 +122,29 @@ pub fn load_db_file(conn: &rusqlite::Connection, path: &Path) -> Option<DbFilesR
         },
     )
     .ok()
+}
+
+pub fn load_or_create_db(path: &Path) -> Result<rusqlite::Connection> {
+    let db_migrations = rusqlite_migration::Migrations::new(vec![rusqlite_migration::M::up(
+        "
+        CREATE TABLE Files(
+            path TEXT NOT NULL PRIMARY KEY,
+            data TEXT NOT NULL,
+            data_debug TEXT NOT NULL
+        );
+        CREATE TABLE LogFiles(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            path TEXT NOT NULL,
+            time TEXT NOT NULL
+        );
+        ",
+    )]);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut conn = rusqlite::Connection::open(path)?;
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    db_migrations.to_latest(&mut conn)?;
+    Ok(conn)
 }
