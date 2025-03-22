@@ -246,9 +246,9 @@ async fn preprocess_file(
         return Err(PreprocessFileError::MissingPrimaryOutput);
     };
 
-    let _log_handle = state
-        .tasks_logger
-        .start_task(&format!("Preprocess: {}", source_file.path.display()));
+    let _task_period = state
+        .task_periods
+        .start(&format!("Preprocess: {}", source_file.path.display()));
 
     let preprocessing_args = update_gcc_args_for_preprocessing(build_object_file_args.clone());
 

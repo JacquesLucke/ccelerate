@@ -13,7 +13,7 @@ pub async fn handle_eager_gcc_request(
     cwd: &Path,
     state: &State,
 ) -> HttpResponse {
-    let _log_handle = state.tasks_logger.start_task(&format!(
+    let _task_period = state.task_periods.start(&format!(
         "Eager: {:?} {}",
         binary.to_standard_binary_name(),
         request_gcc_args

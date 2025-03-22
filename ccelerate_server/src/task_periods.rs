@@ -5,33 +5,49 @@ use std::{
 
 use parking_lot::Mutex;
 
-pub struct TasksLogger {
-    tasks: Arc<Mutex<Vec<TaskLog>>>,
+pub struct TaskPeriods {
+    tasks: Arc<Mutex<Vec<TaskPeriodStorage>>>,
 }
 
-impl TasksLogger {
+struct TaskPeriodStorage {
+    name: String,
+    start_time: Instant,
+    end_time: Arc<Mutex<Option<Instant>>>,
+}
+
+pub struct TaskPeriod {
+    pub name: String,
+    pub duration: Duration,
+    pub active: bool,
+}
+
+pub struct TaskPeriodScope {
+    end_time: Arc<Mutex<Option<Instant>>>,
+}
+
+impl TaskPeriods {
     pub fn new() -> Self {
         Self {
             tasks: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    pub fn start_task(&self, name: &str) -> TaskLogHandle {
+    pub fn start(&self, name: &str) -> TaskPeriodScope {
         let end_time = Arc::new(Mutex::new(None));
-        let task = TaskLog {
+        let task = TaskPeriodStorage {
             name: name.to_string(),
             start_time: Instant::now(),
             end_time: end_time.clone(),
         };
         self.tasks.lock().push(task);
-        TaskLogHandle { end_time }
+        TaskPeriodScope { end_time }
     }
 
-    pub fn get_for_print(&self) -> Vec<TaskLogPrint> {
+    pub fn get_periods(&self) -> Vec<TaskPeriod> {
         self.tasks
             .lock()
             .iter()
-            .map(|t| TaskLogPrint {
+            .map(|t| TaskPeriod {
                 name: t.name.clone(),
                 duration: t.duration(),
                 active: t.is_running(),
@@ -40,19 +56,7 @@ impl TasksLogger {
     }
 }
 
-struct TaskLog {
-    name: String,
-    start_time: Instant,
-    end_time: Arc<Mutex<Option<Instant>>>,
-}
-
-pub struct TaskLogPrint {
-    pub name: String,
-    pub duration: Duration,
-    pub active: bool,
-}
-
-impl TaskLog {
+impl TaskPeriodStorage {
     fn is_running(&self) -> bool {
         self.end_time.lock().is_none()
     }
@@ -65,11 +69,7 @@ impl TaskLog {
     }
 }
 
-pub struct TaskLogHandle {
-    end_time: Arc<Mutex<Option<Instant>>>,
-}
-
-impl Drop for TaskLogHandle {
+impl Drop for TaskPeriodScope {
     fn drop(&mut self) {
         *self.end_time.lock() = Some(Instant::now());
     }

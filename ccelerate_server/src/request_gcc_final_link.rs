@@ -196,14 +196,12 @@ async fn build_combined_translation_unit(
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&headers_code).await.unwrap();
     }
-    let child_result = {
-        log::info!("Preprocess Header: {:?}", dst_object_file.file_name());
-        let _log_handle = state.tasks_logger.start_task(&format!(
-            "Preprocess Header: {:?}",
-            dst_object_file.file_name()
-        ));
-        child.wait_with_output().await.unwrap()
-    };
+    log::info!("Preprocess Header: {:?}", dst_object_file.file_name());
+    let _task_period = state.task_periods.start(&format!(
+        "Preprocess Header: {:?}",
+        dst_object_file.file_name()
+    ));
+    let child_result = child.wait_with_output().await.unwrap();
 
     let mut combined_code: String = "".to_string();
     combined_code.push_str(std::str::from_utf8(&child_result.stdout).unwrap());
@@ -236,13 +234,11 @@ async fn build_combined_translation_unit(
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    let result = {
-        log::info!("Compile unit: {:#?}", compile_gcc_args.to_args());
-        let _log_handle = state
-            .tasks_logger
-            .start_task(&format!("Compile unit: {:?}", dst_object_file.file_name()));
-        child.wait_with_output().await.unwrap()
-    };
+    log::info!("Compile unit: {:#?}", compile_gcc_args.to_args());
+    let _task_period = state
+        .task_periods
+        .start(&format!("Compile unit: {:?}", dst_object_file.file_name()));
+    let result = child.wait_with_output().await.unwrap();
     if !result.status.success() {
         log::error!(
             "Compile unit failed: {}",
@@ -316,20 +312,18 @@ pub async fn handle_gcc_final_link_request(
             .map(|u| u.wrapped_object_path.clone())
             .collect(),
     };
-    {
-        let _task_handle = state.tasks_logger.start_task(&format!(
-            "Build thin archive: {}",
-            wrapped_units_archive_path.to_string_lossy()
-        ));
-        tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
-            .args(wrapped_units_archive_args.to_args())
-            .current_dir(cwd)
-            .spawn()
-            .unwrap()
-            .wait_with_output()
-            .await
-            .unwrap();
-    }
+    let _task_period = state.task_periods.start(&format!(
+        "Build thin archive: {}",
+        wrapped_units_archive_path.to_string_lossy()
+    ));
+    tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
+        .args(wrapped_units_archive_args.to_args())
+        .current_dir(cwd)
+        .spawn()
+        .unwrap()
+        .wait_with_output()
+        .await
+        .unwrap();
 
     let mut modified_gcc_args = request_gcc_args.clone();
     modified_gcc_args.sources = vec![];
@@ -347,7 +341,7 @@ pub async fn handle_gcc_final_link_request(
             .collect::<Vec<_>>(),
     );
 
-    let _link_task_handle = state.tasks_logger.start_task(&format!(
+    let _task_period = state.task_periods.start(&format!(
         "Link: {}",
         modified_gcc_args
             .primary_output

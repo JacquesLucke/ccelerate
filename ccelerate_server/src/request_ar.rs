@@ -18,9 +18,9 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     let Some(output_file_name) = request_output_path.file_name() else {
         return HttpResponse::BadRequest().body("Expected output file name");
     };
-    let _task_handle = state
-        .tasks_logger
-        .start_task(&format!("Prepare: {}", output_file_name.to_string_lossy()));
+    let _task_period = state
+        .task_periods
+        .start(&format!("Prepare: {}", output_file_name.to_string_lossy()));
     let Ok(_) = store_db_file(
         &state.conn.lock(),
         &DbFilesRow {

@@ -22,7 +22,7 @@ use ratatui::{
     widgets::TableState,
 };
 use rusqlite_migration::{M, Migrations};
-use task_periods::TasksLogger;
+use task_periods::TaskPeriods;
 
 mod config;
 mod parallel_pool;
@@ -53,7 +53,7 @@ struct Cli {
 struct State {
     address: String,
     conn: Arc<Mutex<rusqlite::Connection>>,
-    tasks_logger: TasksLogger,
+    task_periods: TaskPeriods,
     tasks_table_state: Arc<Mutex<TableState>>,
     pool: ParallelPool,
     cli: Cli,
@@ -370,7 +370,7 @@ async fn main() -> Result<()> {
     let state = actix_web::web::Data::new(State {
         address: addr.clone(),
         conn: Arc::new(Mutex::new(conn)),
-        tasks_logger: TasksLogger::new(),
+        task_periods: TaskPeriods::new(),
         tasks_table_state: Arc::new(Mutex::new(TableState::default())),
         pool: ParallelPool::new(cli.jobs.unwrap_or_else(|| {
             std::thread::available_parallelism()
@@ -430,7 +430,7 @@ async fn main() -> Result<()> {
 fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>) {
     use ratatui::layout::Constraint::*;
 
-    let mut tasks = state.tasks_logger.get_for_print();
+    let mut tasks = state.task_periods.get_periods();
     tasks.sort_by_key(|t| {
         (
             t.active,
