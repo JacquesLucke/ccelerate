@@ -146,9 +146,24 @@ struct CompileChunk {
     binary: WrappedBinary,
 }
 
+struct GroupObjectsToChunksTaskInfo {}
+
+impl TaskInfo for GroupObjectsToChunksTaskInfo {
+    fn short_name(&self) -> String {
+        "Group objects to chunks".to_string()
+    }
+
+    fn log(&self) {
+        log::info!("Group objects to chunks");
+    }
+}
+
 fn known_object_files_to_chunks(
     original_object_records: &[FileRecord],
+    state: &Data<State>,
 ) -> Result<Vec<CompileChunk>> {
+    let _task_period = log_task(&GroupObjectsToChunksTaskInfo {}, &state);
+
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
         let gcc_args = GCCArgs::parse_owned(&record.cwd, &record.args)?;
@@ -459,7 +474,7 @@ pub async fn handle_gcc_final_link_request(
     let Ok(link_sources) = find_link_sources(request_gcc_args, &state.conn.lock(), state) else {
         return HttpResponse::BadRequest().body("Error finding link sources");
     };
-    let Ok(chunks) = known_object_files_to_chunks(&link_sources.known_object_files) else {
+    let Ok(chunks) = known_object_files_to_chunks(&link_sources.known_object_files, state) else {
         return HttpResponse::BadRequest().body("Error chunking objects");
     };
 
