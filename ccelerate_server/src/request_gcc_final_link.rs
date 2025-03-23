@@ -252,12 +252,35 @@ async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<
     Ok(objects)
 }
 
+struct CompileChunkTaskInfo<'a> {
+    chunk: &'a CompileChunk,
+    local_code_files: &'a [&'a Path],
+}
+
+impl TaskInfo for CompileChunkTaskInfo<'_> {
+    fn short_name(&self) -> String {
+        "Compile chunk".to_string()
+    }
+
+    fn log(&self) {
+        log::info!("Compile chunk");
+    }
+}
+
 async fn compile_chunk_sources(
     chunk: &CompileChunk,
     state: &Data<State>,
     all_preprocessed_headers: &BStr,
     local_code_files: &[&Path],
 ) -> Result<PathBuf> {
+    let _task_period = log_task(
+        &CompileChunkTaskInfo {
+            chunk,
+            local_code_files,
+        },
+        state,
+    );
+
     let mut gcc_args = chunk.reduced_args.clone();
     gcc_args.stop_before_link = true;
     gcc_args.stop_after_preprocessing = false;
@@ -417,10 +440,24 @@ fn get_compile_chunk_header_code(chunk: &CompileChunk, state: &Data<State>) -> R
     Ok(headers_code)
 }
 
+struct CreateThinArchiveTaskInfo {}
+
+impl TaskInfo for CreateThinArchiveTaskInfo {
+    fn short_name(&self) -> String {
+        "Create thin archive".to_string()
+    }
+
+    fn log(&self) {
+        log::info!("Create thin archive");
+    }
+}
+
 pub async fn create_thin_archive_for_objects(
     objects: &[PathBuf],
     state: &Data<State>,
 ) -> Result<PathBuf> {
+    let _task_period = log_task(&CreateThinArchiveTaskInfo {}, state);
+
     let archive_name = format!("{}.a", uuid::Uuid::new_v4());
     let archive_dir = state.data_dir.join("archives").join(&archive_name[..2]);
     let archive_path = archive_dir.join(archive_name);
@@ -449,13 +486,27 @@ pub async fn create_thin_archive_for_objects(
     Ok(archive_path)
 }
 
+struct FinalLinkTaskInfo {}
+
+impl TaskInfo for FinalLinkTaskInfo {
+    fn short_name(&self) -> String {
+        "Final link".to_string()
+    }
+
+    fn log(&self) {
+        log::info!("Final link");
+    }
+}
+
 pub async fn final_link(
     binary: WrappedBinary,
     original_gcc_args: &GCCArgs,
     cwd: &Path,
-    _state: &Data<State>,
+    state: &Data<State>,
     sources: &[PathBuf],
 ) -> Result<std::process::Output> {
+    let _task_period = log_task(&FinalLinkTaskInfo {}, state);
+
     let mut args = original_gcc_args.clone();
     args.sources = sources
         .iter()
