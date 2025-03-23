@@ -14,6 +14,7 @@ use config::Config;
 use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
 use parse_gcc::GCCArgs;
+use path_utils::make_absolute;
 use ratatui::widgets::TableState;
 use state::State;
 use task_periods::TaskPeriods;
@@ -214,10 +215,13 @@ impl log::Log for NoTuiLogger {
 async fn main() -> Result<()> {
     let cli: Cli = clap::Parser::parse();
 
-    let data_dir = cli
-        .data_dir
-        .clone()
-        .unwrap_or_else(|| PathBuf::from("./ccelerate_data"));
+    let cwd = std::env::current_dir()?;
+    let data_dir = make_absolute(
+        &cwd,
+        &cli.data_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("./ccelerate_data")),
+    );
     let db_path = data_dir.join("ccelerate.db");
     let conn = database::load_or_create_db(&db_path)?;
     let addr = format!("127.0.0.1:{}", cli.port);

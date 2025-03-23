@@ -393,6 +393,38 @@ pub async fn create_thin_archive_for_objects(
     Ok(archive_path)
 }
 
+pub async fn final_link(
+    binary: WrappedBinary,
+    original_gcc_args: &GCCArgs,
+    cwd: &Path,
+    state: &Data<State>,
+    sources: &[PathBuf],
+) -> Result<()> {
+    let mut args = original_gcc_args.clone();
+    args.sources = sources
+        .iter()
+        .map(|p| SourceFile {
+            path: p.clone(),
+            language_override: None,
+        })
+        .collect();
+    args.use_link_group = true;
+    let child = tokio::process::Command::new(binary.to_standard_binary_name())
+        .args(args.to_args())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .current_dir(cwd)
+        .spawn()?;
+    let child_output = child.wait_with_output().await?;
+    if !child_output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Linking failed: {}",
+            String::from_utf8_lossy(&child_output.stderr)
+        ));
+    }
+    Ok(())
+}
+
 pub async fn handle_gcc_final_link_request2(
     binary: WrappedBinary,
     request_gcc_args: &GCCArgs,
@@ -433,14 +465,16 @@ pub async fn handle_gcc_final_link_request2(
         return HttpResponse::BadRequest().body("Error creating thin archive");
     };
 
-    // let mut final_link_args = request_gcc_args.clone();
-    // final_link_args.sources = final_link_sources
-    //     .iter()
-    //     .map(|s| SourceFile {
-    //         path: s.clone(),
-    //         language_override: None,
-    //     })
-    //     .collect();
-    // final_link_args.use_link_group = true;
-    HttpResponse::Ok().body("todo")
+    let mut all_link_sources = vec![archive_path];
+    all_link_sources.extend(link_sources.unknown_sources.into_iter());
+
+    match final_link(binary, request_gcc_args, cwd, state, &all_link_sources).await {
+        Ok(_) => {}
+        Err(e) => {
+            log::error!("Error linking thin archive: {:?}", e);
+            return HttpResponse::BadRequest().body("Error linking thin archive");
+        }
+    }
+
+    HttpResponse::Ok().body("")
 }
