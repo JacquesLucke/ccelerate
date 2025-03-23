@@ -36,7 +36,7 @@ fn find_smallest_link_units(
                 if let Some(data) = record {
                     match data.binary {
                         binary if binary.is_gcc_compatible() => {
-                            let args = GCCArgs::parse_owned(&data.cwd, data.args).unwrap();
+                            let args = GCCArgs::parse_owned(&data.cwd, &data.args).unwrap();
                             remaining_paths.extend(args.sources.iter().map(|s| s.path.clone()));
                         }
                         binary if binary.is_ar_compatible() => {
