@@ -317,10 +317,26 @@ async fn compile_chunk_sources(
     Ok(object_path)
 }
 
+struct GetPreprocessedHeadersTaskInfo<'a> {
+    chunk: &'a CompileChunk,
+}
+
+impl TaskInfo for GetPreprocessedHeadersTaskInfo<'_> {
+    fn short_name(&self) -> String {
+        "Get preprocessed headers".to_string()
+    }
+
+    fn log(&self) {
+        log::info!("Get preprocessed headers");
+    }
+}
+
 async fn get_compile_chunk_preprocessed_headers(
     chunk: &CompileChunk,
     state: &Data<State>,
 ) -> Result<BString> {
+    let _task_period = log_task(&GetPreprocessedHeadersTaskInfo { chunk }, state);
+
     let headers_code = get_compile_chunk_header_code(chunk, state)?;
     if state.cli.log_files {
         let mut identifier = String::new();
