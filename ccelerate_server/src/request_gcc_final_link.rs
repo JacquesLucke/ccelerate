@@ -19,6 +19,7 @@ use crate::{
     log_file,
     parse_ar::ArArgs,
     parse_gcc::{GCCArgs, Language, SourceFile},
+    path_utils::shorten_path,
     state::State,
     task_log::{TaskInfo, log_task},
 };
@@ -39,12 +40,7 @@ struct FindLinkSourcesTaskInfo {
 
 impl TaskInfo for FindLinkSourcesTaskInfo {
     fn short_name(&self) -> String {
-        let name = if let Some(output_name) = self.output.file_name() {
-            output_name.to_string_lossy()
-        } else {
-            self.output.to_string_lossy()
-        };
-        format!("Find link sources for {}", name)
+        format!("Find link sources for {}", shorten_path(&self.output))
     }
 
     fn log(&self) {
@@ -162,7 +158,7 @@ fn known_object_files_to_chunks(
     original_object_records: &[FileRecord],
     state: &Data<State>,
 ) -> Result<Vec<CompileChunk>> {
-    let _task_period = log_task(&GroupObjectsToChunksTaskInfo {}, &state);
+    let _task_period = log_task(&GroupObjectsToChunksTaskInfo {}, state);
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
@@ -231,7 +227,14 @@ async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<
     gcc_args.stop_after_preprocessing = false;
     gcc_args.stop_before_assemble = false;
 
-    let all_preprocessed_headers = get_compile_chunk_preprocessed_headers(&chunk, state).await?;
+    let all_preprocessed_headers = {
+        let chunk = chunk.clone();
+        let state_clone = state.clone();
+        state
+            .pool
+            .run(async move || get_compile_chunk_preprocessed_headers(&chunk, &state_clone).await)
+            .await??
+    };
 
     let handles = FuturesUnordered::new();
     for source in &chunk.preprocessed_sources {
@@ -253,17 +256,27 @@ async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<
 }
 
 struct CompileChunkTaskInfo<'a> {
-    chunk: &'a CompileChunk,
     local_code_files: &'a [&'a Path],
 }
 
 impl TaskInfo for CompileChunkTaskInfo<'_> {
     fn short_name(&self) -> String {
-        "Compile chunk".to_string()
+        let mut short_name = "Compile chunk for: ".to_string();
+        for local_code_file in self.local_code_files {
+            short_name.push_str(&shorten_path(local_code_file));
+            short_name.push(' ');
+        }
+        short_name
     }
 
     fn log(&self) {
-        log::info!("Compile chunk");
+        let mut msg = "Compile chunk: ".to_string();
+        for local_code_file in self.local_code_files {
+            msg.push_str("  ");
+            msg.push_str(&shorten_path(local_code_file));
+            msg.push('\n');
+        }
+        log::info!("{}", msg);
     }
 }
 
@@ -273,13 +286,7 @@ async fn compile_chunk_sources(
     all_preprocessed_headers: &BStr,
     local_code_files: &[&Path],
 ) -> Result<PathBuf> {
-    let _task_period = log_task(
-        &CompileChunkTaskInfo {
-            chunk,
-            local_code_files,
-        },
-        state,
-    );
+    let _task_period = log_task(&CompileChunkTaskInfo { local_code_files }, state);
 
     let mut gcc_args = chunk.reduced_args.clone();
     gcc_args.stop_before_link = true;
@@ -340,11 +347,9 @@ async fn compile_chunk_sources(
     Ok(object_path)
 }
 
-struct GetPreprocessedHeadersTaskInfo<'a> {
-    chunk: &'a CompileChunk,
-}
+struct GetPreprocessedHeadersTaskInfo {}
 
-impl TaskInfo for GetPreprocessedHeadersTaskInfo<'_> {
+impl TaskInfo for GetPreprocessedHeadersTaskInfo {
     fn short_name(&self) -> String {
         "Get preprocessed headers".to_string()
     }
@@ -358,7 +363,7 @@ async fn get_compile_chunk_preprocessed_headers(
     chunk: &CompileChunk,
     state: &Data<State>,
 ) -> Result<BString> {
-    let _task_period = log_task(&GetPreprocessedHeadersTaskInfo { chunk }, state);
+    let _task_period = log_task(&GetPreprocessedHeadersTaskInfo {}, state);
 
     let headers_code = get_compile_chunk_header_code(chunk, state)?;
     if state.cli.log_files {
@@ -486,15 +491,17 @@ pub async fn create_thin_archive_for_objects(
     Ok(archive_path)
 }
 
-struct FinalLinkTaskInfo {}
+struct FinalLinkTaskInfo {
+    output: PathBuf,
+}
 
 impl TaskInfo for FinalLinkTaskInfo {
     fn short_name(&self) -> String {
-        "Final link".to_string()
+        format!("Final link for {}", shorten_path(&self.output))
     }
 
     fn log(&self) {
-        log::info!("Final link");
+        log::info!("Final link for {}", self.output.to_string_lossy());
     }
 }
 
@@ -505,7 +512,15 @@ pub async fn final_link(
     state: &Data<State>,
     sources: &[PathBuf],
 ) -> Result<std::process::Output> {
-    let _task_period = log_task(&FinalLinkTaskInfo {}, state);
+    let _task_period = log_task(
+        &FinalLinkTaskInfo {
+            output: original_gcc_args
+                .primary_output
+                .clone()
+                .unwrap_or(PathBuf::from("")),
+        },
+        state,
+    );
 
     let mut args = original_gcc_args.clone();
     args.sources = sources
