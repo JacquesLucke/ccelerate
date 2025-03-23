@@ -246,7 +246,7 @@ async fn compile_chunk_sources(
         .await?;
     }
 
-    let object_name = uuid::Uuid::new_v4().to_string();
+    let object_name = format!("{}.o", uuid::Uuid::new_v4());
     let object_dir = state.data_dir.join("objects").join(&object_name[..2]);
     let object_path = object_dir.join(object_name);
     tokio::fs::create_dir_all(&object_dir).await?;
