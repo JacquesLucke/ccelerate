@@ -20,6 +20,7 @@ use crate::{
     parse_ar::ArArgs,
     parse_gcc::{GCCArgs, Language, SourceFile},
     state::State,
+    task_log::{TaskInfo, log_task},
 };
 
 #[derive(Debug, Default)]
@@ -32,10 +33,40 @@ struct OriginalLinkSources {
     known_object_files: Vec<FileRecord>,
 }
 
+struct FindLinkSourcesTaskInfo {
+    output: PathBuf,
+}
+
+impl TaskInfo for FindLinkSourcesTaskInfo {
+    fn short_name(&self) -> String {
+        let name = if let Some(output_name) = self.output.file_name() {
+            output_name.to_string_lossy()
+        } else {
+            self.output.to_string_lossy()
+        };
+        format!("Find link sources for {}", name)
+    }
+
+    fn log(&self) {
+        log::info!("Find link sources for {}", self.output.to_string_lossy());
+    }
+}
+
 fn find_link_sources(
     root_args: &GCCArgs,
     conn: &rusqlite::Connection,
+    state: &Data<State>,
 ) -> Result<OriginalLinkSources> {
+    let _task_period = log_task(
+        &FindLinkSourcesTaskInfo {
+            output: root_args
+                .primary_output
+                .clone()
+                .unwrap_or(PathBuf::from("")),
+        },
+        state,
+    );
+
     let mut link_sources = OriginalLinkSources::default();
     for source in root_args.sources.iter() {
         find_link_sources_for_file(&source.path, conn, &mut link_sources)?;
@@ -216,8 +247,6 @@ async fn compile_chunk_sources(
     gcc_args.stop_before_link = true;
     gcc_args.stop_after_preprocessing = false;
     gcc_args.stop_before_assemble = false;
-
-    println!("Compiling: {:?}", local_code_files);
 
     let mut full_preprocessed = all_preprocessed_headers.to_owned();
     for local_code_path in local_code_files {
@@ -427,7 +456,7 @@ pub async fn handle_gcc_final_link_request(
     cwd: &Path,
     state: &Data<State>,
 ) -> HttpResponse {
-    let Ok(link_sources) = find_link_sources(request_gcc_args, &state.conn.lock()) else {
+    let Ok(link_sources) = find_link_sources(request_gcc_args, &state.conn.lock(), state) else {
         return HttpResponse::BadRequest().body("Error finding link sources");
     };
     let Ok(chunks) = known_object_files_to_chunks(&link_sources.known_object_files) else {
