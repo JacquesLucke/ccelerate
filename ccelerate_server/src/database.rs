@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     ffi::OsString,
     path::{Path, PathBuf},
 };
@@ -15,6 +16,7 @@ pub struct FileRecord {
     pub local_code_file: Option<PathBuf>,
     pub global_includes: Option<Vec<PathBuf>>,
     pub include_defines: Option<Vec<BString>>,
+    pub bad_includes: Option<Vec<PathBuf>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -25,6 +27,7 @@ struct FileRecordStorage {
     local_code_file: Option<OsString>,
     global_includes: Option<Vec<OsString>>,
     include_defines: Option<Vec<BString>>,
+    bad_includes: Option<Vec<OsString>>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -35,6 +38,7 @@ struct FileRecordDebug {
     local_code_file: Option<String>,
     global_includes: Option<Vec<String>>,
     include_defines: Option<Vec<String>>,
+    bad_includes: Option<Vec<String>>,
 }
 
 impl FileRecordStorage {
@@ -49,6 +53,10 @@ impl FileRecordStorage {
                 .clone()
                 .map(|h| h.iter().map(|s| s.clone().into()).collect()),
             include_defines: data.include_defines.clone(),
+            bad_includes: data
+                .bad_includes
+                .clone()
+                .map(|h| h.iter().map(|s| s.clone().into()).collect()),
         }
     }
 
@@ -63,6 +71,10 @@ impl FileRecordStorage {
                 .clone()
                 .map(|h| h.iter().map(|s| s.clone().into()).collect()),
             include_defines: self.include_defines.clone(),
+            bad_includes: self
+                .bad_includes
+                .clone()
+                .map(|h| h.iter().map(|s| s.clone().into()).collect()),
         }
     }
 }
@@ -89,6 +101,10 @@ impl FileRecordDebug {
                 .include_defines
                 .as_ref()
                 .map(|h| h.iter().map(|s| s.to_string()).collect()),
+            bad_includes: data
+                .bad_includes
+                .as_ref()
+                .map(|h| h.iter().map(|s| s.to_string_lossy().to_string()).collect()),
         }
     }
 }

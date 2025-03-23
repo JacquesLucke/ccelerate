@@ -25,6 +25,7 @@ struct ConfigFile {
     local_header_patterns: Vec<String>,
     include_defines: Vec<String>,
     pure_c_header_patterns: Vec<String>,
+    bad_global_symbols_patterns: Vec<String>,
 }
 
 impl Config {
@@ -75,6 +76,17 @@ impl Config {
         for folder_config in self.folder_configs.iter() {
             for pattern in folder_config.config.pure_c_header_patterns.iter() {
                 if path.to_string_lossy().contains(pattern) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn has_bad_global_symbol(&self, path: &Path) -> bool {
+        for folder_config in self.folder_configs.iter() {
+            for pattern in folder_config.config.bad_global_symbols_patterns.iter() {
+                if path.ends_with(pattern) {
                     return true;
                 }
             }

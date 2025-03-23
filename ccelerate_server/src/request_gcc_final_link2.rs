@@ -146,6 +146,9 @@ fn known_object_files_to_chunks(
         for include_define in record.include_defines.iter().flatten() {
             chunk_key.push_str(include_define);
         }
+        for bad_include in record.bad_includes.iter().flatten() {
+            chunk_key.push_str(bad_include.as_os_str().as_encoded_bytes());
+        }
         let chunk = chunks.entry(chunk_key).or_insert_with(|| CompileChunk {
             reduced_args,
             global_includes: Vec::new(),
@@ -182,10 +185,10 @@ async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<
     gcc_args.stop_after_preprocessing = false;
     gcc_args.stop_before_assemble = false;
 
-    let preprocessed_headers = get_compile_chunk_preprocessed_headers(chunk, state).await?;
+    let all_preprocessed_headers = get_compile_chunk_preprocessed_headers(chunk, state).await?;
     for source in &chunk.preprocessed_sources {
         let local_source_code = tokio::fs::read(source).await?;
-        let mut full_preprocessed = preprocessed_headers.clone();
+        let mut full_preprocessed = all_preprocessed_headers.clone();
         full_preprocessed.push_str(&local_source_code);
 
         if state.cli.log_files {

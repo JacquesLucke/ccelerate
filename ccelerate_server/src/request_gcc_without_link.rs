@@ -6,6 +6,7 @@ use bstr::{BStr, BString, ByteSlice};
 use ccelerate_shared::WrappedBinary;
 use parking_lot::Mutex;
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
@@ -32,6 +33,8 @@ struct ParsePreprocessResult {
     // Sometimes, implementation files define values that affect headers that are typically global.
     // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
     include_defines: Vec<BString>,
+    // Some headers are bad because they define symbols aliases that easily conflict with other code.
+    bad_includes: HashSet<PathBuf>,
 }
 
 async fn parse_preprocessed_source(
@@ -72,6 +75,11 @@ async fn parse_preprocessed_source(
                     } else {
                         result.global_includes.push(header_path.to_owned());
                     }
+                }
+                if !result.bad_includes.contains(header_path)
+                    && state.config.lock().has_bad_global_symbol(header_path)
+                {
+                    result.bad_includes.insert(header_path.to_owned());
                 }
                 header_stack.push(header_path);
             } else if line_marker.is_return_to_file {
@@ -425,6 +433,13 @@ pub async fn handle_gcc_without_link_request(
             local_code_file: Some(preprocess_file_path),
             global_includes: Some(preprocess_result.analysis.global_includes),
             include_defines: Some(preprocess_result.analysis.include_defines),
+            bad_includes: Some(
+                preprocess_result
+                    .analysis
+                    .bad_includes
+                    .into_iter()
+                    .collect(),
+            ),
         },
     ) else {
         return HttpResponse::InternalServerError().body("Failed to store db file");

@@ -35,6 +35,7 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
             local_code_file: None,
             global_includes: None,
             include_defines: None,
+            bad_includes: None,
         },
     ) else {
         return HttpResponse::InternalServerError().body("Failed to store db file");
