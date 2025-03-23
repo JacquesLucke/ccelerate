@@ -13,15 +13,16 @@ impl ParallelPool {
         }
     }
 
-    pub fn run<F, Fut>(&self, f: F) -> JoinHandle<()>
+    pub fn run<F, Fut, Out>(&self, f: F) -> JoinHandle<Out>
     where
         F: FnOnce() -> Fut + Send + 'static,
-        Fut: Future<Output = ()> + Send + 'static,
+        Fut: Future<Output = Out> + Send + 'static,
+        Out: Send + 'static,
     {
         let permit = self.semaphore.clone().acquire_owned();
         tokio::task::spawn(async move {
             let _permit = permit.await.unwrap();
-            f().await;
+            f().await
         })
     }
 }
