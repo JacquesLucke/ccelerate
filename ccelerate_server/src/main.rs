@@ -28,7 +28,6 @@ mod path_utils;
 mod request_ar;
 mod request_gcc_eager;
 mod request_gcc_final_link;
-mod request_gcc_final_link2;
 mod request_gcc_without_link;
 mod state;
 mod task_log;
@@ -131,13 +130,6 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 )
                 .await;
             }
-            request_gcc_final_link2::handle_gcc_final_link_request2(
-                request.binary,
-                &request_gcc_args,
-                &request.cwd,
-                state,
-            )
-            .await;
             return request_gcc_final_link::handle_gcc_final_link_request(
                 request.binary,
                 &request_gcc_args,
