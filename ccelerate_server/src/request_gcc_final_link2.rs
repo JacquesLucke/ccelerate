@@ -361,6 +361,38 @@ fn get_compile_chunk_header_code(chunk: &CompileChunk, state: &Data<State>) -> R
     Ok(headers_code)
 }
 
+pub async fn create_thin_archive_for_objects(
+    objects: &[PathBuf],
+    state: &Data<State>,
+) -> Result<PathBuf> {
+    let archive_name = format!("{}.a", uuid::Uuid::new_v4());
+    let archive_dir = state.data_dir.join("archives").join(&archive_name[..2]);
+    let archive_path = archive_dir.join(archive_name);
+    tokio::fs::create_dir_all(&archive_dir).await?;
+
+    let ar_args = ArArgs {
+        flag_c: true,
+        flag_q: true,
+        flag_s: false,
+        thin_archive: true,
+        sources: objects.to_vec(),
+        output: Some(archive_path.clone()),
+    };
+
+    let child = tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
+        .args(ar_args.to_args())
+        .spawn()?;
+    let child_output = child.wait_with_output().await?;
+    if !child_output.status.success() {
+        return Err(anyhow::anyhow!(
+            "Archive creation failed: {}",
+            String::from_utf8_lossy(&child_output.stderr)
+        ));
+    }
+
+    Ok(archive_path)
+}
+
 pub async fn handle_gcc_final_link_request2(
     binary: WrappedBinary,
     request_gcc_args: &GCCArgs,
@@ -396,6 +428,10 @@ pub async fn handle_gcc_final_link_request2(
             }
         }
     }
+
+    let Ok(archive_path) = create_thin_archive_for_objects(&objects, state).await else {
+        return HttpResponse::BadRequest().body("Error creating thin archive");
+    };
 
     // let mut final_link_args = request_gcc_args.clone();
     // final_link_args.sources = final_link_sources

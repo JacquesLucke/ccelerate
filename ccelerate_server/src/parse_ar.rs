@@ -9,10 +9,14 @@ use anyhow::Result;
 
 use crate::path_utils::make_absolute;
 
+// https://sourceware.org/binutils/docs/binutils/ar-cmdline.html
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct ArArgs {
+    // Quick append.
     pub flag_q: bool,
+    // Create the archive.
     pub flag_c: bool,
+    // Add an index to the archive.
     pub flag_s: bool,
     pub thin_archive: bool,
     pub output: Option<PathBuf>,
