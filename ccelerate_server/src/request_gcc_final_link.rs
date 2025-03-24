@@ -222,11 +222,6 @@ fn known_object_files_to_chunks(
 async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<PathBuf>> {
     let chunk = Arc::new(chunk.clone());
 
-    let mut gcc_args = chunk.reduced_args.clone();
-    gcc_args.stop_before_link = true;
-    gcc_args.stop_after_preprocessing = false;
-    gcc_args.stop_before_assemble = false;
-
     let all_preprocessed_headers = {
         let chunk = chunk.clone();
         let state_clone = state.clone();
