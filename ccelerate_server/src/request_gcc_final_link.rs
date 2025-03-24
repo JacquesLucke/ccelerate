@@ -9,7 +9,7 @@ use std::{
 
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
-use bstr::{BStr, BString, ByteSlice, ByteVec};
+use bstr::{BString, ByteVec};
 use ccelerate_shared::WrappedBinary;
 use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
@@ -222,24 +222,13 @@ fn known_object_files_to_chunks(
 async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<PathBuf>> {
     let chunk = Arc::new(chunk.clone());
 
-    let all_preprocessed_headers = {
-        let chunk = chunk.clone();
-        let state_clone = state.clone();
-        state
-            .pool
-            .run(async move || get_compile_chunk_preprocessed_headers(&chunk, &state_clone).await)
-            .await??
-    };
-
     let handles = FuturesUnordered::new();
     for source in &chunk.preprocessed_sources {
         let state_clone = state.clone();
         let source = source.clone();
-        let headers = all_preprocessed_headers.clone();
         let chunk = chunk.clone();
         let handle = state.pool.run(async move || {
-            return compile_chunk_sources(&chunk, &state_clone, headers.as_bstr(), &[&source])
-                .await;
+            return compile_chunk_sources(&chunk, &state_clone, &[&source]).await;
         });
         handles.push(handle);
     }
@@ -278,38 +267,15 @@ impl TaskInfo for CompileChunkTaskInfo<'_> {
 async fn compile_chunk_sources(
     chunk: &CompileChunk,
     state: &Data<State>,
-    all_preprocessed_headers: &BStr,
     local_code_files: &[&Path],
 ) -> Result<PathBuf> {
-    let _task_period = log_task(&CompileChunkTaskInfo { local_code_files }, state);
+    let preprocessed_headers = get_compile_chunk_preprocessed_headers(chunk, state).await?;
 
+    let _task_period = log_task(&CompileChunkTaskInfo { local_code_files }, state);
     let mut gcc_args = chunk.reduced_args.clone();
     gcc_args.stop_before_link = true;
     gcc_args.stop_after_preprocessing = false;
     gcc_args.stop_before_assemble = false;
-
-    let mut full_preprocessed = all_preprocessed_headers.to_owned();
-    for local_code_path in local_code_files {
-        let local_source_code = tokio::fs::read(local_code_path).await?;
-        full_preprocessed.push_str(&local_source_code);
-    }
-
-    if state.cli.log_files {
-        let mut identifier = String::new();
-        identifier.push_str("Full preprocessed for:\n");
-        for local_code_path in local_code_files {
-            identifier.push_str("  ");
-            identifier.push_str(&local_code_path.to_string_lossy());
-            identifier.push('\n');
-        }
-        log_file(
-            state,
-            &identifier,
-            &full_preprocessed,
-            chunk.source_language.to_preprocessed()?.to_valid_ext(),
-        )
-        .await?;
-    }
 
     let object_name = format!("{}.o", uuid::Uuid::new_v4());
     let object_dir = state.data_dir.join("objects").join(&object_name[..2]);
@@ -330,7 +296,13 @@ async fn compile_chunk_sources(
         .stderr(std::process::Stdio::piped())
         .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&full_preprocessed).await?;
+        stdin.write_all(&preprocessed_headers).await?;
+        for local_code_path in local_code_files {
+            let local_source_code = tokio::fs::read(local_code_path).await?;
+            stdin.write_all(&local_source_code).await?;
+        }
+    } else {
+        return Err(anyhow::anyhow!("Failed to open stdin for child process"));
     }
     let child_output = child.wait_with_output().await?;
     if !child_output.status.success() {
@@ -342,15 +314,17 @@ async fn compile_chunk_sources(
     Ok(object_path)
 }
 
-struct GetPreprocessedHeadersTaskInfo {}
+struct GetPreprocessedHeadersTaskInfo {
+    headers_num: usize,
+}
 
 impl TaskInfo for GetPreprocessedHeadersTaskInfo {
     fn short_name(&self) -> String {
-        "Get preprocessed headers".to_string()
+        format!("Get preprocessed headers: {}", self.headers_num)
     }
 
     fn log(&self) {
-        log::info!("Get preprocessed headers");
+        log::info!("Get preprocessed headers: {}", self.headers_num);
     }
 }
 
@@ -358,7 +332,12 @@ async fn get_compile_chunk_preprocessed_headers(
     chunk: &CompileChunk,
     state: &Data<State>,
 ) -> Result<BString> {
-    let _task_period = log_task(&GetPreprocessedHeadersTaskInfo {}, state);
+    let _task_period = log_task(
+        &GetPreprocessedHeadersTaskInfo {
+            headers_num: chunk.global_includes.len(),
+        },
+        state,
+    );
 
     let headers_code = get_compile_chunk_header_code(chunk, state)?;
     if state.cli.log_files {
