@@ -8,7 +8,12 @@ use std::{
 use parking_lot::Mutex;
 
 pub struct TaskPeriods {
-    tasks: Arc<Mutex<Vec<TaskPeriodStorage>>>,
+    tasks: Arc<Mutex<TaskPeriodsVec>>,
+}
+
+struct TaskPeriodsVec {
+    tasks: Vec<TaskPeriodStorage>,
+    final_sorted_num: usize,
 }
 
 struct TaskPeriodStorage {
@@ -33,7 +38,10 @@ pub struct TaskPeriodScope {
 impl TaskPeriods {
     pub fn new() -> Self {
         Self {
-            tasks: Arc::new(Mutex::new(Vec::new())),
+            tasks: Arc::new(Mutex::new(TaskPeriodsVec {
+                tasks: vec![],
+                final_sorted_num: 0,
+            })),
         }
     }
 
@@ -46,16 +54,31 @@ impl TaskPeriods {
             end_time: end_time.clone(),
             finished_successfully: finished_successfully.clone(),
         };
-        self.tasks.lock().push(task);
+        self.tasks.lock().tasks.push(task);
         TaskPeriodScope {
             end_time,
             finished_successfully,
         }
     }
 
-    pub fn get_periods(&self) -> Vec<TaskPeriod> {
-        self.tasks
-            .lock()
+    pub fn get_sorted_periods(&self) -> Vec<TaskPeriod> {
+        let mut tasks = self.tasks.lock();
+        let fixed_num = tasks.final_sorted_num;
+        let tasks_to_sort = &mut tasks.tasks[fixed_num..];
+        tasks_to_sort.sort_by_key(|t| {
+            let is_running = t.is_running();
+            let duration = t.duration();
+            (
+                is_running,
+                if is_running { duration } else { Duration::ZERO },
+            )
+        });
+        tasks.final_sorted_num += tasks_to_sort
+            .iter()
+            .position(|t| t.is_running())
+            .unwrap_or(0);
+        tasks
+            .tasks
             .iter()
             .map(|t| TaskPeriod {
                 name: t.name.clone(),

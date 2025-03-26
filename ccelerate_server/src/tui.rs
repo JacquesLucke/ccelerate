@@ -48,17 +48,7 @@ pub fn run_tui(state: &Data<State>) -> Result<()> {
 fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>) {
     use ratatui::layout::Constraint::*;
 
-    let mut tasks = state.task_periods.get_periods();
-    tasks.sort_by_key(|t| {
-        (
-            t.active,
-            if t.active {
-                (t.duration.as_secs_f64() * 100f64) as u64
-            } else {
-                0
-            },
-        )
-    });
+    let tasks: Vec<crate::task_periods::TaskPeriod> = state.task_periods.get_sorted_periods();
 
     let mut tasks_table_state = state.tasks_table_state.lock();
 
