@@ -1,7 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -31,6 +31,8 @@ struct OriginalLinkSources {
     // Those object files are compiled from source here, so we know how they are
     // compiled exactly and can optimize that process.
     known_object_files: Vec<FileRecord>,
+
+    handled_paths: HashSet<PathBuf>,
 }
 
 struct FindLinkSourcesTaskInfo {
@@ -94,6 +96,9 @@ fn find_link_sources_for_static_library(
     conn: &rusqlite::Connection,
     link_sources: &mut OriginalLinkSources,
 ) -> Result<()> {
+    if !link_sources.handled_paths.insert(library_path.to_owned()) {
+        return Ok(());
+    }
     let Some(record) = load_file_record(conn, library_path) else {
         link_sources.unknown_sources.push(library_path.to_owned());
         return Ok(());
@@ -116,6 +121,9 @@ fn find_link_sources_for_object_file(
     conn: &rusqlite::Connection,
     link_sources: &mut OriginalLinkSources,
 ) -> Result<()> {
+    if !link_sources.handled_paths.insert(object_path.to_owned()) {
+        return Ok(());
+    }
     let Some(record) = load_file_record(conn, object_path) else {
         link_sources.unknown_sources.push(object_path.to_owned());
         return Ok(());
