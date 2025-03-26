@@ -17,6 +17,7 @@ struct TaskPeriodsVec {
 }
 
 struct TaskPeriodStorage {
+    category: String,
     name: String,
     start_time: Instant,
     end_time: Arc<Mutex<Option<Instant>>>,
@@ -24,6 +25,7 @@ struct TaskPeriodStorage {
 }
 
 pub struct TaskPeriod {
+    pub category: String,
     pub name: String,
     pub duration: Duration,
     pub active: bool,
@@ -45,10 +47,11 @@ impl TaskPeriods {
         }
     }
 
-    pub fn start(&self, name: &str) -> TaskPeriodScope {
+    pub fn start(&self, category: &str, name: &str) -> TaskPeriodScope {
         let end_time = Arc::new(Mutex::new(None));
         let finished_successfully = Arc::new(Mutex::new(false));
         let task = TaskPeriodStorage {
+            category: category.to_string(),
             name: name.to_string(),
             start_time: Instant::now(),
             end_time: end_time.clone(),
@@ -81,6 +84,7 @@ impl TaskPeriods {
             .tasks
             .iter()
             .map(|t| TaskPeriod {
+                category: t.category.clone(),
                 name: t.name.clone(),
                 duration: t.duration(),
                 active: t.is_running(),

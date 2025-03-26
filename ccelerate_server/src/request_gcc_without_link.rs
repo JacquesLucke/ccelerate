@@ -459,6 +459,10 @@ struct PreprocessTranslationUnitTaskInfo {
 }
 
 impl TaskInfo for PreprocessTranslationUnitTaskInfo {
+    fn category(&self) -> String {
+        "Preprocess".to_string()
+    }
+
     fn short_name(&self) -> String {
         format!(
             "Preprocess: {}",
@@ -479,6 +483,10 @@ struct HandlePreprocessedTranslationUnitTaskInfo {
 }
 
 impl TaskInfo for HandlePreprocessedTranslationUnitTaskInfo {
+    fn category(&self) -> String {
+        "Local Code".to_string()
+    }
+
     fn short_name(&self) -> String {
         format!(
             "Handle preprocessed: {}",

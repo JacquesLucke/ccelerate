@@ -18,6 +18,10 @@ struct EagerGccTaskInfo {
 }
 
 impl TaskInfo for EagerGccTaskInfo {
+    fn category(&self) -> String {
+        "Eager".to_string()
+    }
+
     fn short_name(&self) -> String {
         if let Some(output) = self.args.primary_output.as_ref() {
             if let Some(output_name) = output.file_name() {

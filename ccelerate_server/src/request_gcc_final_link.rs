@@ -40,6 +40,10 @@ struct FindLinkSourcesTaskInfo {
 }
 
 impl TaskInfo for FindLinkSourcesTaskInfo {
+    fn category(&self) -> String {
+        "Link Sources".to_string()
+    }
+
     fn short_name(&self) -> String {
         format!("Find link sources for {}", shorten_path(&self.output))
     }
@@ -146,6 +150,10 @@ struct CompileChunk {
 struct GroupObjectsToChunksTaskInfo {}
 
 impl TaskInfo for GroupObjectsToChunksTaskInfo {
+    fn category(&self) -> String {
+        "Group Chunks".to_string()
+    }
+
     fn short_name(&self) -> String {
         "Group objects to chunks".to_string()
     }
@@ -235,6 +243,10 @@ struct CompileChunkTaskInfo<'a> {
 }
 
 impl TaskInfo for CompileChunkTaskInfo<'_> {
+    fn category(&self) -> String {
+        "Compile".to_string()
+    }
+
     fn short_name(&self) -> String {
         let mut short_name = format!("Compile ({}): ", self.sources.len());
         for source in self.sources {
@@ -337,6 +349,10 @@ struct GetPreprocessedHeadersTaskInfo {
 }
 
 impl TaskInfo for GetPreprocessedHeadersTaskInfo {
+    fn category(&self) -> String {
+        "Headers".to_string()
+    }
+
     fn short_name(&self) -> String {
         format!("Get preprocessed headers: {}", self.headers_num)
     }
@@ -446,6 +462,10 @@ fn get_compile_chunk_header_code(
 struct CreateThinArchiveTaskInfo {}
 
 impl TaskInfo for CreateThinArchiveTaskInfo {
+    fn category(&self) -> String {
+        "Archive".to_string()
+    }
+
     fn short_name(&self) -> String {
         "Create thin archive".to_string()
     }
@@ -495,6 +515,10 @@ struct FinalLinkTaskInfo {
 }
 
 impl TaskInfo for FinalLinkTaskInfo {
+    fn category(&self) -> String {
+        "Link".to_string()
+    }
+
     fn short_name(&self) -> String {
         format!("Final link for {}", shorten_path(&self.output))
     }

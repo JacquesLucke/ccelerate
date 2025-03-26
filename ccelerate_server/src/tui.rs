@@ -65,6 +65,7 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
         tasks.iter().map(|t| {
             ratatui::widgets::Row::new([
                 ratatui::text::Text::raw(format!("{:3.1}s", t.duration.as_secs_f64())),
+                ratatui::text::Text::raw(&t.category),
                 ratatui::text::Text::raw(&t.name),
             ])
             .style(if t.active {
@@ -75,7 +76,7 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
                 fail_style
             })
         }),
-        [Length(10), Percentage(100)],
+        [Length(10), Length(15), Percentage(100)],
     );
 
     frame.render_stateful_widget(table, main_area, &mut tasks_table_state);

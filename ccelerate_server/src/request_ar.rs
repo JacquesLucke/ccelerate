@@ -22,9 +22,10 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     let Some(output_file_name) = request_output_path.file_name() else {
         return HttpResponse::BadRequest().body("Expected output file name");
     };
-    let task_period = state
-        .task_periods
-        .start(&format!("Prepare: {}", output_file_name.to_string_lossy()));
+    let task_period = state.task_periods.start(
+        "Ar",
+        &format!("Prepare: {}", output_file_name.to_string_lossy()),
+    );
     let Ok(_) = store_file_record(
         &state.conn.lock(),
         request_output_path,
