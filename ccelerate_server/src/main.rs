@@ -242,6 +242,11 @@ async fn main() -> Result<()> {
     }
     // Run the server in the background and the tui on the main thread.
     tokio::spawn(server_thread(state.clone()));
-    tui::run_tui(&state);
+    match tui::run_tui(&state) {
+        Ok(_) => {}
+        Err(e) => {
+            log::error!("Error running tui: {e}");
+        }
+    };
     Ok(())
 }

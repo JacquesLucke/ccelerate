@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use std::path::{Path, PathBuf};
 
 pub fn make_absolute(base: &Path, path: &Path) -> PathBuf {

@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
@@ -112,13 +114,13 @@ pub fn store_file_record(
     conn: &rusqlite::Connection,
     path: &Path,
     data: &FileRecord,
-) -> rusqlite::Result<()> {
+) -> Result<()> {
     conn.execute(
         "INSERT OR REPLACE INTO Files (path, data_debug, data) VALUES (?1, ?2, ?3)",
         rusqlite::params![
             path.to_string_lossy(),
-            serde_json::to_string_pretty(&FileRecordDebug::from_record(data)).unwrap(),
-            serde_json::to_string(&FileRecordStorage::from_record(data)).unwrap(),
+            serde_json::to_string_pretty(&FileRecordDebug::from_record(data))?,
+            serde_json::to_string(&FileRecordStorage::from_record(data))?,
         ],
     )?;
     Ok(())
@@ -129,9 +131,10 @@ pub fn load_file_record(conn: &rusqlite::Connection, path: &Path) -> Option<File
         "SELECT data FROM Files WHERE path = ?",
         rusqlite::params![path.to_string_lossy().to_string()],
         |row| {
-            let data = row.get::<usize, String>(0).unwrap();
+            let data = row.get::<usize, String>(0).expect("should be valid");
             Ok(serde_json::from_str::<FileRecordStorage>(&data)
-                .unwrap()
+                // TODO: Should probably have better error handling for the case when the type changes.
+                .expect("should be valid")
                 .to_record())
         },
     )

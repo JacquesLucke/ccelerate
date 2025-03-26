@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use tokio::task::JoinHandle;
@@ -21,7 +23,7 @@ impl ParallelPool {
     {
         let permit = self.semaphore.clone().acquire_owned();
         tokio::task::spawn(async move {
-            let _permit = permit.await.unwrap();
+            let _permit = permit.await.expect("should be valid");
             f().await
         })
     }

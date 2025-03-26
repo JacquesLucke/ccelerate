@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use crate::{state::State, task_periods::TaskPeriodScope};
 
 pub trait TaskInfo {

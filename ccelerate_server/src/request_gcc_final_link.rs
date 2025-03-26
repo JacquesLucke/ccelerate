@@ -577,11 +577,11 @@ pub async fn handle_gcc_final_link_request(
             }
             Ok(Err(e)) => {
                 log::error!("Error compiling chunk: {:?}", e);
-                return HttpResponse::BadRequest().body("Error compiling chunk");
+                return HttpResponse::BadRequest().body(e.to_string());
             }
             Err(e) => {
                 log::error!("Error compiling chunk: {:?}", e);
-                return HttpResponse::BadRequest().body("Error compiling chunk");
+                return HttpResponse::InternalServerError().body(e.to_string());
             }
         }
     }

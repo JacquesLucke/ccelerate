@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use anyhow::Result;
 use bstr::BStr;
 use std::{
@@ -100,10 +102,12 @@ impl Config {
             if self.scanned_folders.contains(ancestor) {
                 return Ok(());
             }
-            self.scanned_folders.insert(ancestor.to_owned());
             let config_path = ancestor.join("ccelerate.toml");
             if !config_path.exists() {
                 continue;
+            }
+            for config_ancestor in config_path.ancestors() {
+                self.scanned_folders.insert(config_ancestor.to_owned());
             }
             self.load_config_file(&config_path)?;
             break;

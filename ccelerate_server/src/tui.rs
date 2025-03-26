@@ -1,4 +1,7 @@
+#![deny(clippy::unwrap_used)]
+
 use actix_web::web::Data;
+use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::Layout,
@@ -7,7 +10,7 @@ use ratatui::{
 
 use crate::State;
 
-pub fn run_tui(state: &Data<State>) {
+pub fn run_tui(state: &Data<State>) -> Result<()> {
     let mut terminal = ratatui::init();
 
     loop {
@@ -18,8 +21,8 @@ pub fn run_tui(state: &Data<State>) {
                 draw_terminal(frame, state_clone);
             })
             .expect("failed to draw terminal");
-        if crossterm::event::poll(std::time::Duration::from_millis(100)).unwrap() {
-            match crossterm::event::read().unwrap() {
+        if crossterm::event::poll(std::time::Duration::from_millis(100))? {
+            match crossterm::event::read()? {
                 Event::Key(KeyEvent {
                     code: KeyCode::Char('q'),
                     ..
@@ -39,6 +42,7 @@ pub fn run_tui(state: &Data<State>) {
         }
     }
     ratatui::restore();
+    Ok(())
 }
 
 fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>) {

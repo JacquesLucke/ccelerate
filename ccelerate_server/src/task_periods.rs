@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use std::{
     sync::Arc,
     time::{Duration, Instant},
