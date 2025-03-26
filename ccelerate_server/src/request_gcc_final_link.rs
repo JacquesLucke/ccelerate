@@ -236,7 +236,7 @@ struct CompileChunkTaskInfo<'a> {
 
 impl TaskInfo for CompileChunkTaskInfo<'_> {
     fn short_name(&self) -> String {
-        let mut short_name = "Compile chunk for: ".to_string();
+        let mut short_name = format!("Compile ({}): ", self.sources.len());
         for source in self.sources {
             short_name.push_str(&shorten_path(source));
             short_name.push(' ');
