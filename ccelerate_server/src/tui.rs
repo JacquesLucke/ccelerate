@@ -63,7 +63,8 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
     let text = ratatui::text::Text::raw(format!("ccelerate_server at http://{}", state.address));
     frame.render_widget(text, title_area);
 
-    let done_style = Style::new().fg(Color::Green);
+    let success_style = Style::new().fg(Color::Green);
+    let fail_style = Style::new().fg(Color::Red);
     let not_done_style = Style::new().fg(Color::Blue);
 
     let table = ratatui::widgets::Table::new(
@@ -72,7 +73,13 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
                 ratatui::text::Text::raw(format!("{:3.1}s", t.duration.as_secs_f64())),
                 ratatui::text::Text::raw(&t.name),
             ])
-            .style(if t.active { not_done_style } else { done_style })
+            .style(if t.active {
+                not_done_style
+            } else if t.finished_successfully {
+                success_style
+            } else {
+                fail_style
+            })
         }),
         [Length(10), Percentage(100)],
     );

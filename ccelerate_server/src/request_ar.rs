@@ -22,7 +22,7 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     let Some(output_file_name) = request_output_path.file_name() else {
         return HttpResponse::BadRequest().body("Expected output file name");
     };
-    let _task_period = state
+    let task_period = state
         .task_periods
         .start(&format!("Prepare: {}", output_file_name.to_string_lossy()));
     let Ok(_) = store_file_record(
@@ -46,6 +46,7 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     let Ok(_) = std::fs::write(request_output_path, dummy_archive.contents()) else {
         return HttpResponse::InternalServerError().body("Failed to write dummy archive");
     };
+    task_period.finished_successfully();
     HttpResponse::Ok().json(ccelerate_shared::RunResponseDataWire {
         ..Default::default()
     })

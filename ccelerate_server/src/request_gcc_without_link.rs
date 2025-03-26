@@ -44,6 +44,8 @@ async fn parse_preprocessed_source(
 ) -> Result<ParsePreprocessResult> {
     let mut result = ParsePreprocessResult::default();
 
+    writeln!(result.local_code, "#pragma GCC diagnostic push")?;
+
     let mut header_stack: Vec<&Path> = Vec::new();
     let mut local_depth = 0;
 
@@ -108,6 +110,7 @@ async fn parse_preprocessed_source(
             }
         }
     }
+    writeln!(result.local_code, "#pragma GCC diagnostic pop")?;
     Ok(result)
 }
 
@@ -257,7 +260,7 @@ async fn preprocess_file(
         return Err(PreprocessFileError::MissingPrimaryOutput);
     };
 
-    let _task_period = log_task(
+    let task_period = log_task(
         &PreprocessTranslationUnitTaskInfo {
             dst_object_file: obj_path.clone(),
         },
@@ -296,8 +299,8 @@ async fn preprocess_file(
         )
         .await;
     }
-
-    let _task_period = log_task(
+    task_period.finished_successfully();
+    let task_period = log_task(
         &HandlePreprocessedTranslationUnitTaskInfo {
             dst_object_file: obj_path.clone(),
         },
@@ -309,6 +312,7 @@ async fn preprocess_file(
         return Err(PreprocessFileError::AnalysisFailed);
     };
 
+    task_period.finished_successfully();
     Ok(PreprocessFileResult {
         source_file: source_file.clone(),
         preprocessed_language,

@@ -44,7 +44,7 @@ pub async fn handle_eager_gcc_request(
     cwd: &Path,
     state: &State,
 ) -> HttpResponse {
-    let _task_period = log_task(
+    let task_period = log_task(
         &EagerGccTaskInfo {
             binary,
             args: request_gcc_args.clone(),
@@ -64,6 +64,7 @@ pub async fn handle_eager_gcc_request(
     let Ok(child_result) = child.wait_with_output().await else {
         return HttpResponse::InternalServerError().body("Failed to wait on child");
     };
+    task_period.finished_successfully();
     HttpResponse::Ok().json(
         ccelerate_shared::RunResponseData {
             stdout: child_result.stdout,

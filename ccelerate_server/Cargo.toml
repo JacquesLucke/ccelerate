@@ -30,3 +30,4 @@ bstr = { version = "1.11.3", features = ["serde"] }
 toml = "0.8.20"
 chrono = "0.4.40"
 futures = "0.3.31"
+async-recursion = "1.1.1"

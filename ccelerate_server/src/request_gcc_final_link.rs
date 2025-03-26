@@ -52,7 +52,7 @@ fn find_link_sources(
     conn: &rusqlite::Connection,
     state: &Data<State>,
 ) -> Result<OriginalLinkSources> {
-    let _task_period = log_task(
+    let task_period = log_task(
         &FindLinkSourcesTaskInfo {
             output: root_args
                 .primary_output
@@ -66,6 +66,7 @@ fn find_link_sources(
     for source in root_args.sources.iter() {
         find_link_sources_for_file(&source.path, conn, &mut link_sources)?;
     }
+    task_period.finished_successfully();
     Ok(link_sources)
 }
 
@@ -150,7 +151,7 @@ fn known_object_files_to_chunks(
     original_object_records: &[FileRecord],
     state: &Data<State>,
 ) -> Result<Vec<CompileChunk>> {
-    let _task_period = log_task(&GroupObjectsToChunksTaskInfo {}, state);
+    let task_period = log_task(&GroupObjectsToChunksTaskInfo {}, state);
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
@@ -188,26 +189,37 @@ fn known_object_files_to_chunks(
         });
         chunk.records.push(record.clone());
     }
+    task_period.finished_successfully();
     Ok(chunks.into_values().collect())
 }
 
-async fn compile_chunk(chunk: &CompileChunk, state: &Data<State>) -> Result<Vec<PathBuf>> {
-    let chunk = Arc::new(chunk.clone());
-
-    let handles = FuturesUnordered::new();
-    for record in &chunk.records {
-        let state_clone = state.clone();
-        let record = Arc::new(record.clone());
-        let handle = state.pool.run(async move || {
-            return compile_chunk_sources(&state_clone, &[&record]).await;
-        });
-        handles.push(handle);
+#[async_recursion::async_recursion]
+async fn compile_chunk_in_chunks(
+    records: &[FileRecord],
+    state: &Data<State>,
+) -> Result<Vec<PathBuf>> {
+    if records.is_empty() {
+        return Ok(vec![]);
     }
-    let mut objects = vec![];
-    for handle in handles {
-        objects.push(handle.await??);
+    if records.len() <= 10 {
+        let result = compile_chunk_sources_in_pool(state, records).await;
+        match result {
+            Ok(object) => {
+                return Ok(vec![object]);
+            }
+            Err(e) => {
+                if records.len() == 1 {
+                    return Err(e);
+                }
+            }
+        }
     }
-    Ok(objects)
+    let (left, right) = records.split_at(records.len() / 2);
+    let (left, right) = tokio::try_join!(
+        compile_chunk_in_chunks(left, state),
+        compile_chunk_in_chunks(right, state)
+    )?;
+    Ok(left.into_iter().chain(right).collect())
 }
 
 struct CompileChunkTaskInfo<'a> {
@@ -235,7 +247,7 @@ impl TaskInfo for CompileChunkTaskInfo<'_> {
     }
 }
 
-async fn compile_chunk_sources(state: &Data<State>, records: &[&FileRecord]) -> Result<PathBuf> {
+async fn compile_chunk_sources(state: &Data<State>, records: &[FileRecord]) -> Result<PathBuf> {
     let sources = records
         .iter()
         .flat_map(|r| &r.local_code_file)
@@ -250,7 +262,7 @@ async fn compile_chunk_sources(state: &Data<State>, records: &[&FileRecord]) -> 
     let object_path = object_dir.join(object_name);
     tokio::fs::create_dir_all(&object_dir).await?;
 
-    let _task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
+    let task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
     let mut gcc_args = GCCArgs::parse_owned(&first_record.cwd, &first_record.args)?;
     let first_source = gcc_args
         .sources
@@ -296,7 +308,20 @@ async fn compile_chunk_sources(state: &Data<State>, records: &[&FileRecord]) -> 
             String::from_utf8_lossy(&child_output.stderr)
         ));
     }
+    task_period.finished_successfully();
     Ok(object_path)
+}
+
+async fn compile_chunk_sources_in_pool(
+    state: &Data<State>,
+    records: &[FileRecord],
+) -> Result<PathBuf> {
+    let state_clone = state.clone();
+    let records = Arc::new(records.to_vec());
+    state
+        .pool
+        .run(async move || compile_chunk_sources(&state_clone, &records).await)
+        .await?
 }
 
 struct GetPreprocessedHeadersTaskInfo {
@@ -314,7 +339,7 @@ impl TaskInfo for GetPreprocessedHeadersTaskInfo {
 }
 
 async fn get_compile_chunk_preprocessed_headers(
-    records: &[&FileRecord],
+    records: &[FileRecord],
     state: &Data<State>,
     source_language: Language,
 ) -> Result<BString> {
@@ -335,7 +360,7 @@ async fn get_compile_chunk_preprocessed_headers(
         }
     }
 
-    let _task_period = log_task(
+    let task_period = log_task(
         &GetPreprocessedHeadersTaskInfo {
             headers_num: ordered_unique_includes.len(),
         },
@@ -382,6 +407,7 @@ async fn get_compile_chunk_preprocessed_headers(
         ));
     }
     let preprocessed_headers = BString::from(child_output.stdout);
+    task_period.finished_successfully();
     Ok(preprocessed_headers)
 }
 
@@ -425,7 +451,7 @@ pub async fn create_thin_archive_for_objects(
     objects: &[PathBuf],
     state: &Data<State>,
 ) -> Result<PathBuf> {
-    let _task_period = log_task(&CreateThinArchiveTaskInfo {}, state);
+    let task_period = log_task(&CreateThinArchiveTaskInfo {}, state);
 
     let archive_name = format!("{}.a", uuid::Uuid::new_v4());
     let archive_dir = state.data_dir.join("archives").join(&archive_name[..2]);
@@ -452,6 +478,7 @@ pub async fn create_thin_archive_for_objects(
         ));
     }
 
+    task_period.finished_successfully();
     Ok(archive_path)
 }
 
@@ -476,7 +503,7 @@ pub async fn final_link(
     state: &Data<State>,
     sources: &[PathBuf],
 ) -> Result<std::process::Output> {
-    let _task_period = log_task(
+    let task_period = log_task(
         &FinalLinkTaskInfo {
             output: original_gcc_args
                 .primary_output
@@ -508,6 +535,7 @@ pub async fn final_link(
             String::from_utf8_lossy(&child_output.stderr)
         ));
     }
+    task_period.finished_successfully();
     Ok(child_output)
 }
 
@@ -527,7 +555,10 @@ pub async fn handle_gcc_final_link_request(
     let handles = FuturesUnordered::new();
     for chunk in chunks {
         let state = state.clone();
-        let handle = tokio::task::spawn(async move { compile_chunk(&chunk, &state).await });
+        let handle =
+            tokio::task::spawn(
+                async move { compile_chunk_in_chunks(&chunk.records, &state).await },
+            );
         handles.push(handle);
     }
     let mut objects = Vec::new();

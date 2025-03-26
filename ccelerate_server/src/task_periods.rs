@@ -13,16 +13,19 @@ struct TaskPeriodStorage {
     name: String,
     start_time: Instant,
     end_time: Arc<Mutex<Option<Instant>>>,
+    finished_successfully: Arc<Mutex<bool>>,
 }
 
 pub struct TaskPeriod {
     pub name: String,
     pub duration: Duration,
     pub active: bool,
+    pub finished_successfully: bool,
 }
 
 pub struct TaskPeriodScope {
     end_time: Arc<Mutex<Option<Instant>>>,
+    finished_successfully: Arc<Mutex<bool>>,
 }
 
 impl TaskPeriods {
@@ -34,13 +37,18 @@ impl TaskPeriods {
 
     pub fn start(&self, name: &str) -> TaskPeriodScope {
         let end_time = Arc::new(Mutex::new(None));
+        let finished_successfully = Arc::new(Mutex::new(false));
         let task = TaskPeriodStorage {
             name: name.to_string(),
             start_time: Instant::now(),
             end_time: end_time.clone(),
+            finished_successfully: finished_successfully.clone(),
         };
         self.tasks.lock().push(task);
-        TaskPeriodScope { end_time }
+        TaskPeriodScope {
+            end_time,
+            finished_successfully,
+        }
     }
 
     pub fn get_periods(&self) -> Vec<TaskPeriod> {
@@ -51,6 +59,7 @@ impl TaskPeriods {
                 name: t.name.clone(),
                 duration: t.duration(),
                 active: t.is_running(),
+                finished_successfully: *t.finished_successfully.lock(),
             })
             .collect()
     }
@@ -66,6 +75,12 @@ impl TaskPeriodStorage {
             .lock()
             .unwrap_or_else(Instant::now)
             .duration_since(self.start_time)
+    }
+}
+
+impl TaskPeriodScope {
+    pub fn finished_successfully(&self) {
+        *self.finished_successfully.lock() = true;
     }
 }
 
