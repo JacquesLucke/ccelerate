@@ -5,7 +5,7 @@ use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::Layout,
-    style::{Color, Style},
+    style::{Color, Style, Stylize},
 };
 
 use crate::State;
@@ -14,13 +14,17 @@ pub fn run_tui(state: &Data<State>) -> Result<()> {
     let mut terminal = ratatui::init();
 
     loop {
-        let state_clone = state.clone();
-        state_clone.tasks_table_state.lock().select_last();
-        terminal
-            .draw(|frame| {
-                draw_terminal(frame, state_clone);
-            })
-            .expect("failed to draw terminal");
+        if *state.auto_scroll.lock() {
+            state.tasks_table_state.lock().select_last();
+        }
+        {
+            let state = state.clone();
+            terminal
+                .draw(|frame| {
+                    draw_terminal(frame, state);
+                })
+                .expect("failed to draw terminal");
+        }
         if crossterm::event::poll(std::time::Duration::from_millis(100))? {
             match crossterm::event::read()? {
                 Event::Key(KeyEvent {
@@ -36,6 +40,34 @@ pub fn run_tui(state: &Data<State>) -> Result<()> {
                     ..
                 }) => {
                     break;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Up, ..
+                }) => {
+                    state.tasks_table_state.lock().select_previous();
+                    *state.auto_scroll.lock() = false;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Down,
+                    ..
+                }) => {
+                    state.tasks_table_state.lock().select_next();
+                    let is_at_end = state.tasks_table_state.lock().selected()
+                        == Some(state.task_periods.tasks_num() - 1);
+                    *state.auto_scroll.lock() = is_at_end;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Home,
+                    ..
+                }) => {
+                    state.tasks_table_state.lock().select_first();
+                    *state.auto_scroll.lock() = false;
+                }
+                Event::Key(KeyEvent {
+                    code: KeyCode::End, ..
+                }) => {
+                    state.tasks_table_state.lock().select_last();
+                    *state.auto_scroll.lock() = true;
                 }
                 _ => {}
             }
@@ -61,7 +93,7 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
     let fail_style = Style::new().fg(Color::Red);
     let not_done_style = Style::new().fg(Color::Blue);
 
-    let table = ratatui::widgets::Table::new(
+    let mut table = ratatui::widgets::Table::new(
         tasks.iter().map(|t| {
             ratatui::widgets::Row::new([
                 ratatui::text::Text::raw(format!("{:3.1}s", t.duration.as_secs_f64())),
@@ -78,6 +110,9 @@ fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>)
         }),
         [Length(10), Length(15), Percentage(100)],
     );
+    if !*state.auto_scroll.lock() {
+        table = table.row_highlight_style(Style::new().gray());
+    }
 
     frame.render_stateful_widget(table, main_area, &mut tasks_table_state);
 }

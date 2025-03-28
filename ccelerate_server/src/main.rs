@@ -222,6 +222,7 @@ async fn main() -> Result<()> {
         conn: Arc::new(Mutex::new(conn)),
         task_periods: TaskPeriods::new(),
         tasks_table_state: Arc::new(Mutex::new(TableState::default())),
+        auto_scroll: Arc::new(Mutex::new(true)),
         pool: ParallelPool::new(cli.jobs.unwrap_or_else(|| {
             std::thread::available_parallelism()
                 .unwrap_or(NonZeroUsize::new(1).unwrap())

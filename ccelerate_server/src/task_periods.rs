@@ -92,6 +92,10 @@ impl TaskPeriods {
             })
             .collect()
     }
+
+    pub fn tasks_num(&self) -> usize {
+        self.tasks.lock().tasks.len()
+    }
 }
 
 impl TaskPeriodStorage {

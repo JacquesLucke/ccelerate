@@ -11,6 +11,7 @@ pub struct State {
     pub conn: Arc<Mutex<rusqlite::Connection>>,
     pub task_periods: TaskPeriods,
     pub tasks_table_state: Arc<Mutex<ratatui::widgets::TableState>>,
+    pub auto_scroll: Arc<Mutex<bool>>,
     pub pool: ParallelPool,
     pub cli: Cli,
     pub data_dir: PathBuf,
