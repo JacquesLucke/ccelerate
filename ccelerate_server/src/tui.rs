@@ -69,6 +69,14 @@ pub fn run_tui(state: &Data<State>) -> Result<()> {
                     state.tasks_table_state.lock().select_last();
                     *state.auto_scroll.lock() = true;
                 }
+                Event::Key(KeyEvent {
+                    code: KeyCode::Char('s'),
+                    ..
+                }) => {
+                    let save_path = state.data_dir.join("tasks.json");
+                    let periods = state.task_periods.get_sorted_periods();
+                    std::fs::write(save_path, serde_json::to_string_pretty(&periods)?)?;
+                }
                 _ => {}
             }
         }
