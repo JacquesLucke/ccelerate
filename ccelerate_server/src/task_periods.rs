@@ -68,7 +68,7 @@ impl TaskPeriods {
         let mut tasks = self.tasks.lock();
         let fixed_num = tasks.final_sorted_num;
         let tasks_to_sort = &mut tasks.tasks[fixed_num..];
-        tasks_to_sort.sort_by_key(|t| {
+        tasks_to_sort.sort_by_cached_key(|t| {
             let is_running = t.is_running();
             let duration = t.duration();
             (
