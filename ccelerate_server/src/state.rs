@@ -4,7 +4,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use parking_lot::Mutex;
 
-use crate::{Cli, config::Config, parallel_pool::ParallelPool, task_periods::TaskPeriods};
+use crate::{Cli, config::ConfigManager, parallel_pool::ParallelPool, task_periods::TaskPeriods};
 
 pub struct State {
     pub address: String,
@@ -15,5 +15,5 @@ pub struct State {
     pub pool: ParallelPool,
     pub cli: Cli,
     pub data_dir: PathBuf,
-    pub config: Arc<Mutex<Config>>,
+    pub config_manager: ConfigManager,
 }

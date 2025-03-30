@@ -16,6 +16,7 @@ use std::{
 
 use crate::{
     State,
+    config::Config,
     database::{FileRecord, store_file_record},
     log_file,
     parse_gcc::{GCCArgs, Language, SourceFile},
@@ -40,7 +41,7 @@ struct ParsePreprocessResult {
 async fn parse_preprocessed_source(
     code: &BStr,
     source_file_path: &Path,
-    state: &Data<State>,
+    config: &Config,
 ) -> Result<ParsePreprocessResult> {
     let mut result = ParsePreprocessResult::default();
 
@@ -58,7 +59,7 @@ async fn parse_preprocessed_source(
         if line.starts_with(b"#define ") {
             if is_local {
                 if let Ok(macro_def) = MacroDefinition::parse(line) {
-                    if state.config.lock().is_include_define(macro_def.name) {
+                    if config.is_include_define(macro_def.name) {
                         result.include_defines.push(line.to_owned());
                     }
                 }
@@ -72,14 +73,14 @@ async fn parse_preprocessed_source(
             let header_path = Path::new(line_marker.header_name);
             if line_marker.is_start_of_new_file {
                 if is_local {
-                    if state.config.lock().is_local_header(header_path) {
+                    if config.is_local_header(header_path) {
                         local_depth += 1;
                     } else {
                         result.global_includes.push(header_path.to_owned());
                     }
                 }
                 if !result.bad_includes.contains(header_path)
-                    && state.config.lock().has_bad_global_symbol(header_path)
+                    && config.has_bad_global_symbol(header_path)
                 {
                     result.bad_includes.insert(header_path.to_owned());
                 }
@@ -243,6 +244,7 @@ async fn preprocess_file(
     build_object_file_args: &GCCArgs,
     cwd: &Path,
     state: &Data<State>,
+    config: &Config,
 ) -> Result<PreprocessFileResult, PreprocessFileError> {
     if build_object_file_args.sources.len() >= 2 {
         return Err(PreprocessFileError::MultipleSourceFiles);
@@ -307,7 +309,7 @@ async fn preprocess_file(
         state,
     );
     let Ok(analysis) =
-        parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, state).await
+        parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, config).await
     else {
         return Err(PreprocessFileError::AnalysisFailed);
     };
@@ -326,6 +328,7 @@ pub async fn handle_gcc_without_link_request(
     build_object_file_args: &GCCArgs,
     cwd: &Path,
     state: &Data<State>,
+    config: &Arc<Config>,
 ) -> HttpResponse {
     let preprocess_result = Arc::new(Mutex::new(None));
     {
@@ -333,11 +336,13 @@ pub async fn handle_gcc_without_link_request(
         let build_object_file_args = build_object_file_args.clone();
         let preprocess_result = preprocess_result.clone();
         let state_clone = state.clone();
+        let config = config.clone();
         let Ok(_) = state
             .pool
             .run(async move || {
                 let result =
-                    preprocess_file(binary, &build_object_file_args, &cwd, &state_clone).await;
+                    preprocess_file(binary, &build_object_file_args, &cwd, &state_clone, &config)
+                        .await;
                 preprocess_result.lock().replace(result);
             })
             .await

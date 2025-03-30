@@ -10,7 +10,7 @@ use std::{
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
-use config::Config;
+use config::ConfigManager;
 use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
 use parse_gcc::GCCArgs;
@@ -93,25 +93,26 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
             let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
                 return HttpResponse::NotImplemented().body("Cannot parse gcc arguments");
             };
-            {
-                let mut config = state.config.lock();
-                for source in request_gcc_args.sources.iter() {
-                    match config.ensure_configs(&source.path) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            return HttpResponse::BadRequest()
-                                .body(format!("Error reading config file: {}", e));
-                        }
-                    }
+            let config = match state.config_manager.config_for_paths(
+                &request_gcc_args
+                    .sources
+                    .iter()
+                    .map(|s| &s.path)
+                    .collect::<Vec<_>>(),
+            ) {
+                Ok(config) => config,
+                Err(e) => {
+                    return HttpResponse::BadRequest()
+                        .body(format!("Error reading config file: {}", e));
                 }
-            }
+            };
             if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
                 || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
                 || request_gcc_args.primary_output.is_none()
                 || request_gcc_args
                     .sources
                     .iter()
-                    .any(|p| state.config.lock().is_eager_path(&p.path))
+                    .any(|p| config.is_eager_path(&p.path))
             {
                 return request_gcc_eager::handle_eager_gcc_request(
                     request.binary,
@@ -127,6 +128,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                     &request_gcc_args,
                     &request.cwd,
                     state,
+                    &config,
                 )
                 .await;
             }
@@ -135,6 +137,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 &request_gcc_args,
                 &request.cwd,
                 state,
+                &config,
             )
             .await;
         }
@@ -230,7 +233,7 @@ async fn main() -> Result<()> {
         })),
         cli,
         data_dir,
-        config: Arc::new(Mutex::new(Config::new())),
+        config_manager: ConfigManager::new(),
     });
 
     if state.cli.no_tui {

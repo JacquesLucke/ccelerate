@@ -15,6 +15,7 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
+    config::Config,
     database::{FileRecord, load_file_record},
     parse_ar::ArArgs,
     parse_gcc::{GCCArgs, Language, SourceFile},
@@ -213,12 +214,13 @@ fn known_object_files_to_chunks(
 async fn compile_chunk_in_chunks(
     records: &[FileRecord],
     state: &Data<State>,
+    config: &Arc<Config>,
 ) -> Result<Vec<PathBuf>> {
     if records.is_empty() {
         return Ok(vec![]);
     }
     if records.len() <= 10 {
-        let result = compile_chunk_sources_in_pool(state, records).await;
+        let result = compile_chunk_sources_in_pool(state, records, config).await;
         match result {
             Ok(object) => {
                 return Ok(vec![object]);
@@ -232,8 +234,8 @@ async fn compile_chunk_in_chunks(
     }
     let (left, right) = records.split_at(records.len() / 2);
     let (left, right) = tokio::try_join!(
-        compile_chunk_in_chunks(left, state),
-        compile_chunk_in_chunks(right, state)
+        compile_chunk_in_chunks(left, state, config),
+        compile_chunk_in_chunks(right, state, config)
     )?;
     Ok(left.into_iter().chain(right).collect())
 }
@@ -267,7 +269,11 @@ impl TaskInfo for CompileChunkTaskInfo<'_> {
     }
 }
 
-async fn compile_chunk_sources(state: &Data<State>, records: &[FileRecord]) -> Result<PathBuf> {
+async fn compile_chunk_sources(
+    state: &Data<State>,
+    records: &[FileRecord],
+    config: &Config,
+) -> Result<PathBuf> {
     let sources = records
         .iter()
         .flat_map(|r| &r.local_code_file)
@@ -291,7 +297,7 @@ async fn compile_chunk_sources(state: &Data<State>, records: &[FileRecord]) -> R
     let source_language = first_source.language()?;
     let preprocessed_language = source_language.to_preprocessed()?;
     let preprocessed_headers =
-        get_compile_chunk_preprocessed_headers(records, state, source_language).await?;
+        get_compile_chunk_preprocessed_headers(records, state, source_language, config).await?;
 
     gcc_args.stop_before_link = true;
     gcc_args.stop_after_preprocessing = false;
@@ -335,12 +341,14 @@ async fn compile_chunk_sources(state: &Data<State>, records: &[FileRecord]) -> R
 async fn compile_chunk_sources_in_pool(
     state: &Data<State>,
     records: &[FileRecord],
+    config: &Arc<Config>,
 ) -> Result<PathBuf> {
     let state_clone = state.clone();
     let records = Arc::new(records.to_vec());
+    let config = config.clone();
     state
         .pool
-        .run(async move || compile_chunk_sources(&state_clone, &records).await)
+        .run(async move || compile_chunk_sources(&state_clone, &records, &config).await)
         .await?
 }
 
@@ -366,6 +374,7 @@ async fn get_compile_chunk_preprocessed_headers(
     records: &[FileRecord],
     state: &Data<State>,
     source_language: Language,
+    config: &Config,
 ) -> Result<BString> {
     let mut ordered_unique_includes: Vec<&Path> = vec![];
     let mut include_defines: Vec<&BStr> = vec![];
@@ -395,7 +404,7 @@ async fn get_compile_chunk_preprocessed_headers(
         &ordered_unique_includes,
         &include_defines,
         source_language,
-        state,
+        config,
     )?;
 
     let first_record = records
@@ -439,15 +448,14 @@ fn get_compile_chunk_header_code(
     include_paths: &[&Path],
     defines: &[&BStr],
     language: Language,
-    state: &Data<State>,
+    config: &Config,
 ) -> Result<BString> {
     let mut headers_code = BString::new(Vec::new());
     for define in defines {
         writeln!(headers_code, "{}", define)?;
     }
     for header in include_paths {
-        let need_extern_c =
-            language == Language::Cxx && state.config.lock().is_pure_c_header(header);
+        let need_extern_c = language == Language::Cxx && config.is_pure_c_header(header);
         if need_extern_c {
             writeln!(headers_code, "extern \"C\" {{")?;
         }
@@ -576,6 +584,7 @@ pub async fn handle_gcc_final_link_request(
     request_gcc_args: &GCCArgs,
     cwd: &Path,
     state: &Data<State>,
+    config: &Arc<Config>,
 ) -> HttpResponse {
     let Ok(link_sources) = find_link_sources(request_gcc_args, &state.conn.lock(), state) else {
         return HttpResponse::BadRequest().body("Error finding link sources");
@@ -587,10 +596,10 @@ pub async fn handle_gcc_final_link_request(
     let handles = FuturesUnordered::new();
     for chunk in chunks {
         let state = state.clone();
-        let handle =
-            tokio::task::spawn(
-                async move { compile_chunk_in_chunks(&chunk.records, &state).await },
-            );
+        let config = config.clone();
+        let handle = tokio::task::spawn(async move {
+            compile_chunk_in_chunks(&chunk.records, &state, &config).await
+        });
         handles.push(handle);
     }
     let mut objects = Vec::new();

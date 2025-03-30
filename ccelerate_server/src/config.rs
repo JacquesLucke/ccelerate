@@ -1,26 +1,34 @@
-#![deny(clippy::unwrap_used)]
-
-use anyhow::Result;
-use bstr::BStr;
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
+use anyhow::Result;
+use bstr::{BStr, BString};
+use parking_lot::Mutex;
 use serde::Deserialize;
 
-#[derive(Debug)]
+pub struct ConfigManager {
+    state: Mutex<ConfigState>,
+}
+
+struct ConfigState {
+    config: Arc<Config>,
+    config_files: Vec<PathBuf>,
+    included_dirs: HashSet<PathBuf>,
+    dirs_without_config: HashSet<PathBuf>,
+}
+
 pub struct Config {
-    folder_configs: Vec<FolderConfig>,
-    scanned_folders: HashSet<PathBuf>,
+    eager_patterns: Vec<glob::Pattern>,
+    local_header_patterns: Vec<glob::Pattern>,
+    include_defines: Vec<BString>,
+    pure_c_header_patterns: Vec<glob::Pattern>,
+    bad_global_symbols_patterns: Vec<glob::Pattern>,
 }
 
-#[derive(Debug)]
-struct FolderConfig {
-    config: ConfigFile,
-}
-
-#[derive(Deserialize, Debug)]
+#[derive(Debug, Deserialize)]
 struct ConfigFile {
     eager_patterns: Vec<String>,
     local_header_patterns: Vec<String>,
@@ -29,105 +37,122 @@ struct ConfigFile {
     bad_global_symbols_patterns: Vec<String>,
 }
 
-impl Config {
+impl ConfigManager {
     pub fn new() -> Self {
         Self {
-            folder_configs: vec![],
-            scanned_folders: HashSet::new(),
+            state: Mutex::new(ConfigState {
+                config: Arc::new(Config::new()),
+                config_files: Vec::new(),
+                included_dirs: HashSet::new(),
+                dirs_without_config: HashSet::new(),
+            }),
         }
+    }
+
+    pub fn config_for_paths<P: AsRef<std::path::Path>>(&self, paths: &[P]) -> Result<Arc<Config>> {
+        let mut state = self.state.lock();
+        let mut missing_config_dirs = vec![];
+        let mut missing_config_files = vec![];
+        for path in paths {
+            let path = path.as_ref();
+            if state.included_dirs.iter().any(|dir| path.starts_with(dir)) {
+                continue;
+            }
+            if path
+                .ancestors()
+                .all(|a| state.dirs_without_config.contains(a))
+            {
+                continue;
+            }
+            for ancestor in path.ancestors().collect::<Vec<_>>().into_iter().rev() {
+                let config_path = ancestor.join("ccelerate.toml");
+                if !config_path.exists() {
+                    state.dirs_without_config.insert(ancestor.to_owned());
+                    continue;
+                }
+                missing_config_dirs.push(ancestor.to_owned());
+                missing_config_files.push(config_path);
+            }
+        }
+        if missing_config_files.is_empty() {
+            return Ok(state.config.clone());
+        }
+        let mut config_files = missing_config_files;
+        config_files.extend(state.config_files.iter().cloned());
+        let new_config = Config::new_from_files(&config_files)?;
+        *state = ConfigState {
+            config: Arc::new(new_config),
+            config_files,
+            included_dirs: state.included_dirs.clone(),
+            dirs_without_config: state.dirs_without_config.clone(),
+        };
+        Ok(state.config.clone())
+    }
+}
+
+impl Config {
+    fn new() -> Self {
+        Self {
+            eager_patterns: Vec::new(),
+            local_header_patterns: Vec::new(),
+            include_defines: Vec::new(),
+            pure_c_header_patterns: Vec::new(),
+            bad_global_symbols_patterns: Vec::new(),
+        }
+    }
+
+    fn new_from_files<P: AsRef<Path>>(config_files: &[P]) -> Result<Self> {
+        let mut config = Self::new();
+        for path in config_files {
+            let config_file = std::fs::read_to_string(path)?;
+            let config_file: ConfigFile = toml::from_str(config_file.as_str())?;
+
+            macro_rules! add_patterns {
+                ($field:ident) => {
+                    for pattern in config_file.$field.iter() {
+                        config.$field.push(glob::Pattern::new(pattern)?);
+                    }
+                };
+            }
+
+            add_patterns!(eager_patterns);
+            add_patterns!(local_header_patterns);
+            add_patterns!(pure_c_header_patterns);
+            add_patterns!(bad_global_symbols_patterns);
+
+            config
+                .include_defines
+                .extend(config_file.include_defines.into_iter().map(BString::from));
+        }
+
+        Ok(config)
     }
 
     pub fn is_eager_path(&self, path: &Path) -> bool {
-        for folder_config in self.folder_configs.iter() {
-            for pattern in folder_config.config.eager_patterns.iter() {
-                if glob::Pattern::new(pattern)
-                    .expect("todo")
-                    .matches_path(path)
-                {
-                    return true;
-                }
-            }
-        }
-        false
+        self.eager_patterns
+            .iter()
+            .any(|pattern| pattern.matches_path(path))
     }
 
     pub fn is_local_header(&self, path: &Path) -> bool {
-        for folder_config in self.folder_configs.iter() {
-            for pattern in folder_config.config.local_header_patterns.iter() {
-                if glob::Pattern::new(pattern)
-                    .expect("todo")
-                    .matches_path(path)
-                {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
-    pub fn is_include_define(&self, name: &BStr) -> bool {
-        for folder_config in self.folder_configs.iter() {
-            for pattern in folder_config.config.include_defines.iter() {
-                if name == pattern {
-                    return true;
-                }
-            }
-        }
-        false
+        self.local_header_patterns
+            .iter()
+            .any(|pattern| pattern.matches_path(path))
     }
 
     pub fn is_pure_c_header(&self, path: &Path) -> bool {
-        for folder_config in self.folder_configs.iter() {
-            for pattern in folder_config.config.pure_c_header_patterns.iter() {
-                if glob::Pattern::new(pattern)
-                    .expect("todo")
-                    .matches_path(path)
-                {
-                    return true;
-                }
-            }
-        }
-        false
+        self.pure_c_header_patterns
+            .iter()
+            .any(|pattern| pattern.matches_path(path))
     }
 
     pub fn has_bad_global_symbol(&self, path: &Path) -> bool {
-        for folder_config in self.folder_configs.iter() {
-            for pattern in folder_config.config.bad_global_symbols_patterns.iter() {
-                if glob::Pattern::new(pattern)
-                    .expect("todo")
-                    .matches_path(path)
-                {
-                    return true;
-                }
-            }
-        }
-        false
+        self.bad_global_symbols_patterns
+            .iter()
+            .any(|pattern| pattern.matches_path(path))
     }
 
-    pub fn ensure_configs(&mut self, path: &Path) -> Result<()> {
-        let ancestors = path.ancestors().collect::<Vec<_>>();
-        for ancestor in ancestors.into_iter().rev() {
-            if self.scanned_folders.contains(ancestor) {
-                return Ok(());
-            }
-            let config_path = ancestor.join("ccelerate.toml");
-            if !config_path.exists() {
-                continue;
-            }
-            for config_ancestor in config_path.ancestors() {
-                self.scanned_folders.insert(config_ancestor.to_owned());
-            }
-            self.load_config_file(&config_path)?;
-            break;
-        }
-        Ok(())
-    }
-
-    fn load_config_file(&mut self, path: &Path) -> Result<()> {
-        let config: ConfigFile = toml::from_str(std::fs::read_to_string(path)?.as_str())?;
-        log::info!("Loaded: {:#?}", config);
-        let folder_config = FolderConfig { config };
-        self.folder_configs.push(folder_config);
-        Ok(())
+    pub fn is_include_define(&self, name: &BStr) -> bool {
+        self.include_defines.iter().any(|define| define == name)
     }
 }
