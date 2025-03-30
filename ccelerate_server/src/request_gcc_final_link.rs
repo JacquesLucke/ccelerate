@@ -115,7 +115,7 @@ fn find_link_sources_for_static_library(
             library_path.display()
         ));
     }
-    let ar_args = ar_args::BuildStaticArchiveArgs::parse(&record.cwd, &record.args)?;
+    let ar_args = ar_args::BuildStaticArchiveInfo::from_args(&record.cwd, &record.args)?;
     for source in ar_args.member_paths {
         find_link_sources_for_file(&source, conn, link_sources)?;
     }

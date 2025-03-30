@@ -12,14 +12,14 @@ use smallvec::SmallVec;
 
 use crate::path_utils::make_absolute;
 
-pub struct BuildStaticArchiveArgs {
+pub struct BuildStaticArchiveInfo {
     pub archive_path: PathBuf,
     pub archive_name: OsString,
     pub member_paths: SmallVec<[PathBuf; 16]>,
 }
 
-impl BuildStaticArchiveArgs {
-    pub fn parse<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<BuildStaticArchiveArgs> {
+impl BuildStaticArchiveInfo {
+    pub fn from_args<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<BuildStaticArchiveInfo> {
         let args = parse_ar_args(args)?;
         if !args.operation.contains("c") {
             return Err(anyhow!("arguments don't create archive, no 'c' flag"));
@@ -28,7 +28,7 @@ impl BuildStaticArchiveArgs {
         let Some(archive_name) = archive_path.file_name() else {
             return Err(anyhow!("archive path has no file name"));
         };
-        Ok(BuildStaticArchiveArgs {
+        Ok(BuildStaticArchiveInfo {
             archive_name: archive_name.to_owned(),
             archive_path,
             member_paths: args

@@ -12,7 +12,7 @@ use crate::{
 
 pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
-    let Ok(ar_args) = ar_args::BuildStaticArchiveArgs::parse(&request.cwd, &request_args_ref)
+    let Ok(ar_args) = ar_args::BuildStaticArchiveInfo::from_args(&request.cwd, &request_args_ref)
     else {
         return HttpResponse::BadRequest().body("Arguments to ar do not build an archive");
     };
