@@ -24,18 +24,13 @@ pub struct ArArgs {
 }
 
 impl ArArgs {
-    pub fn parse_owned(cwd: &Path, raw_args: Vec<OsString>) -> Result<Self> {
-        let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
-        Self::parse(cwd, raw_args.as_slice())
-    }
-
-    pub fn parse(cwd: &Path, raw_args: &[&OsStr]) -> Result<Self> {
+    pub fn parse<P: AsRef<OsStr>>(cwd: &Path, raw_args: &[P]) -> Result<Self> {
         let mut args = Self::default();
         let mut raw_args_iter = raw_args.iter();
         let first_arg = raw_args_iter
             .next()
             .ok_or_else(|| anyhow::anyhow!("Missing first argument for ar command"))?;
-        for c in first_arg.to_string_lossy().chars() {
+        for c in first_arg.as_ref().to_string_lossy().chars() {
             match c {
                 'q' => args.flag_q = true,
                 'c' => args.flag_c = true,
@@ -123,21 +118,10 @@ mod test {
     }
 
     fn test_round_trip(args: &[&OsStr]) {
-        let parse1 = ArArgs::parse(
-            Path::new("/first/path"),
-            args.iter().map(|s| &**s).collect::<Vec<_>>().as_slice(),
-        )
-        .expect("should be valid");
+        let parse1 = ArArgs::parse(Path::new("/first/path"), args).expect("should be valid");
         let parse1_to_args = parse1.to_args();
-        let parse2 = ArArgs::parse(
-            Path::new("/second/path"),
-            parse1_to_args
-                .iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .expect("should be valid");
+        let parse2 =
+            ArArgs::parse(Path::new("/second/path"), &parse1_to_args).expect("should be valid");
         assert_eq!(parse2, parse1);
     }
 }

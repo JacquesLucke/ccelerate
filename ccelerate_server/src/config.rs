@@ -9,7 +9,7 @@ use std::{
 
 use serde::Deserialize;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Config {
     folder_configs: Vec<FolderConfig>,
     scanned_folders: HashSet<PathBuf>,
@@ -31,6 +31,13 @@ struct ConfigFile {
 }
 
 impl Config {
+    pub fn new() -> Self {
+        Self {
+            folder_configs: vec![],
+            scanned_folders: HashSet::new(),
+        }
+    }
+
     pub fn is_eager_path(&self, path: &Path) -> bool {
         for folder_config in self.folder_configs.iter() {
             if !path.starts_with(&folder_config.dir) {

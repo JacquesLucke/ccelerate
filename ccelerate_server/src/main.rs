@@ -168,7 +168,7 @@ async fn route_run(
         log::error!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
-    return handle_request(&run_request, &state).await;
+    handle_request(&run_request, &state).await
 }
 
 async fn server_thread(state: Data<State>) {
@@ -230,7 +230,7 @@ async fn main() -> Result<()> {
         })),
         cli,
         data_dir,
-        config: Arc::new(Mutex::new(Config::default())),
+        config: Arc::new(Mutex::new(Config::new())),
     });
 
     if state.cli.no_tui {

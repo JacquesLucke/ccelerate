@@ -127,22 +127,17 @@ impl Language {
 }
 
 impl GCCArgs {
-    pub fn parse_owned(cwd: &Path, raw_args: &[OsString]) -> Result<Self> {
-        let raw_args: Vec<&OsStr> = raw_args.iter().map(|s| s.as_ref()).collect();
-        Self::parse(cwd, raw_args.as_slice())
-    }
-
-    pub fn parse(cwd: &Path, raw_args: &[&OsStr]) -> Result<Self> {
+    pub fn parse<S: AsRef<OsStr>>(cwd: &Path, raw_args: &[S]) -> Result<Self> {
         let mut args = Self::default();
 
         let mut last_language = None;
 
         let mut raw_args_iter = raw_args.iter();
         while let Some(raw_arg) = raw_args_iter.next() {
-            let arg_str = raw_arg.to_str().ok_or_else(|| {
+            let arg_str = raw_arg.as_ref().to_str().ok_or_else(|| {
                 anyhow::anyhow!(
                     "Failed to convert OsStr to str for arg: {}",
-                    raw_arg.to_string_lossy()
+                    raw_arg.as_ref().to_string_lossy()
                 )
             })?;
             if let Some(definition) = arg_str.strip_prefix("-D") {
@@ -187,7 +182,8 @@ impl GCCArgs {
             } else if arg_str == "-x" {
                 let name = raw_args_iter
                     .next()
-                    .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Missing name"))?
+                    .as_ref();
                 let name = name.to_string_lossy().to_string();
                 last_language = Language::from_x_arg(&name)?;
             } else if arg_str == "-include" {
@@ -209,7 +205,8 @@ impl GCCArgs {
             } else if arg_str == "-MT" {
                 let name = raw_args_iter
                     .next()
-                    .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+                    .ok_or_else(|| anyhow::anyhow!("Missing name"))?
+                    .as_ref();
                 let name = name.to_string_lossy().to_string();
                 args.depfile_target_name = Some(name);
             } else if arg_str == "-MF" {
@@ -1301,21 +1298,10 @@ mod test {
     }
 
     fn test_round_trip(args: &[&OsStr]) {
-        let parse1 = GCCArgs::parse(
-            Path::new("/first/path"),
-            args.iter().map(|s| &**s).collect::<Vec<_>>().as_slice(),
-        )
-        .expect("should be valid");
+        let parse1 = GCCArgs::parse(Path::new("/first/path"), args).expect("should be valid");
         let parse1_to_args = parse1.to_args();
-        let parse2 = GCCArgs::parse(
-            Path::new("/second/path"),
-            parse1_to_args
-                .iter()
-                .map(|s| s.as_ref())
-                .collect::<Vec<_>>()
-                .as_slice(),
-        )
-        .expect("should be valid");
+        let parse2 =
+            GCCArgs::parse(Path::new("/second/path"), &parse1_to_args).expect("should be valid");
         assert_eq!(parse2, parse1);
     }
 }

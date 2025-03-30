@@ -113,7 +113,7 @@ fn find_link_sources_for_static_library(
             library_path.display()
         ));
     }
-    let ar_args = ArArgs::parse_owned(&record.cwd, record.args)?;
+    let ar_args = ArArgs::parse(&record.cwd, &record.args)?;
     for source in ar_args.sources {
         find_link_sources_for_file(&source, conn, link_sources)?;
     }
@@ -171,7 +171,7 @@ fn known_object_files_to_chunks(
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
-        let gcc_args = GCCArgs::parse_owned(&record.cwd, &record.args)?;
+        let gcc_args = GCCArgs::parse(&record.cwd, &record.args)?;
 
         let mut chunk_key = BString::new(Vec::new());
         chunk_key.push_str(record.binary.to_standard_binary_name().as_encoded_bytes());
@@ -283,7 +283,7 @@ async fn compile_chunk_sources(state: &Data<State>, records: &[FileRecord]) -> R
     tokio::fs::create_dir_all(&object_dir).await?;
 
     let task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
-    let mut gcc_args = GCCArgs::parse_owned(&first_record.cwd, &first_record.args)?;
+    let mut gcc_args = GCCArgs::parse(&first_record.cwd, &first_record.args)?;
     let first_source = gcc_args
         .sources
         .first()
@@ -401,7 +401,7 @@ async fn get_compile_chunk_preprocessed_headers(
     let first_record = records
         .first()
         .expect("There has to be at least one record");
-    let mut gcc_args = GCCArgs::parse_owned(&first_record.cwd, &first_record.args)?;
+    let mut gcc_args = GCCArgs::parse(&first_record.cwd, &first_record.args)?;
     gcc_args.sources = vec![];
     gcc_args.primary_output = None;
     gcc_args.depfile_target_name = None;
