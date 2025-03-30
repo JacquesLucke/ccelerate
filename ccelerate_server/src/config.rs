@@ -31,6 +31,10 @@ struct ConfigFile {
 }
 
 impl Config {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
     pub fn is_eager_path(&self, path: &Path) -> bool {
         for folder_config in self.folder_configs.iter() {
             if !path.starts_with(&folder_config.dir) {
