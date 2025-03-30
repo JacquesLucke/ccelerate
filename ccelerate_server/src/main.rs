@@ -25,7 +25,6 @@ mod config;
 mod database;
 mod gcc_args;
 mod parallel_pool;
-mod parse_gcc;
 mod path_utils;
 mod request_ar;
 mod request_gcc_eager;
