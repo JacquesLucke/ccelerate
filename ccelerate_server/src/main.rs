@@ -31,6 +31,7 @@ mod request_ar;
 mod request_gcc_eager;
 mod request_gcc_final_link;
 mod request_gcc_without_link;
+mod source_file;
 mod state;
 mod task_log;
 mod task_periods;

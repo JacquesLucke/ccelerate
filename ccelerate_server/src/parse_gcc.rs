@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{code_language::CodeLanguage, path_utils::make_absolute};
+use crate::{code_language::CodeLanguage, path_utils::make_absolute, source_file::SourceFile};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct GCCArgs {
@@ -43,26 +43,6 @@ pub struct GCCArgs {
     pub openmp_flag: bool,
     pub use_link_group: bool,
     pub preprocess_keep_defines: bool,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct SourceFile {
-    pub path: PathBuf,
-    pub language_override: Option<CodeLanguage>,
-}
-
-impl SourceFile {
-    pub fn language(&self) -> Result<CodeLanguage> {
-        if let Some(language) = self.language_override {
-            return Ok(language);
-        }
-        let ext = self
-            .path
-            .extension()
-            .and_then(|e| e.to_str())
-            .ok_or_else(|| anyhow::anyhow!("Failed to get extension"))?;
-        CodeLanguage::from_ext(ext)
-    }
 }
 
 impl GCCArgs {

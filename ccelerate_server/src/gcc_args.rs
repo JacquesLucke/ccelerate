@@ -9,7 +9,7 @@ use bstr::{BString, ByteVec};
 use os_str_bytes::OsStrBytesExt;
 use smallvec::{SmallVec, smallvec};
 
-use crate::{code_language::CodeLanguage, parse_gcc::SourceFile, path_utils::make_absolute};
+use crate::{code_language::CodeLanguage, path_utils::make_absolute, source_file::SourceFile};
 
 pub struct BuildObjectFileInfo {
     pub source_path: PathBuf,

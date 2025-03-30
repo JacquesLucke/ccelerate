@@ -20,7 +20,7 @@ use crate::{
     config::Config,
     database::{FileRecord, store_file_record},
     gcc_args, log_file,
-    parse_gcc::SourceFile,
+    source_file::SourceFile,
     task_log::{TaskInfo, log_task},
 };
 

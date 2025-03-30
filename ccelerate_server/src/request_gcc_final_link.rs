@@ -21,8 +21,8 @@ use crate::{
     config::Config,
     database::{FileRecord, load_file_record},
     gcc_args,
-    parse_gcc::SourceFile,
     path_utils::shorten_path,
+    source_file::SourceFile,
     state::State,
     task_log::{TaskInfo, log_task},
 };
