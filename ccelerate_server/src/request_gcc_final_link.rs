@@ -177,11 +177,7 @@ fn known_object_files_to_chunks(
         let mut chunk_key = BString::new(Vec::new());
         chunk_key.push_str(record.binary.to_standard_binary_name().as_encoded_bytes());
         chunk_key.push_str(info.source_language.to_valid_ext());
-        gcc_args::add_translation_unit_unspecific_args_to_key(
-            &record.args,
-            &record.cwd,
-            &mut chunk_key,
-        );
+        gcc_args::add_translation_unit_unspecific_args_to_key(&record.args, &mut chunk_key)?;
         chunk_key.push_str(record.cwd.as_os_str().as_encoded_bytes());
         for include_define in record.include_defines.iter().flatten() {
             chunk_key.push_str(include_define);
@@ -291,10 +287,9 @@ async fn compile_chunk_sources(
 
     let build_args = gcc_args::update_to_build_object_from_stdin(
         &first_record.args,
-        &first_record.cwd,
         &object_path,
         preprocessed_language,
-    );
+    )?;
 
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
         .args(build_args)
@@ -396,11 +391,11 @@ async fn get_compile_chunk_preprocessed_headers(
     let first_record = records
         .first()
         .expect("There has to be at least one record");
-    let preprocess_args = gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
-        &first_record.args,
-        &first_record.cwd,
-        source_language,
-    );
+    let preprocess_args =
+        gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
+            &first_record.args,
+            source_language,
+        )?;
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
         .args(preprocess_args)
         .stdin(std::process::Stdio::piped())
@@ -530,7 +525,7 @@ pub async fn final_link<S: AsRef<OsStr>>(
             language_override: None,
         })
         .collect();
-    let link_args = gcc_args::update_to_link_sources_as_group(original_gcc_args, &new_sources, cwd);
+    let link_args = gcc_args::update_to_link_sources_as_group(original_gcc_args, &new_sources)?;
 
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(link_args)

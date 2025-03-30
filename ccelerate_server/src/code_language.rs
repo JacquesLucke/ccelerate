@@ -1,5 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
+use std::path::Path;
+
 use anyhow::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -23,6 +25,10 @@ impl CodeLanguage {
             "ii" => Ok(Self::II),
             _ => Err(anyhow!("Unknown language extension: {}", ext)),
         }
+    }
+
+    pub fn from_path(path: &Path) -> Result<Self> {
+        Self::from_ext(path.extension().and_then(|e| e.to_str()).unwrap_or(""))
     }
 
     pub fn to_valid_ext(self) -> &'static str {

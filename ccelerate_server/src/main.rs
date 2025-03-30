@@ -124,27 +124,31 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 )
                 .await;
             }
-
-            if gcc_args::is_build_object_file(&request.args) {
-                return request_gcc_without_link::handle_gcc_without_link_request(
-                    request.binary,
-                    &request.args,
-                    &request.cwd,
-                    state,
-                    &config,
-                )
-                .await;
+            match gcc_args::is_build_object_file(&request.args) {
+                Ok(true) => {
+                    request_gcc_without_link::handle_gcc_without_link_request(
+                        request.binary,
+                        &request.args,
+                        &request.cwd,
+                        state,
+                        &config,
+                    )
+                    .await
+                }
+                Ok(false) => {
+                    request_gcc_final_link::handle_gcc_final_link_request(
+                        request.binary,
+                        &request.args,
+                        &request.cwd,
+                        state,
+                        &config,
+                    )
+                    .await
+                }
+                Err(e) => HttpResponse::BadRequest().body(format!("Error parsing arguments: {e}")),
             }
-            return request_gcc_final_link::handle_gcc_final_link_request(
-                request.binary,
-                &request.args,
-                &request.cwd,
-                state,
-                &config,
-            )
-            .await;
         }
-    };
+    }
 }
 
 async fn log_file(state: &Data<State>, name: &str, data: &[u8], ext: &str) -> Result<()> {
