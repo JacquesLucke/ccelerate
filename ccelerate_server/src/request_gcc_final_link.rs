@@ -16,9 +16,10 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     ar_args,
+    code_language::Language,
     config::Config,
     database::{FileRecord, load_file_record},
-    parse_gcc::{GCCArgs, Language, SourceFile},
+    parse_gcc::{GCCArgs, SourceFile},
     path_utils::shorten_path,
     state::State,
     task_log::{TaskInfo, log_task},

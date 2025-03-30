@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::path_utils::make_absolute;
+use crate::{code_language::Language, path_utils::make_absolute};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct GCCArgs {
@@ -62,67 +62,6 @@ impl SourceFile {
             .and_then(|e| e.to_str())
             .ok_or_else(|| anyhow::anyhow!("Failed to get extension"))?;
         Language::from_ext(ext)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum Language {
-    // C code.
-    C,
-    // C++ code.
-    Cxx,
-    // Preprocessed C code.
-    I,
-    // Preprocessed C++ code.
-    II,
-}
-
-impl Language {
-    pub fn from_ext(ext: &str) -> Result<Self> {
-        match ext {
-            "c" => Ok(Self::C),
-            "cc" | "cp" | "cpp" | "cxx" | "c++" => Ok(Self::Cxx),
-            "i" => Ok(Self::I),
-            "ii" => Ok(Self::II),
-            _ => Err(anyhow::anyhow!("Unknown language extension: {}", ext)),
-        }
-    }
-
-    pub fn to_valid_ext(self) -> &'static str {
-        match self {
-            Self::C => "c",
-            Self::Cxx => "cc",
-            Self::I => "i",
-            Self::II => "ii",
-        }
-    }
-
-    pub fn from_x_arg(arg: &str) -> Result<Option<Self>> {
-        match arg {
-            "c" => Ok(Some(Self::C)),
-            "c++" => Ok(Some(Self::Cxx)),
-            "cpp-output" => Ok(Some(Self::I)),
-            "c++-cpp-output" => Ok(Some(Self::II)),
-            "none" => Ok(None),
-            _ => Err(anyhow::anyhow!("Unknown language {}", arg)),
-        }
-    }
-
-    pub fn to_x_arg(self) -> &'static str {
-        match self {
-            Self::C => "c",
-            Self::Cxx => "c++",
-            Self::I => "cpp-output",
-            Self::II => "c++-cpp-output",
-        }
-    }
-
-    pub fn to_preprocessed(self) -> Result<Language> {
-        match self {
-            Self::C => Ok(Self::I),
-            Self::Cxx => Ok(Self::II),
-            _ => Err(anyhow::anyhow!("Cannot preprocess language {:?}", self)),
-        }
     }
 }
 

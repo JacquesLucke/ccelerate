@@ -16,10 +16,11 @@ use std::{
 
 use crate::{
     State,
+    code_language::Language,
     config::Config,
     database::{FileRecord, store_file_record},
     log_file,
-    parse_gcc::{GCCArgs, Language, SourceFile},
+    parse_gcc::{GCCArgs, SourceFile},
     task_log::{TaskInfo, log_task},
 };
 
