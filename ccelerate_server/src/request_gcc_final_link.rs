@@ -15,9 +15,9 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
+    ar_args,
     config::Config,
     database::{FileRecord, load_file_record},
-    parse_ar::ArArgs,
     parse_gcc::{GCCArgs, Language, SourceFile},
     path_utils::shorten_path,
     state::State,
@@ -114,8 +114,8 @@ fn find_link_sources_for_static_library(
             library_path.display()
         ));
     }
-    let ar_args = ArArgs::parse(&record.cwd, &record.args)?;
-    for source in ar_args.sources {
+    let ar_args = ar_args::BuildStaticArchiveArgs::parse(&record.cwd, &record.args)?;
+    for source in ar_args.member_paths {
         find_link_sources_for_file(&source, conn, link_sources)?;
     }
     Ok(())
@@ -494,17 +494,11 @@ pub async fn create_thin_archive_for_objects(
     let archive_path = archive_dir.join(archive_name);
     tokio::fs::create_dir_all(&archive_dir).await?;
 
-    let ar_args = ArArgs {
-        flag_c: true,
-        flag_q: true,
-        flag_s: false,
-        thin_archive: true,
-        sources: objects.to_vec(),
-        output: Some(archive_path.clone()),
-    };
-
     let child = tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
-        .args(ar_args.to_args())
+        .args(ar_args::make_args_to_build_thin_static_archive(
+            &archive_path,
+            objects,
+        ))
         .spawn()?;
     let child_output = child.wait_with_output().await?;
     if !child_output.status.success() {

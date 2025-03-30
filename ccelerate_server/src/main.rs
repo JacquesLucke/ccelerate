@@ -19,10 +19,10 @@ use ratatui::widgets::TableState;
 use state::State;
 use task_periods::TaskPeriods;
 
+mod ar_args;
 mod config;
 mod database;
 mod parallel_pool;
-mod parse_ar;
 mod parse_gcc;
 mod path_utils;
 mod request_ar;

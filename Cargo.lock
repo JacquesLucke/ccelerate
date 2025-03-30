@@ -476,6 +476,7 @@ dependencies = [
  "include_dir",
  "log",
  "once_cell",
+ "os_str_bytes",
  "parking_lot",
  "ratatui",
  "rayon",
@@ -485,6 +486,7 @@ dependencies = [
  "scopeguard",
  "serde",
  "serde_json",
+ "smallvec",
  "tempfile",
  "tokio",
  "toml",
@@ -1684,6 +1686,15 @@ dependencies = [
  "libc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "os_str_bytes"
+version = "7.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c86e2db86dd008b4c88c77a9bb83d9286bf77204e255bb3fda3b2eebcae66b62"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

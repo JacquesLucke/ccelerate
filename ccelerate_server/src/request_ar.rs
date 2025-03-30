@@ -6,33 +6,27 @@ use actix_web::{HttpResponse, web::Data};
 use ccelerate_shared::RunRequestData;
 
 use crate::{
-    State,
+    State, ar_args,
     database::{FileRecord, store_file_record},
-    parse_ar::ArArgs,
 };
 
 pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
-    let Ok(request_ar_args) = ArArgs::parse(&request.cwd, &request_args_ref) else {
-        return HttpResponse::BadRequest().body("Cannot parse ar arguments");
-    };
-    let Some(request_output_path) = request_ar_args.output.as_ref() else {
-        return HttpResponse::BadRequest().body("Expected output path");
-    };
-    let Some(output_file_name) = request_output_path.file_name() else {
-        return HttpResponse::BadRequest().body("Expected output file name");
+    let Ok(ar_args) = ar_args::BuildStaticArchiveArgs::parse(&request.cwd, &request_args_ref)
+    else {
+        return HttpResponse::BadRequest().body("Arguments to ar do not build an archive");
     };
     let task_period = state.task_periods.start(
         "Ar",
-        &format!("Prepare: {}", output_file_name.to_string_lossy()),
+        &format!("Prepare: {}", ar_args.archive_name.to_string_lossy()),
     );
     let Ok(_) = store_file_record(
         &state.conn.lock(),
-        request_output_path,
+        &ar_args.archive_path,
         &FileRecord {
             cwd: request.cwd.clone(),
             binary: request.binary,
-            args: request_ar_args.to_args(),
+            args: request.args.clone(),
             local_code_file: None,
             global_includes: None,
             include_defines: None,
@@ -44,7 +38,7 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     let Some(dummy_archive) = crate::ASSETS_DIR.get_file("dummy_archive.a") else {
         return HttpResponse::InternalServerError().body("Failed to get dummy archive");
     };
-    let Ok(_) = std::fs::write(request_output_path, dummy_archive.contents()) else {
+    let Ok(_) = std::fs::write(ar_args.archive_path, dummy_archive.contents()) else {
         return HttpResponse::InternalServerError().body("Failed to write dummy archive");
     };
     task_period.finished_successfully();
