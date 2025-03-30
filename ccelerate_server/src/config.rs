@@ -17,7 +17,6 @@ pub struct Config {
 
 #[derive(Debug)]
 struct FolderConfig {
-    dir: PathBuf,
     config: ConfigFile,
 }
 
@@ -40,11 +39,11 @@ impl Config {
 
     pub fn is_eager_path(&self, path: &Path) -> bool {
         for folder_config in self.folder_configs.iter() {
-            if !path.starts_with(&folder_config.dir) {
-                continue;
-            }
             for pattern in folder_config.config.eager_patterns.iter() {
-                if path.to_string_lossy().contains(pattern) {
+                if glob::Pattern::new(pattern)
+                    .expect("todo")
+                    .matches_path(path)
+                {
                     return true;
                 }
             }
@@ -53,16 +52,12 @@ impl Config {
     }
 
     pub fn is_local_header(&self, path: &Path) -> bool {
-        if matches!(path.extension(), Some(ext) if ext == "cc" || ext == "c" || ext == "cpp" || ext == "cxx" || ext =="c++")
-        {
-            return true;
-        }
-        if path.as_os_str().to_string_lossy().contains("shaders/infos") {
-            return true;
-        }
         for folder_config in self.folder_configs.iter() {
             for pattern in folder_config.config.local_header_patterns.iter() {
-                if path.ends_with(pattern) {
+                if glob::Pattern::new(pattern)
+                    .expect("todo")
+                    .matches_path(path)
+                {
                     return true;
                 }
             }
@@ -84,7 +79,10 @@ impl Config {
     pub fn is_pure_c_header(&self, path: &Path) -> bool {
         for folder_config in self.folder_configs.iter() {
             for pattern in folder_config.config.pure_c_header_patterns.iter() {
-                if path.to_string_lossy().contains(pattern) {
+                if glob::Pattern::new(pattern)
+                    .expect("todo")
+                    .matches_path(path)
+                {
                     return true;
                 }
             }
@@ -95,7 +93,10 @@ impl Config {
     pub fn has_bad_global_symbol(&self, path: &Path) -> bool {
         for folder_config in self.folder_configs.iter() {
             for pattern in folder_config.config.bad_global_symbols_patterns.iter() {
-                if path.ends_with(pattern) {
+                if glob::Pattern::new(pattern)
+                    .expect("todo")
+                    .matches_path(path)
+                {
                     return true;
                 }
             }
@@ -125,14 +126,7 @@ impl Config {
     fn load_config_file(&mut self, path: &Path) -> Result<()> {
         let config: ConfigFile = toml::from_str(std::fs::read_to_string(path)?.as_str())?;
         log::info!("Loaded: {:#?}", config);
-        let folder_config = FolderConfig {
-            dir: path
-                .canonicalize()?
-                .parent()
-                .ok_or_else(|| anyhow::anyhow!("Could not find parent"))?
-                .to_owned(),
-            config,
-        };
+        let folder_config = FolderConfig { config };
         self.folder_configs.push(folder_config);
         Ok(())
     }
