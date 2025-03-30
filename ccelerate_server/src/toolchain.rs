@@ -11,6 +11,8 @@ use ccelerate_shared::WrappedBinary;
 use parking_lot::Mutex;
 use serde::Deserialize;
 
+use crate::{parse_ar::ArArgs, parse_gcc::GCCArgs};
+
 pub struct Toolchain {
     config: Mutex<Arc<ToolchainConfig>>,
 }
@@ -49,8 +51,51 @@ impl Toolchain {
         }
     }
 
-    pub fn run(&self, binary: WrappedBinary, cwd: &Path, args: &[&OsStr]) -> RunResult {
-        RunResult::new_success()
+    pub async fn run<S: AsRef<OsStr>>(
+        &self,
+        binary: WrappedBinary,
+        cwd: &Path,
+        args: &[S],
+    ) -> RunResult {
+        match self.run_error_handling(binary, cwd, args).await {
+            Ok(result) => result,
+            Err(e) => RunResult::new_error(e),
+        }
+    }
+
+    pub async fn run_error_handling<S: AsRef<OsStr>>(
+        &self,
+        binary: WrappedBinary,
+        cwd: &Path,
+        args: &[S],
+    ) -> Result<RunResult> {
+        match binary {
+            WrappedBinary::Ar => self.run_ar(cwd, args).await,
+            WrappedBinary::Gcc
+            | WrappedBinary::Gxx
+            | WrappedBinary::Clang
+            | WrappedBinary::Clangxx => self.run_gcc(cwd, args).await,
+        }
+    }
+
+    async fn run_ar<S: AsRef<OsStr>>(&self, cwd: &Path, args: &[S]) -> Result<RunResult> {
+        let args = ArArgs::parse(cwd, args)?;
+        let mut paths_for_config = vec![];
+        paths_for_config.push(cwd);
+        for path in &args.sources {
+            paths_for_config.push(path.as_path());
+        }
+        let Some(output) = &args.output else {
+            return Ok(RunResult::new_error_str("Missing output"));
+        };
+        paths_for_config.push(output.as_path());
+        let config = self.get_config_for_paths(&paths_for_config).await?;
+        Ok(RunResult::new_success())
+    }
+
+    async fn run_gcc<S: AsRef<OsStr>>(&self, cwd: &Path, args: &[S]) -> Result<RunResult> {
+        let args = GCCArgs::parse(cwd, args)?;
+        Ok(RunResult::new_success())
     }
 
     async fn get_config_for_paths<P: AsRef<Path>>(
@@ -79,6 +124,22 @@ impl RunResult {
             stdout: Vec::new(),
             stderr: Vec::new(),
             exit_code: 0,
+        }
+    }
+
+    pub fn new_error(error: anyhow::Error) -> RunResult {
+        RunResult {
+            stdout: Vec::new(),
+            stderr: format!("{error}").into_bytes(),
+            exit_code: 1,
+        }
+    }
+
+    pub fn new_error_str(error: &str) -> RunResult {
+        RunResult {
+            stdout: Vec::new(),
+            stderr: error.into(),
+            exit_code: 1,
         }
     }
 }

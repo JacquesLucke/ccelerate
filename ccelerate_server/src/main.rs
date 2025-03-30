@@ -173,7 +173,8 @@ async fn route_run(
     let args_ref: Vec<&OsStr> = run_request.args.iter().map(|s| s.as_ref()).collect();
     let result = state
         .toolchain
-        .run(run_request.binary, &run_request.cwd, &args_ref);
+        .run(run_request.binary, &run_request.cwd, &args_ref)
+        .await;
     HttpResponse::Ok().json(
         ccelerate_shared::RunResponseData {
             stdout: result.stdout,
