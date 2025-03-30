@@ -18,6 +18,7 @@ use path_utils::make_absolute;
 use ratatui::widgets::TableState;
 use state::State;
 use task_periods::TaskPeriods;
+use toolchain::Toolchain;
 
 mod config;
 mod database;
@@ -32,6 +33,7 @@ mod request_gcc_without_link;
 mod state;
 mod task_log;
 mod task_periods;
+mod toolchain;
 mod tui;
 
 static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
@@ -168,7 +170,18 @@ async fn route_run(
         log::error!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
-    return handle_request(&run_request, &state).await;
+    let args_ref: Vec<&OsStr> = run_request.args.iter().map(|s| s.as_ref()).collect();
+    let result = state
+        .toolchain
+        .run(run_request.binary, &run_request.cwd, &args_ref);
+    HttpResponse::Ok().json(
+        ccelerate_shared::RunResponseData {
+            stdout: result.stdout,
+            stderr: result.stderr,
+            status: result.exit_code,
+        }
+        .to_wire(),
+    )
 }
 
 async fn server_thread(state: Data<State>) {
@@ -231,6 +244,7 @@ async fn main() -> Result<()> {
         cli,
         data_dir,
         config: Arc::new(Mutex::new(Config::default())),
+        toolchain: Toolchain::new(),
     });
 
     if state.cli.no_tui {
