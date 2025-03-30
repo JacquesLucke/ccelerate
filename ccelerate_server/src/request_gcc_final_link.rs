@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -19,6 +20,7 @@ use crate::{
     code_language::CodeLanguage,
     config::Config,
     database::{FileRecord, load_file_record},
+    gcc_args,
     parse_gcc::{GCCArgs, SourceFile},
     path_utils::shorten_path,
     state::State,
@@ -56,22 +58,19 @@ impl TaskInfo for FindLinkSourcesTaskInfo {
 }
 
 fn find_link_sources(
-    root_args: &GCCArgs,
+    args_info: &gcc_args::LinkFileInfo,
     conn: &rusqlite::Connection,
     state: &Data<State>,
 ) -> Result<OriginalLinkSources> {
     let task_period = log_task(
         &FindLinkSourcesTaskInfo {
-            output: root_args
-                .primary_output
-                .clone()
-                .unwrap_or(PathBuf::from("")),
+            output: args_info.output.clone(),
         },
         state,
     );
 
     let mut link_sources = OriginalLinkSources::default();
-    for source in root_args.sources.iter() {
+    for source in args_info.sources.iter() {
         find_link_sources_for_file(&source.path, conn, &mut link_sources)?;
     }
     task_period.finished_successfully();
@@ -531,34 +530,32 @@ impl TaskInfo for FinalLinkTaskInfo {
     }
 }
 
-pub async fn final_link(
+pub async fn final_link<S: AsRef<OsStr>>(
     binary: WrappedBinary,
-    original_gcc_args: &GCCArgs,
+    original_gcc_args: &[S],
+    args_info: &gcc_args::LinkFileInfo,
     cwd: &Path,
     state: &Data<State>,
     sources: &[PathBuf],
 ) -> Result<std::process::Output> {
     let task_period = log_task(
         &FinalLinkTaskInfo {
-            output: original_gcc_args
-                .primary_output
-                .clone()
-                .unwrap_or(PathBuf::from("")),
+            output: args_info.output.clone(),
         },
         state,
     );
 
-    let mut args = original_gcc_args.clone();
-    args.sources = sources
+    let new_sources: Vec<_> = sources
         .iter()
         .map(|p| SourceFile {
             path: p.clone(),
             language_override: None,
         })
         .collect();
-    args.use_link_group = true;
+    let link_args = gcc_args::update_to_link_sources_as_group(original_gcc_args, &new_sources);
+
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
-        .args(args.to_args())
+        .args(link_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .current_dir(cwd)
@@ -574,14 +571,17 @@ pub async fn final_link(
     Ok(child_output)
 }
 
-pub async fn handle_gcc_final_link_request(
+pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
     binary: WrappedBinary,
-    request_gcc_args: &GCCArgs,
+    original_args: &[S],
     cwd: &Path,
     state: &Data<State>,
     config: &Arc<Config>,
 ) -> HttpResponse {
-    let Ok(link_sources) = find_link_sources(request_gcc_args, &state.conn.lock(), state) else {
+    let Ok(args_info) = gcc_args::LinkFileInfo::from_args(cwd, original_args) else {
+        return HttpResponse::BadRequest().body("Error parsing arguments");
+    };
+    let Ok(link_sources) = find_link_sources(&args_info, &state.conn.lock(), state) else {
         return HttpResponse::BadRequest().body("Error finding link sources");
     };
     let Ok(chunks) = known_object_files_to_chunks(&link_sources.known_object_files, state) else {
@@ -621,14 +621,22 @@ pub async fn handle_gcc_final_link_request(
     let mut all_link_sources = vec![archive_path];
     all_link_sources.extend(link_sources.unknown_sources.into_iter());
 
-    let link_output =
-        match final_link(binary, request_gcc_args, cwd, state, &all_link_sources).await {
-            Ok(output) => output,
-            Err(e) => {
-                log::error!("Error linking thin archive: {:?}", e);
-                return HttpResponse::BadRequest().body("Error linking thin archive");
-            }
-        };
+    let link_output = match final_link(
+        binary,
+        original_args,
+        &args_info,
+        cwd,
+        state,
+        &all_link_sources,
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(e) => {
+            log::error!("Error linking thin archive: {:?}", e);
+            return HttpResponse::BadRequest().body("Error linking thin archive");
+        }
+    };
 
     HttpResponse::Ok().json(
         ccelerate_shared::RunResponseData {

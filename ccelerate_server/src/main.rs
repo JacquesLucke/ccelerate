@@ -11,9 +11,9 @@ use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use config::ConfigManager;
+use os_str_bytes::OsStrBytesExt;
 use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
-use parse_gcc::GCCArgs;
 use path_utils::make_absolute;
 use ratatui::widgets::TableState;
 use state::State;
@@ -23,6 +23,7 @@ mod ar_args;
 mod code_language;
 mod config;
 mod database;
+mod gcc_args;
 mod parallel_pool;
 mod parse_gcc;
 mod path_utils;
@@ -57,76 +58,77 @@ async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
 }
 
-fn gcc_args_have_marker(args: &GCCArgs, marker: &str) -> bool {
-    for arg in args.to_args() {
-        if arg.to_string_lossy().contains(marker) {
+fn gcc_args_have_marker<S: AsRef<OsStr>>(args: &[S], marker: &str) -> bool {
+    for arg in args {
+        if arg.as_ref().contains(marker) {
             return true;
         }
     }
     false
 }
 
-fn gcc_args_or_cwd_have_marker(args: &GCCArgs, cwd: &Path, marker: &str) -> bool {
+fn gcc_args_or_cwd_have_marker<S: AsRef<OsStr>>(args: &[S], cwd: &Path, marker: &str) -> bool {
     if gcc_args_have_marker(args, marker) {
         return true;
     }
-    if cwd.to_string_lossy().contains(marker) {
+    if cwd.as_os_str().contains(marker) {
         return true;
     }
     false
 }
 
-fn is_gcc_compiler_id_check(args: &GCCArgs, cwd: &Path) -> bool {
+fn is_gcc_compiler_id_check<S: AsRef<OsStr>>(args: &[S], cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CompilerIdC")
 }
 
-fn is_gcc_cmakescratch(args: &GCCArgs, cwd: &Path) -> bool {
+fn is_gcc_cmakescratch<S: AsRef<OsStr>>(args: &[S], cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CMakeScratch")
 }
 
 async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
-    let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
     match request.binary {
         WrappedBinary::Ar => {
             return request_ar::handle_ar_request(request, state).await;
         }
         WrappedBinary::Gcc | WrappedBinary::Gxx | WrappedBinary::Clang | WrappedBinary::Clangxx => {
-            let Ok(request_gcc_args) = GCCArgs::parse(&request.cwd, &request_args_ref) else {
-                return HttpResponse::NotImplemented().body("Cannot parse gcc arguments");
+            let files = gcc_args::BuildFilesInfo::from_args(&request.cwd, &request.args);
+
+            let known_sources = match &files {
+                Ok(files) => files.sources.as_slice(),
+                Err(_) => &[],
             };
-            let config = match state.config_manager.config_for_paths(
-                &request_gcc_args
-                    .sources
-                    .iter()
-                    .map(|s| &s.path)
-                    .collect::<Vec<_>>(),
-            ) {
+            let mut paths_for_config: Vec<&Path> = vec![request.cwd.as_ref()];
+            paths_for_config.extend(known_sources.iter().map(|s| s.path.as_path()));
+
+            let has_output = match &files {
+                Ok(files) => files.output.is_some(),
+                Err(_) => false,
+            };
+            let config = match state.config_manager.config_for_paths(&paths_for_config) {
                 Ok(config) => config,
                 Err(e) => {
                     return HttpResponse::BadRequest()
                         .body(format!("Error reading config file: {}", e));
                 }
             };
-            if is_gcc_cmakescratch(&request_gcc_args, &request.cwd)
-                || is_gcc_compiler_id_check(&request_gcc_args, &request.cwd)
-                || request_gcc_args.primary_output.is_none()
-                || request_gcc_args
-                    .sources
-                    .iter()
-                    .any(|p| config.is_eager_path(&p.path))
+            if is_gcc_cmakescratch(&request.args, &request.cwd)
+                || is_gcc_compiler_id_check(&request.args, &request.cwd)
+                || !has_output
+                || known_sources.iter().any(|p| config.is_eager_path(&p.path))
             {
                 return request_gcc_eager::handle_eager_gcc_request(
                     request.binary,
-                    &request_gcc_args,
+                    &request.args,
                     &request.cwd,
                     state,
                 )
                 .await;
             }
-            if request_gcc_args.stop_before_link {
+
+            if gcc_args::is_build_object_file(&request.args) {
                 return request_gcc_without_link::handle_gcc_without_link_request(
                     request.binary,
-                    &request_gcc_args,
+                    &request.args,
                     &request.cwd,
                     state,
                     &config,
@@ -135,7 +137,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
             }
             return request_gcc_final_link::handle_gcc_final_link_request(
                 request.binary,
-                &request_gcc_args,
+                &request.args,
                 &request.cwd,
                 state,
                 &config,

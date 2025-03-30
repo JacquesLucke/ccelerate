@@ -19,8 +19,8 @@ use crate::{
     code_language::CodeLanguage,
     config::Config,
     database::{FileRecord, store_file_record},
-    log_file,
-    parse_gcc::{GCCArgs, SourceFile},
+    gcc_args, log_file,
+    parse_gcc::SourceFile,
     task_log::{TaskInfo, log_task},
 };
 
@@ -228,52 +228,37 @@ enum PreprocessFileError {
         stderr: Vec<u8>,
         status: ExitStatus,
     },
+    FailedParse,
 }
 
-fn update_gcc_args_for_preprocessing(build_object_file_args: GCCArgs) -> GCCArgs {
-    // Do not disable generating depfiles which are used by Ninja.
-    let mut result = build_object_file_args;
-    result.primary_output = None;
-    result.stop_before_link = false;
-    result.stop_after_preprocessing = true;
-    result.preprocess_keep_defines = true;
-    result
-}
-
-async fn preprocess_file(
+async fn preprocess_file<S: AsRef<OsStr>>(
     binary: WrappedBinary,
-    build_object_file_args: &GCCArgs,
+    build_object_file_args: &[S],
     cwd: &Path,
     state: &Data<State>,
     config: &Config,
 ) -> Result<PreprocessFileResult, PreprocessFileError> {
-    if build_object_file_args.sources.len() >= 2 {
-        return Err(PreprocessFileError::MultipleSourceFiles);
-    }
-    let Some(source_file) = build_object_file_args.sources.first() else {
-        return Err(PreprocessFileError::NoSourceFile);
+    let Ok(args_info) = gcc_args::BuildObjectFileInfo::from_args(cwd, build_object_file_args)
+    else {
+        return Err(PreprocessFileError::FailedParse);
     };
-    let Ok(source_file_language) = source_file.language() else {
-        return Err(PreprocessFileError::FailedToDetermineLanguage);
-    };
-    let Ok(preprocessed_language) = source_file_language.to_preprocessed() else {
+    let Ok(preprocessed_language) = args_info.source_language.to_preprocessed() else {
         return Err(PreprocessFileError::CannotPreprocessLanguage);
-    };
-    let Some(obj_path) = build_object_file_args.primary_output.as_ref() else {
-        return Err(PreprocessFileError::MissingPrimaryOutput);
     };
 
     let task_period = log_task(
         &PreprocessTranslationUnitTaskInfo {
-            dst_object_file: obj_path.clone(),
+            dst_object_file: args_info.object_path.clone(),
         },
         state,
     );
 
-    let preprocessing_args = update_gcc_args_for_preprocessing(build_object_file_args.clone());
+    let preprocessing_args = gcc_args::update_build_object_args_to_output_preprocessed_with_defines(
+        build_object_file_args,
+    );
 
     let Ok(child) = tokio::process::Command::new(binary.to_standard_binary_name())
-        .args(preprocessing_args.to_args())
+        .args(preprocessing_args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -296,7 +281,7 @@ async fn preprocess_file(
     if state.cli.log_files {
         let _ = log_file(
             state,
-            &format!("Preprocessed {}", obj_path.display()),
+            &format!("Preprocessed {}", args_info.object_path.display()),
             &preprocessed_code,
             preprocessed_language.to_valid_ext(),
         )
@@ -305,28 +290,32 @@ async fn preprocess_file(
     task_period.finished_successfully();
     let task_period = log_task(
         &HandlePreprocessedTranslationUnitTaskInfo {
-            dst_object_file: obj_path.clone(),
+            dst_object_file: args_info.object_path.clone(),
         },
         state,
     );
     let Ok(analysis) =
-        parse_preprocessed_source(preprocessed_code.as_bstr(), &source_file.path, config).await
+        parse_preprocessed_source(preprocessed_code.as_bstr(), &args_info.source_path, config)
+            .await
     else {
         return Err(PreprocessFileError::AnalysisFailed);
     };
 
     task_period.finished_successfully();
     Ok(PreprocessFileResult {
-        source_file: source_file.clone(),
+        source_file: SourceFile {
+            path: args_info.source_path,
+            language_override: None,
+        },
         preprocessed_language,
-        original_obj_output: obj_path.clone(),
+        original_obj_output: args_info.object_path.clone(),
         analysis,
     })
 }
 
-pub async fn handle_gcc_without_link_request(
+pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
     binary: WrappedBinary,
-    build_object_file_args: &GCCArgs,
+    build_object_file_args: &[S],
     cwd: &Path,
     state: &Data<State>,
     config: &Arc<Config>,
@@ -334,10 +323,13 @@ pub async fn handle_gcc_without_link_request(
     let preprocess_result = Arc::new(Mutex::new(None));
     {
         let cwd = cwd.to_owned();
-        let build_object_file_args = build_object_file_args.clone();
         let preprocess_result = preprocess_result.clone();
         let state_clone = state.clone();
         let config = config.clone();
+        let build_object_file_args: Vec<_> = build_object_file_args
+            .iter()
+            .map(|s| s.as_ref().to_owned())
+            .collect();
         let Ok(_) = state
             .pool
             .run(async move || {
@@ -439,7 +431,10 @@ pub async fn handle_gcc_without_link_request(
         &FileRecord {
             cwd: cwd.to_path_buf(),
             binary,
-            args: build_object_file_args.to_args(),
+            args: build_object_file_args
+                .iter()
+                .map(|s| s.as_ref().to_owned())
+                .collect(),
             local_code_file: Some(preprocess_file_path),
             global_includes: Some(preprocess_result.analysis.global_includes),
             include_defines: Some(preprocess_result.analysis.include_defines),
