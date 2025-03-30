@@ -21,7 +21,7 @@ use crate::{
     config::Config,
     database::{FileRecord, load_file_record},
     gcc_args,
-    parse_gcc::{GCCArgs, SourceFile},
+    parse_gcc::SourceFile,
     path_utils::shorten_path,
     state::State,
     task_log::{TaskInfo, log_task},
@@ -172,28 +172,16 @@ fn known_object_files_to_chunks(
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
-        let gcc_args = GCCArgs::parse(&record.cwd, &record.args)?;
+        let info = gcc_args::BuildObjectFileInfo::from_args(&record.cwd, &record.args)?;
 
         let mut chunk_key = BString::new(Vec::new());
         chunk_key.push_str(record.binary.to_standard_binary_name().as_encoded_bytes());
-        let source_language = gcc_args
-            .sources
-            .first()
-            .map(|s| s.language())
-            .ok_or_else(|| anyhow::anyhow!("Cannot determine language of source file"))??;
-        chunk_key.push_str(source_language.to_valid_ext());
-
-        // Remove data the is specific to a single translation unit.
-        let mut reduced_args = gcc_args;
-        reduced_args.sources.clear();
-        reduced_args.primary_output = None;
-        reduced_args.depfile_target_name = None;
-        reduced_args.depfile_output_path = None;
-        reduced_args.depfile_generate = false;
-
-        for arg in reduced_args.to_args() {
-            chunk_key.push_str(arg.as_encoded_bytes());
-        }
+        chunk_key.push_str(info.source_language.to_valid_ext());
+        gcc_args::add_translation_unit_unspecific_args_to_key(
+            &record.args,
+            &record.cwd,
+            &mut chunk_key,
+        );
         chunk_key.push_str(record.cwd.as_os_str().as_encoded_bytes());
         for include_define in record.include_defines.iter().flatten() {
             chunk_key.push_str(include_define);
@@ -289,29 +277,27 @@ async fn compile_chunk_sources(
     tokio::fs::create_dir_all(&object_dir).await?;
 
     let task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
-    let mut gcc_args = GCCArgs::parse(&first_record.cwd, &first_record.args)?;
-    let first_source = gcc_args
-        .sources
+    let first_source_record = records
         .first()
-        .expect("There has to be at least one source");
-    let source_language = first_source.language()?;
+        .expect("There has to be at least one record");
+    let source_language = gcc_args::BuildObjectFileInfo::from_args(
+        &first_source_record.cwd,
+        &first_source_record.args,
+    )?
+    .source_language;
     let preprocessed_language = source_language.to_preprocessed()?;
     let preprocessed_headers =
         get_compile_chunk_preprocessed_headers(records, state, source_language, config).await?;
 
-    gcc_args.stop_before_link = true;
-    gcc_args.stop_after_preprocessing = false;
-    gcc_args.stop_before_assemble = false;
-    gcc_args.primary_output = Some(object_path.clone());
-    gcc_args.sources = vec![];
-
-    let mut gcc_args = gcc_args.to_args();
-    gcc_args.push("-x".into());
-    gcc_args.push(preprocessed_language.to_gcc_x_arg().into());
-    gcc_args.push("-".into());
+    let build_args = gcc_args::update_to_build_object_from_stdin(
+        &first_record.args,
+        &first_record.cwd,
+        &object_path,
+        preprocessed_language,
+    );
 
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
-        .args(&gcc_args)
+        .args(build_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -410,21 +396,13 @@ async fn get_compile_chunk_preprocessed_headers(
     let first_record = records
         .first()
         .expect("There has to be at least one record");
-    let mut gcc_args = GCCArgs::parse(&first_record.cwd, &first_record.args)?;
-    gcc_args.sources = vec![];
-    gcc_args.primary_output = None;
-    gcc_args.depfile_target_name = None;
-    gcc_args.depfile_output_path = None;
-    gcc_args.depfile_generate = false;
-    gcc_args.stop_after_preprocessing = true;
-    gcc_args.stop_before_link = false;
-    gcc_args.stop_before_assemble = false;
-    let mut gcc_args = gcc_args.to_args();
-    gcc_args.push("-x".into());
-    gcc_args.push(source_language.to_gcc_x_arg().into());
-    gcc_args.push("-".into());
+    let preprocess_args = gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
+        &first_record.args,
+        &first_record.cwd,
+        source_language,
+    );
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
-        .args(&gcc_args)
+        .args(preprocess_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -552,7 +530,7 @@ pub async fn final_link<S: AsRef<OsStr>>(
             language_override: None,
         })
         .collect();
-    let link_args = gcc_args::update_to_link_sources_as_group(original_gcc_args, &new_sources);
+    let link_args = gcc_args::update_to_link_sources_as_group(original_gcc_args, &new_sources, cwd);
 
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(link_args)

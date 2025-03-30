@@ -255,6 +255,7 @@ async fn preprocess_file<S: AsRef<OsStr>>(
 
     let preprocessing_args = gcc_args::update_build_object_args_to_output_preprocessed_with_defines(
         build_object_file_args,
+        cwd,
     );
 
     let Ok(child) = tokio::process::Command::new(binary.to_standard_binary_name())
