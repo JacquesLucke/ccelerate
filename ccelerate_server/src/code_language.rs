@@ -3,7 +3,7 @@
 use anyhow::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum Language {
+pub enum CodeLanguage {
     // C code.
     C,
     // C++ code.
@@ -14,7 +14,7 @@ pub enum Language {
     II,
 }
 
-impl Language {
+impl CodeLanguage {
     pub fn from_ext(ext: &str) -> Result<Self> {
         match ext {
             "c" => Ok(Self::C),
@@ -34,7 +34,7 @@ impl Language {
         }
     }
 
-    pub fn from_x_arg(arg: &str) -> Result<Option<Self>> {
+    pub fn from_gcc_x_arg(arg: &str) -> Result<Option<Self>> {
         match arg {
             "c" => Ok(Some(Self::C)),
             "c++" => Ok(Some(Self::Cxx)),
@@ -45,7 +45,7 @@ impl Language {
         }
     }
 
-    pub fn to_x_arg(self) -> &'static str {
+    pub fn to_gcc_x_arg(self) -> &'static str {
         match self {
             Self::C => "c",
             Self::Cxx => "c++",
@@ -54,7 +54,7 @@ impl Language {
         }
     }
 
-    pub fn to_preprocessed(self) -> Result<Language> {
+    pub fn to_preprocessed(self) -> Result<CodeLanguage> {
         match self {
             Self::C => Ok(Self::I),
             Self::Cxx => Ok(Self::II),

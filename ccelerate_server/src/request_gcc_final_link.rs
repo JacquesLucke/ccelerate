@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     ar_args,
-    code_language::Language,
+    code_language::CodeLanguage,
     config::Config,
     database::{FileRecord, load_file_record},
     parse_gcc::{GCCArgs, SourceFile},
@@ -308,7 +308,7 @@ async fn compile_chunk_sources(
 
     let mut gcc_args = gcc_args.to_args();
     gcc_args.push("-x".into());
-    gcc_args.push(preprocessed_language.to_x_arg().into());
+    gcc_args.push(preprocessed_language.to_gcc_x_arg().into());
     gcc_args.push("-".into());
 
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
@@ -374,7 +374,7 @@ impl TaskInfo for GetPreprocessedHeadersTaskInfo {
 async fn get_compile_chunk_preprocessed_headers(
     records: &[FileRecord],
     state: &Data<State>,
-    source_language: Language,
+    source_language: CodeLanguage,
     config: &Config,
 ) -> Result<BString> {
     let mut ordered_unique_includes: Vec<&Path> = vec![];
@@ -422,7 +422,7 @@ async fn get_compile_chunk_preprocessed_headers(
     gcc_args.stop_before_assemble = false;
     let mut gcc_args = gcc_args.to_args();
     gcc_args.push("-x".into());
-    gcc_args.push(source_language.to_x_arg().into());
+    gcc_args.push(source_language.to_gcc_x_arg().into());
     gcc_args.push("-".into());
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
         .args(&gcc_args)
@@ -448,7 +448,7 @@ async fn get_compile_chunk_preprocessed_headers(
 fn get_compile_chunk_header_code(
     include_paths: &[&Path],
     defines: &[&BStr],
-    language: Language,
+    language: CodeLanguage,
     config: &Config,
 ) -> Result<BString> {
     let mut headers_code = BString::new(Vec::new());
@@ -456,7 +456,7 @@ fn get_compile_chunk_header_code(
         writeln!(headers_code, "{}", define)?;
     }
     for header in include_paths {
-        let need_extern_c = language == Language::Cxx && config.is_pure_c_header(header);
+        let need_extern_c = language == CodeLanguage::Cxx && config.is_pure_c_header(header);
         if need_extern_c {
             writeln!(headers_code, "extern \"C\" {{")?;
         }

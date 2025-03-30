@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{code_language::Language, path_utils::make_absolute};
+use crate::{code_language::CodeLanguage, path_utils::make_absolute};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct GCCArgs {
@@ -48,11 +48,11 @@ pub struct GCCArgs {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SourceFile {
     pub path: PathBuf,
-    pub language_override: Option<Language>,
+    pub language_override: Option<CodeLanguage>,
 }
 
 impl SourceFile {
-    pub fn language(&self) -> Result<Language> {
+    pub fn language(&self) -> Result<CodeLanguage> {
         if let Some(language) = self.language_override {
             return Ok(language);
         }
@@ -61,7 +61,7 @@ impl SourceFile {
             .extension()
             .and_then(|e| e.to_str())
             .ok_or_else(|| anyhow::anyhow!("Failed to get extension"))?;
-        Language::from_ext(ext)
+        CodeLanguage::from_ext(ext)
     }
 }
 
@@ -124,7 +124,7 @@ impl GCCArgs {
                     .ok_or_else(|| anyhow::anyhow!("Missing name"))?
                     .as_ref();
                 let name = name.to_string_lossy().to_string();
-                last_language = Language::from_x_arg(&name)?;
+                last_language = CodeLanguage::from_gcc_x_arg(&name)?;
             } else if arg_str == "-include" {
                 let path = raw_args_iter
                     .next()
@@ -318,14 +318,14 @@ impl GCCArgs {
 
     fn to_args_update_language(
         &self,
-        last_language: &mut Option<Language>,
-        new_language: &Option<Language>,
+        last_language: &mut Option<CodeLanguage>,
+        new_language: &Option<CodeLanguage>,
         args: &mut Vec<OsString>,
     ) {
         if last_language != new_language {
             args.push("-x".into());
             if let Some(language) = &new_language {
-                args.push(language.to_x_arg().into());
+                args.push(language.to_gcc_x_arg().into());
             } else {
                 args.push("none".into());
             }

@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     State,
-    code_language::Language,
+    code_language::CodeLanguage,
     config::Config,
     database::{FileRecord, store_file_record},
     log_file,
@@ -203,7 +203,7 @@ impl<'a> GccLinemarker<'a> {
 
 struct PreprocessFileResult {
     source_file: SourceFile,
-    preprocessed_language: Language,
+    preprocessed_language: CodeLanguage,
     original_obj_output: PathBuf,
     analysis: ParsePreprocessResult,
 }
