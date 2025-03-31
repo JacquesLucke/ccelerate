@@ -23,6 +23,9 @@ pub fn extract_preprocessor_directives(code: &BStr) -> Result<BString> {
         },
     );
 
+    // TODO:
+    // - Multi-line string within preprocessor directive.
+
     while let Some(capture) = RE_FIND_START.captures(remaining) {
         if let Some(m) = capture.name("preproc") {
             let end = m.start() + find_directive_length(remaining[m.start()..].as_bstr());
@@ -152,8 +155,7 @@ mod tests {
     #[test]
     fn test_extract_preprocessor_directives() {
         let dir = "";
-        let files =
-            glob::glob(format!("{}/home/jacques/Documents/**/*.h", dir).as_str()).expect("");
+        let files = glob::glob(format!("{}/home/jacques/blender/**/*.cc", dir).as_str()).expect("");
         for (i, file) in files.enumerate() {
             let Ok(file) = file else {
                 continue;
