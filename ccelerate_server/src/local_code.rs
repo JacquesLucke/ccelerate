@@ -1,3 +1,5 @@
+#![deny(clippy::unwrap_used)]
+
 use std::{
     collections::HashSet,
     io::Write,
@@ -7,7 +9,7 @@ use std::{
 use anyhow::Result;
 use bstr::{BStr, BString, ByteSlice};
 
-use crate::config::Config;
+use crate::{config::Config, path_utils::make_absolute};
 
 #[derive(Debug, Default)]
 pub struct LocalCode {
@@ -30,6 +32,12 @@ impl LocalCode {
         source_file_path: &Path,
         config: &Config,
     ) -> Result<LocalCode> {
+        let Some(source_dir) = source_file_path.parent() else {
+            return Err(anyhow::anyhow!(
+                "Failed to get directory of source file path"
+            ));
+        };
+
         let mut result = LocalCode::default();
 
         writeln!(result.local_code, "#pragma GCC diagnostic push")?;
@@ -99,6 +107,12 @@ impl LocalCode {
             }
         }
         writeln!(result.local_code, "#pragma GCC diagnostic pop")?;
+
+        result
+            .global_includes
+            .iter_mut()
+            .for_each(|p| *p = make_absolute(source_dir, p));
+
         Ok(result)
     }
 }
