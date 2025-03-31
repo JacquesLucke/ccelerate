@@ -25,7 +25,7 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
-struct ParsePreprocessResult {
+struct LocalCodeResult {
     // Preprocessed code of the source file without any of the headers.
     local_code: BString,
     // Global headers that are included in this file. Generally, all these headers
@@ -43,8 +43,8 @@ async fn parse_preprocessed_source(
     code: &BStr,
     source_file_path: &Path,
     config: &Config,
-) -> Result<ParsePreprocessResult> {
-    let mut result = ParsePreprocessResult::default();
+) -> Result<LocalCodeResult> {
+    let mut result = LocalCodeResult::default();
 
     writeln!(result.local_code, "#pragma GCC diagnostic push")?;
 
@@ -205,7 +205,7 @@ struct PreprocessFileResult {
     source_file: SourceFile,
     preprocessed_language: CodeLanguage,
     original_obj_output: PathBuf,
-    analysis: ParsePreprocessResult,
+    analysis: LocalCodeResult,
 }
 
 #[allow(dead_code)]
