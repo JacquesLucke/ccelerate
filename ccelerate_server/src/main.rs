@@ -24,6 +24,7 @@ mod code_language;
 mod config;
 mod database;
 mod gcc_args;
+mod local_code;
 mod parallel_pool;
 mod path_utils;
 mod request_ar;
