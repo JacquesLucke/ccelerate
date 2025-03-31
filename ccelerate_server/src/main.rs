@@ -27,6 +27,7 @@ mod gcc_args;
 mod local_code;
 mod parallel_pool;
 mod path_utils;
+mod preprocessor_directives;
 mod request_ar;
 mod request_gcc_eager;
 mod request_gcc_final_link;
