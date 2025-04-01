@@ -1,8 +1,45 @@
 use std::io::Write;
+use std::path::Path;
 
 use anyhow::Result;
 use anyhow::anyhow;
 use bstr::{BStr, BString, ByteSlice};
+
+pub enum DirectivesUpdate {
+    Unchanged,
+    Changed,
+    Removed,
+}
+
+pub async fn update_directives_file(
+    directives_dir: &Path,
+    original: &Path,
+) -> Result<DirectivesUpdate> {
+    // TODO: Generalize making the path relative to root.
+    let derived_path = directives_dir.join(original.strip_prefix("/")?);
+
+    let derived_exists = derived_path.exists();
+    let original_exists = original.exists();
+    if !original_exists {
+        if derived_exists {
+            tokio::fs::remove_file(derived_path).await?;
+            return Ok(DirectivesUpdate::Removed);
+        }
+        return Ok(DirectivesUpdate::Unchanged);
+    }
+    let original_code = tokio::fs::read(original).await?;
+    let updated_derived_code = extract_preprocessor_directives(original_code.as_bstr())?;
+
+    if derived_exists {
+        let old_derived_code = tokio::fs::read(&derived_path).await?;
+        if old_derived_code == updated_derived_code {
+            return Ok(DirectivesUpdate::Unchanged);
+        }
+    }
+    tokio::fs::create_dir_all(derived_path.parent().expect("should be valid")).await?;
+    tokio::fs::write(&derived_path, updated_derived_code).await?;
+    Ok(DirectivesUpdate::Changed)
+}
 
 pub fn extract_preprocessor_directives(code: &BStr) -> Result<BString> {
     let mut result = BString::new(vec![]);
@@ -181,18 +218,45 @@ mod tests {
     use super::*;
     use bstr::ByteSlice;
 
-    #[test]
-    fn test_extract_preprocessor_directives() {
-        let files = glob::glob("/home/jacques/blender/**/*.h").expect("");
+    // #[test]
+    // fn test_extract_preprocessor_directives() {
+    //     let files = glob::glob("/home/jacques/blender/**/*.h").expect("");
+    //     for (i, file) in files.enumerate() {
+    //         let Ok(file) = file else {
+    //             continue;
+    //         };
+    //         let code = std::fs::read(&file).expect("should be valid");
+    //         println!("FILE {}: {}", i, file.display());
+    //         let directives = extract_preprocessor_directives(code.as_bytes().as_bstr())
+    //             .expect("should be valid");
+    //         println!("{}", directives);
+    //     }
+    // }
+
+    #[tokio::test]
+    async fn test_update_directives_file() {
+        let directives_dir =
+            Path::new("/home/jacques/Documents/ccelerate/ccelerate_data/directives");
+        // update_directives_glob(directives_dir, "/home/jacques/blender/**/*.h")
+        //     .await
+        //     .expect("");
+        update_directives_glob(directives_dir, "/usr/include/**/*")
+            .await
+            .expect("");
+    }
+
+    async fn update_directives_glob(directives_dir: &Path, glob: &str) -> Result<()> {
+        let files = glob::glob(glob).expect("");
         for (i, file) in files.enumerate() {
-            let Ok(file) = file else {
+            let Ok(file) = file else { continue };
+            if !file.is_file() {
                 continue;
-            };
-            let code = std::fs::read(&file).expect("should be valid");
+            }
             println!("FILE {}: {}", i, file.display());
-            let directives = extract_preprocessor_directives(code.as_bytes().as_bstr())
-                .expect("should be valid");
-            println!("{}", directives);
+            update_directives_file(directives_dir, &file)
+                .await
+                .expect("");
         }
+        Ok(())
     }
 }
