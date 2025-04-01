@@ -23,14 +23,12 @@ pub fn extract_preprocessor_directives(code: &BStr) -> Result<BString> {
         },
     );
 
-    // TODO:
-    // - Multi-line string within preprocessor directive.
-
     while let Some(capture) = RE_FIND_START.captures(remaining) {
         if let Some(m) = capture.name("preproc") {
-            let end = m.start() + find_directive_length(remaining[m.start()..].as_bstr());
+            let end = m.start() + find_directive_length(remaining[m.start()..].as_bstr())?;
             let part = &remaining[m.start()..end];
             write!(result, "{}", part)?;
+            // println!("PREP: {}", part.to_str_lossy());
             remaining = remaining[end..].as_bstr();
         } else if let Some(m) = capture.name("line_comment") {
             let length = find_line_comment_length(remaining[m.start()..].as_bstr());
@@ -81,16 +79,47 @@ fn find_line_comment_length(code: &BStr) -> usize {
     code.len()
 }
 
-fn find_directive_length(code: &BStr) -> usize {
-    let mut length = find_line_comment_length(code);
-    let line = &code[..length];
-    if let Some(pos) = line.find(b"//") {
-        length = length.min(pos);
+fn find_directive_length(code: &BStr) -> Result<usize> {
+    static RE_FIND_NEXT: once_cell::sync::Lazy<regex::bytes::Regex> = once_cell::sync::Lazy::new(
+        || {
+            regex::bytes::Regex::new(r#"(?m)(?P<newline>\n)|(?P<line_comment>//)|(?P<block_comment>/\*)|(?P<string>")|(?P<char>')|(?P<raw>R"[^(\r\n]*\()"#)
+                .expect("should be valid")
+        },
+    );
+
+    let mut current = 0;
+    while let Some(capture) = RE_FIND_NEXT.captures(&code[current..]) {
+        if let Some(m) = capture.name("newline") {
+            let i = current + m.start();
+            let before = &code[..i];
+            if before.ends_with(b"\\") {
+                current = i + 1;
+                continue;
+            }
+            return Ok(i + 1);
+        } else if let Some(m) = capture.name("line_comment") {
+            let i = current + m.start();
+            let length = find_line_comment_length(&code[i..]);
+            return Ok(i + length);
+        } else if let Some(m) = capture.name("block_comment") {
+            let i = current + m.start();
+            let length = find_block_comment_length(&code[i..])?;
+            current = i + length;
+        } else if let Some(m) = capture.name("string") {
+            let i = current + m.start();
+            let length = find_string_length(&code[i..])?;
+            current = i + length;
+        } else if let Some(m) = capture.name("char") {
+            let i = current + m.start();
+            let length = find_char_length(&code[i..])?;
+            current = i + length;
+        } else if let Some(m) = capture.name("raw") {
+            let i = current + m.start();
+            let length = find_raw_string_length(&code[i..])?;
+            current = i + length;
+        }
     }
-    if let Some(pos) = line.find(b"/*") {
-        length = length.min(pos);
-    }
-    length
+    Ok(code.len())
 }
 
 fn find_block_comment_length(code: &BStr) -> Result<usize> {
@@ -154,8 +183,7 @@ mod tests {
 
     #[test]
     fn test_extract_preprocessor_directives() {
-        let dir = "";
-        let files = glob::glob(format!("{}/home/jacques/blender/**/*.cc", dir).as_str()).expect("");
+        let files = glob::glob("/home/jacques/blender/**/*.h").expect("");
         for (i, file) in files.enumerate() {
             let Ok(file) = file else {
                 continue;
