@@ -215,6 +215,8 @@ fn find_raw_string_length(code: &BStr) -> Result<usize> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config::ConfigManager;
+
     use super::*;
     use bstr::ByteSlice;
 
@@ -237,19 +239,29 @@ mod tests {
     async fn test_update_directives_file() {
         let directives_dir =
             Path::new("/home/jacques/Documents/ccelerate/ccelerate_data/directives");
-        // update_directives_glob(directives_dir, "/home/jacques/blender/**/*.h")
-        //     .await
-        //     .expect("");
-        update_directives_glob(directives_dir, "/usr/include/**/*")
-            .await
-            .expect("");
+        let globs = vec![
+            "/home/jacques/blender/**/*.h",
+            "/home/jacques/blender/**/*.hh",
+            "/usr/include/**/*",
+        ];
+
+        for glob in globs {
+            update_directives_glob(directives_dir, glob)
+                .await
+                .expect("");
+        }
     }
 
     async fn update_directives_glob(directives_dir: &Path, glob: &str) -> Result<()> {
+        let config_manager = ConfigManager::new();
         let files = glob::glob(glob).expect("");
         for (i, file) in files.enumerate() {
             let Ok(file) = file else { continue };
             if !file.is_file() {
+                continue;
+            }
+            let config = config_manager.config_for_paths(&[&file])?;
+            if config.is_local_header(&file) {
                 continue;
             }
             println!("FILE {}: {}", i, file.display());
