@@ -66,6 +66,9 @@ impl ConfigManager {
             }
             for ancestor in path.ancestors().collect::<Vec<_>>().into_iter().rev() {
                 let config_path = ancestor.join("ccelerate.toml");
+                if state.config_files.contains(&config_path) {
+                    continue;
+                }
                 if !config_path.exists() {
                     state.dirs_without_config.insert(ancestor.to_owned());
                     continue;
