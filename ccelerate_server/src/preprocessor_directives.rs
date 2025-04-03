@@ -1,5 +1,6 @@
 use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use anyhow::anyhow;
@@ -11,12 +12,33 @@ pub enum DirectivesUpdate {
     Removed,
 }
 
+pub fn get_corresponding_directives_path(
+    directives_dir: &Path,
+    original: &Path,
+) -> Result<PathBuf> {
+    if !original.is_absolute() {
+        return Err(anyhow!("Path must be absolute"));
+    }
+    // TODO: Generalize making the path relative to root.
+    let relative = original.strip_prefix("/")?;
+    let derived_path = directives_dir.join(relative);
+    Ok(derived_path)
+}
+
+pub fn get_original_path(directives_dir: &Path, derived: &Path) -> PathBuf {
+    if let Ok(relative) = derived.strip_prefix(directives_dir) {
+        // TODO: Generalize path root.
+        PathBuf::from("/").join(relative)
+    } else {
+        derived.to_owned()
+    }
+}
+
 pub async fn update_directives_file(
     directives_dir: &Path,
     original: &Path,
 ) -> Result<DirectivesUpdate> {
-    // TODO: Generalize making the path relative to root.
-    let derived_path = directives_dir.join(original.strip_prefix("/")?);
+    let derived_path = get_corresponding_directives_path(directives_dir, original)?;
 
     let derived_exists = derived_path.exists();
     let original_exists = original.exists();
