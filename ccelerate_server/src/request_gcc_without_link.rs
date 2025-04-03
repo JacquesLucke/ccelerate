@@ -150,6 +150,9 @@ pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
     state: &Data<State>,
     config: &Arc<Config>,
 ) -> HttpResponse {
+    let id = uuid::Uuid::new_v4();
+    log::info!(id:?; "lala");
+
     let preprocess_result = Arc::new(Mutex::new(None));
     {
         let cwd = cwd.to_owned();

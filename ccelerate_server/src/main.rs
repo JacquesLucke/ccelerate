@@ -11,6 +11,7 @@ use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
 use config::ConfigManager;
+use log_events::LogEventInfo;
 use os_str_bytes::OsStrBytesExt;
 use parallel_pool::ParallelPool;
 use parking_lot::Mutex;
@@ -25,6 +26,7 @@ mod config;
 mod database;
 mod gcc_args;
 mod local_code;
+mod log_events;
 mod parallel_pool;
 mod path_utils;
 mod preprocessor_directives;
@@ -180,7 +182,23 @@ async fn route_run(
         log::error!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
-    handle_request(&run_request, &state).await
+    let id = log_events::LogScopeId::new();
+    log_events::log(
+        LogEventInfo::RunRequestStart {
+            id: id.clone(),
+            request: run_request.clone(),
+        },
+        None,
+    );
+    let response = handle_request(&run_request, &state).await;
+    log_events::log(
+        LogEventInfo::RunRequestEnd {
+            id,
+            success: response.status().is_success(),
+        },
+        None,
+    );
+    response
 }
 
 async fn server_thread(state: Data<State>) {
