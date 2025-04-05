@@ -132,7 +132,6 @@ async fn compile_compatible_objects(
         .join(object_name);
     path_utils::ensure_directory_for_file(&object_path).await?;
 
-    // let objects = NonEmpty::<[ObjectData]>::new(objects).ok_or_else(|| anyhow::anyhow!("empty"))?;
     let preprocessed_headers = get_preprocessed_headers(objects, state, config).await?;
 
     let preprocessed_language = CodeLanguage::from_path(&any_object.local_code.local_code_file)?;
