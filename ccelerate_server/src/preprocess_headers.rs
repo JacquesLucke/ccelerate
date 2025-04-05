@@ -10,11 +10,11 @@ use crate::{
 };
 
 pub async fn get_preprocessed_headers(
-    records: &[ObjectData],
+    objects: &[ObjectData],
     state: &Arc<State>,
     config: &Config,
 ) -> Result<BString> {
-    let any_object = records
+    let any_object = objects
         .first()
         .expect("There has to be at least one record");
     let source_language =
@@ -22,14 +22,14 @@ pub async fn get_preprocessed_headers(
 
     let mut ordered_unique_includes: Vec<&Path> = vec![];
     let mut include_defines: Vec<&BStr> = vec![];
-    for record in records {
-        for include in &record.local_code.global_includes {
+    for object in objects {
+        for include in &object.local_code.global_includes {
             if ordered_unique_includes.contains(&include.as_path()) {
                 continue;
             }
             ordered_unique_includes.push(include.as_path());
         }
-        for define in &record.local_code.include_defines {
+        for define in &object.local_code.include_defines {
             if include_defines.contains(&define.as_bstr()) {
                 continue;
             }
@@ -48,7 +48,7 @@ pub async fn get_preprocessed_headers(
         config,
     )?;
 
-    let first_record = records
+    let first_record = objects
         .first()
         .expect("There has to be at least one record");
     let preprocess_args =
