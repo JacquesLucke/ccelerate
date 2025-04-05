@@ -21,7 +21,22 @@ pub async fn wrap_compile_object_file(
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<CommandOutput> {
-    let preprocess_result = preprocess_file_in_pool(binary, args, cwd, state, config).await?;
+    state
+        .pool
+        .run_same_thread(async move || {
+            wrap_compile_object_file_impl(binary, args, cwd, state, config).await
+        })
+        .await
+}
+
+async fn wrap_compile_object_file_impl(
+    binary: WrappedBinary,
+    args: &[impl AsRef<OsStr>],
+    cwd: &Path,
+    state: &Arc<State>,
+    config: &Arc<Config>,
+) -> Result<CommandOutput> {
+    let preprocess_result = preprocess_file(binary, args, cwd, state, config).await?;
     let local_code_path = write_local_code_file(&preprocess_result, state).await?;
     write_dummy_object_file(&preprocess_result).await?;
 
@@ -41,23 +56,6 @@ pub async fn wrap_compile_object_file(
     )?;
 
     Ok(CommandOutput::new_ok())
-}
-
-async fn preprocess_file_in_pool(
-    binary: WrappedBinary,
-    args: &[impl AsRef<OsStr>],
-    cwd: &Path,
-    state: &Arc<State>,
-    config: &Arc<Config>,
-) -> Result<PreprocessFileResult> {
-    let cwd = cwd.to_owned();
-    let state_clone = state.clone();
-    let config = config.clone();
-    let args: Vec<_> = args.iter().map(|s| s.as_ref().to_owned()).collect();
-    state
-        .pool
-        .run(async move || preprocess_file(binary, &args, &cwd, &state_clone, &config).await)
-        .await?
 }
 
 struct PreprocessFileResult {

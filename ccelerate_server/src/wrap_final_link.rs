@@ -328,7 +328,7 @@ async fn compile_chunk_sources_in_pool(
     let config = config.clone();
     state
         .pool
-        .run(async move || compile_chunk_sources(&state_clone, &records, &config).await)
+        .run_separate_thread(async move || compile_chunk_sources(&state_clone, &records, &config).await)
         .await?
 }
 

@@ -15,7 +15,7 @@ impl ParallelPool {
         }
     }
 
-    pub fn run<F, Fut, Out>(&self, f: F) -> JoinHandle<Out>
+    pub fn run_separate_thread<F, Fut, Out>(&self, f: F) -> JoinHandle<Out>
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Out> + Send + 'static,
@@ -26,5 +26,18 @@ impl ParallelPool {
             let _permit = permit.await.expect("should be valid");
             f().await
         })
+    }
+
+    pub async fn run_same_thread<F, Fut, Out>(&self, f: F) -> Out
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Out>,
+    {
+        let _permit = self
+            .semaphore
+            .acquire()
+            .await
+            .expect("should always succeed eventually");
+        f().await
     }
 }
