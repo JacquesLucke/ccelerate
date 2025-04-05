@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
-use actix_web::web::Data;
+use std::sync::Arc;
+
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
@@ -10,7 +11,7 @@ use ratatui::{
 
 use crate::{State, export_trace};
 
-pub async fn run_tui(state: &Data<State>) -> Result<()> {
+pub async fn run_tui(state: &Arc<State>) -> Result<()> {
     let mut terminal = ratatui::init();
 
     let start_instant = std::time::Instant::now();
@@ -19,14 +20,11 @@ pub async fn run_tui(state: &Data<State>) -> Result<()> {
         if *state.auto_scroll.lock() {
             state.tasks_table_state.lock().select_last();
         }
-        {
-            let state = state.clone();
-            terminal
-                .draw(|frame| {
-                    draw_terminal(frame, state);
-                })
-                .expect("failed to draw terminal");
-        }
+        terminal
+            .draw(|frame| {
+                draw_terminal(frame, state);
+            })
+            .expect("failed to draw terminal");
         if crossterm::event::poll(std::time::Duration::from_millis(100))? {
             match crossterm::event::read()? {
                 Event::Key(KeyEvent {
@@ -86,7 +84,7 @@ pub async fn run_tui(state: &Data<State>) -> Result<()> {
     Ok(())
 }
 
-fn draw_terminal(frame: &mut ratatui::Frame, state: actix_web::web::Data<State>) {
+fn draw_terminal(frame: &mut ratatui::Frame, state: &Arc<State>) {
     use ratatui::layout::Constraint::*;
 
     let tasks: Vec<crate::task_periods::TaskPeriod> = state.task_periods.get_sorted_periods();

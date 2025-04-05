@@ -8,7 +8,6 @@ use std::{
     sync::Arc,
 };
 
-use actix_web::web::Data;
 use anyhow::Result;
 use bstr::{BStr, BString, ByteSlice, ByteVec};
 use ccelerate_shared::WrappedBinary;
@@ -60,7 +59,7 @@ impl TaskPeriodInfo for FindLinkSourcesTaskInfo {
 fn find_link_sources(
     args_info: &gcc_args::LinkFileInfo,
     conn: &rusqlite::Connection,
-    state: &Data<State>,
+    state: &Arc<State>,
 ) -> Result<OriginalLinkSources> {
     let task_period = state.task_periods.start(FindLinkSourcesTaskInfo {
         output: args_info.output.clone(),
@@ -165,7 +164,7 @@ impl TaskPeriodInfo for GroupObjectsToChunksTaskInfo {
 
 fn known_object_files_to_chunks(
     original_object_records: &[FileRecord],
-    state: &Data<State>,
+    state: &Arc<State>,
 ) -> Result<Vec<CompileChunk>> {
     let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {
         num: original_object_records.len(),
@@ -198,7 +197,7 @@ fn known_object_files_to_chunks(
 #[async_recursion::async_recursion]
 async fn compile_chunk_in_chunks(
     records: &[FileRecord],
-    state: &Data<State>,
+    state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<Vec<PathBuf>> {
     if records.is_empty() {
@@ -254,7 +253,7 @@ impl TaskPeriodInfo for CompileChunkTaskInfo {
 }
 
 async fn compile_chunk_sources(
-    state: &Data<State>,
+    state: &Arc<State>,
     records: &[FileRecord],
     config: &Config,
 ) -> Result<PathBuf> {
@@ -323,7 +322,7 @@ async fn compile_chunk_sources(
 }
 
 async fn compile_chunk_sources_in_pool(
-    state: &Data<State>,
+    state: &Arc<State>,
     records: &[FileRecord],
     config: &Arc<Config>,
 ) -> Result<PathBuf> {
@@ -356,7 +355,7 @@ impl TaskPeriodInfo for GetPreprocessedHeadersTaskInfo {
 
 async fn get_compile_chunk_preprocessed_headers(
     records: &[FileRecord],
-    state: &Data<State>,
+    state: &Arc<State>,
     source_language: CodeLanguage,
     config: &Config,
 ) -> Result<BString> {
@@ -458,7 +457,7 @@ impl TaskPeriodInfo for CreateThinArchiveTaskInfo {
 
 pub async fn create_thin_archive_for_objects(
     objects: &[PathBuf],
-    state: &Data<State>,
+    state: &Arc<State>,
 ) -> Result<PathBuf> {
     let task_period = state.task_periods.start(CreateThinArchiveTaskInfo {});
 
@@ -508,7 +507,7 @@ pub async fn final_link<S: AsRef<OsStr>>(
     original_gcc_args: &[S],
     args_info: &gcc_args::LinkFileInfo,
     cwd: &Path,
-    state: &Data<State>,
+    state: &Arc<State>,
     sources: &[PathBuf],
 ) -> Result<CommandOutput> {
     let task_period = state.task_periods.start(FinalLinkTaskInfo {
@@ -545,7 +544,7 @@ pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     original_args: &[S],
     cwd: &Path,
-    state: &Data<State>,
+    state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<CommandOutput> {
     let args_info = gcc_args::LinkFileInfo::from_args(cwd, original_args)?;

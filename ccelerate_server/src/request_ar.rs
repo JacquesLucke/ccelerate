@@ -1,8 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
-use std::ffi::OsStr;
+use std::{ffi::OsStr, sync::Arc};
 
-use actix_web::web::Data;
 use anyhow::Result;
 use ccelerate_shared::RunRequestData;
 
@@ -32,7 +31,7 @@ impl TaskPeriodInfo for BuildStaticArchiveInfo {
 
 pub async fn handle_ar_request(
     request: &RunRequestData,
-    state: &Data<State>,
+    state: &Arc<State>,
 ) -> Result<CommandOutput> {
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
     let ar_args = ar_args::BuildStaticArchiveInfo::from_args(&request.cwd, &request_args_ref)?;

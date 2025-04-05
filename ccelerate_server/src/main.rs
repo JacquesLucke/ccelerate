@@ -40,6 +40,10 @@ mod tui;
 
 static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
 
+struct WebState {
+    state: Arc<State>,
+}
+
 #[derive(clap::Parser, Debug)]
 #[command(name = "ccelerate_server")]
 struct Cli {
@@ -134,7 +138,7 @@ impl CommandOutput {
     }
 }
 
-async fn handle_request(request: &RunRequestData, state: &Data<State>) -> Result<CommandOutput> {
+async fn handle_request(request: &RunRequestData, state: &Arc<State>) -> Result<CommandOutput> {
     match request.binary {
         WrappedBinary::Ar => {
             return request_ar::handle_ar_request(request, state).await;
@@ -193,7 +197,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> Result
     }
 }
 
-async fn log_file(state: &Data<State>, name: &str, data: &[u8], ext: &str) -> Result<()> {
+async fn log_file(state: &Arc<State>, name: &str, data: &[u8], ext: &str) -> Result<()> {
     let data_hash = twox_hash::XxHash64::oneshot(0, data);
     let data_hash_str = format!("{:x}", data_hash);
     let file_name = format!("{}.{}", data_hash_str, ext);
@@ -214,13 +218,13 @@ async fn log_file(state: &Data<State>, name: &str, data: &[u8], ext: &str) -> Re
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestDataWire>,
-    state: Data<State>,
+    web_state: Data<WebState>,
 ) -> impl actix_web::Responder {
     let Ok(run_request) = RunRequestData::from_wire(&run_request) else {
         log::error!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
-    let output = CommandOutput::from_result(handle_request(&run_request, &state).await);
+    let output = CommandOutput::from_result(handle_request(&run_request, &web_state.state).await);
     HttpResponse::Ok().json(
         RunResponseData {
             stdout: output.stdout,
@@ -231,16 +235,17 @@ async fn route_run(
     )
 }
 
-async fn server_thread(state: Data<State>) {
-    let state_clone = state.clone();
+async fn server_thread(state: Arc<State>) {
+    let web_state = actix_web::web::Data::new(WebState { state });
+    let web_state_clone = web_state.clone();
     actix_web::HttpServer::new(move || {
         actix_web::App::new()
-            .app_data(state.clone())
+            .app_data(web_state.clone())
             .service(route_index)
             .service(route_run)
     })
     .client_request_timeout(Duration::from_secs(0))
-    .bind(state_clone.address.clone())
+    .bind(web_state_clone.state.address.clone())
     .unwrap()
     .run()
     .await
@@ -277,7 +282,7 @@ async fn main() -> Result<()> {
     let db_path = data_dir.join("ccelerate.db");
     let conn = database::load_or_create_db(&db_path)?;
     let addr = format!("127.0.0.1:{}", cli.port);
-    let state = actix_web::web::Data::new(State {
+    let state = Arc::new(State {
         address: addr.clone(),
         conn: Arc::new(Mutex::new(conn)),
         task_periods: TaskPeriods::new(),

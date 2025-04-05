@@ -1,6 +1,5 @@
 #![deny(clippy::unwrap_used)]
 
-use actix_web::web::Data;
 use anyhow::Result;
 use bstr::ByteSlice;
 use ccelerate_shared::WrappedBinary;
@@ -34,7 +33,7 @@ async fn preprocess_file<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     build_object_file_args: &[S],
     cwd: &Path,
-    state: &Data<State>,
+    state: &Arc<State>,
     config: &Config,
 ) -> Result<PreprocessFileResult> {
     let args_info = gcc_args::BuildObjectFileInfo::from_args(cwd, build_object_file_args)?;
@@ -99,7 +98,7 @@ pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     build_object_file_args: &[S],
     cwd: &Path,
-    state: &Data<State>,
+    state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<CommandOutput> {
     let preprocess_result = {
