@@ -67,4 +67,12 @@ impl CodeLanguage {
             _ => Err(anyhow!("Cannot preprocess language {:?}", self)),
         }
     }
+
+    pub fn to_non_preprocessed(self) -> Result<CodeLanguage> {
+        match self {
+            Self::I => Ok(Self::C),
+            Self::II => Ok(Self::Cxx),
+            _ => Err(anyhow!("This is not a preprocessed language: {:?}", self)),
+        }
+    }
 }

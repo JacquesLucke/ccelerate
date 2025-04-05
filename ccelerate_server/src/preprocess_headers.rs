@@ -12,9 +12,14 @@ use crate::{
 pub async fn get_preprocessed_headers(
     records: &[ObjectData],
     state: &Arc<State>,
-    source_language: CodeLanguage,
     config: &Config,
 ) -> Result<BString> {
+    let any_object = records
+        .first()
+        .expect("There has to be at least one record");
+    let source_language =
+        CodeLanguage::from_path(&any_object.local_code.local_code_file)?.to_non_preprocessed()?;
+
     let mut ordered_unique_includes: Vec<&Path> = vec![];
     let mut include_defines: Vec<&BStr> = vec![];
     for record in records {

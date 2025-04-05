@@ -12,7 +12,7 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    CommandOutput, ar_args, args_processing, config::Config, gcc_args,
+    CommandOutput, ar_args, args_processing, code_language::CodeLanguage, config::Config, gcc_args,
     group_compatible_objects::group_compatible_objects, link_sources::find_link_sources,
     path_utils::shorten_path, preprocess_headers::get_preprocessed_headers,
     source_file::SourceFile, state::State, state_persistent::ObjectData,
@@ -121,16 +121,9 @@ async fn compile_compatible_objects(
     let object_path = object_dir.join(object_name);
     tokio::fs::create_dir_all(&object_dir).await?;
 
-    let source_language = args_processing::BuildObjectFileInfo::from_args(
-        any_object.create.binary,
-        &any_object.create.cwd,
-        &any_object.create.args,
-    )?
-    .source_language;
-    let preprocessed_language = source_language.to_preprocessed()?;
-    let preprocessed_headers =
-        get_preprocessed_headers(objects, state, source_language, config).await?;
+    let preprocessed_headers = get_preprocessed_headers(objects, state, config).await?;
 
+    let preprocessed_language = CodeLanguage::from_path(&any_object.local_code.local_code_file)?;
     let build_args = gcc_args::update_to_build_object_from_stdin(
         &any_object.create.args,
         &object_path,
