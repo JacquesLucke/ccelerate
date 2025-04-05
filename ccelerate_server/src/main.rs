@@ -23,6 +23,7 @@ mod ar_args;
 mod code_language;
 mod config;
 mod database;
+mod export_trace;
 mod gcc_args;
 mod local_code;
 mod parallel_pool;
@@ -254,7 +255,7 @@ async fn main() -> Result<()> {
     }
     // Run the server in the background and the tui on the main thread.
     tokio::spawn(server_thread(state.clone()));
-    match tui::run_tui(&state) {
+    match tui::run_tui(&state).await {
         Ok(_) => {}
         Err(e) => {
             log::error!("Error running tui: {e}");
