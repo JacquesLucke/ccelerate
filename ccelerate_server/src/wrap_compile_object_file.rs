@@ -128,7 +128,7 @@ async fn write_local_code_file(
         "{}_{}.{}",
         local_code_hash_str,
         debug_name,
-        args_info.source_language.to_preprocessed()?.to_valid_ext()
+        args_info.source_language.to_preprocessed()?.valid_ext()
     );
 
     let preprocess_file_path = state

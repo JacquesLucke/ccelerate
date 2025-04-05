@@ -48,7 +48,7 @@ fn create_object_compatibility_key(object: &ObjectData) -> Result<BString> {
             .to_standard_binary_name()
             .as_encoded_bytes(),
     );
-    key.push_str(info.source_language.to_valid_ext());
+    key.push_str(info.source_language.valid_ext());
     key.push_str(object.create.cwd.as_os_str().as_encoded_bytes());
     for include_define in &object.local_code.include_defines {
         key.push_str(include_define);

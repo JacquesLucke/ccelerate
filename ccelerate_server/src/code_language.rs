@@ -31,7 +31,7 @@ impl CodeLanguage {
         Self::from_ext(path.extension().and_then(|e| e.to_str()).unwrap_or(""))
     }
 
-    pub fn to_valid_ext(self) -> &'static str {
+    pub fn valid_ext(&self) -> &'static str {
         match self {
             Self::C => "c",
             Self::Cxx => "cc",

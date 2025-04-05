@@ -102,9 +102,9 @@ pub fn rewrite_to_extract_local_code(args: &[impl AsRef<OsStr>]) -> Result<Vec<O
     Ok(args.to_args_owned_vec())
 }
 
-pub fn update_build_object_args_to_just_output_preprocessed_from_stdin(
+pub fn update_build_object_args_to_just_output_preprocessed(
     args: &[impl AsRef<OsStr>],
-    source_language: CodeLanguage,
+    include_code_path: &Path,
 ) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
     args.args.retain(|arg| match arg {
@@ -135,10 +135,8 @@ pub fn update_build_object_args_to_just_output_preprocessed_from_stdin(
     });
     // Stop after preprocessing.
     args.push_single_arg_str("-E");
-    // Set language for code going in stdin.
-    args.push_dual_arg_str("-x", source_language.to_gcc_x_arg());
-    // Tell gcc that code passed into stdin. This has to be the last argument.
-    args.push_single_arg_str("-");
+    // Set input file.
+    args.push_source_arg(include_code_path);
     Ok(args.to_args_owned_vec())
 }
 

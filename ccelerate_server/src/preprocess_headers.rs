@@ -3,10 +3,9 @@ use std::{io::Write, path::Path, sync::Arc};
 use anyhow::Result;
 use bstr::{BStr, BString, ByteSlice};
 use nunny::NonEmpty;
-use tokio::io::AsyncWriteExt;
 
 use crate::{
-    CommandOutput, code_language::CodeLanguage, config::Config, gcc_args, state::State,
+    CommandOutput, code_language::CodeLanguage, config::Config, gcc_args, path_utils, state::State,
     state_persistent::ObjectData, task_periods::TaskPeriodInfo,
 };
 
@@ -15,27 +14,25 @@ pub async fn get_preprocessed_headers(
     state: &Arc<State>,
     config: &Config,
 ) -> Result<BString> {
-    let include_code = get_include_code_for_objects(objects, config)?;
-
     let any_object = objects.first();
     let source_language =
         CodeLanguage::from_path(&any_object.local_code.local_code_file)?.to_non_preprocessed()?;
+
+    let include_code = get_include_code_for_objects(objects, config)?;
+    let include_code_file =
+        tempfile::NamedTempFile::with_suffix(format!(".{}", source_language.valid_ext()))?;
+    path_utils::ensure_directory_and_write(include_code_file.path(), &include_code).await?;
+
     let task_period = state.task_periods.start(GetPreprocessedHeadersTaskInfo {});
-    let preprocess_args =
-        gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
-            &any_object.create.args,
-            source_language,
-        )?;
-    let mut child =
-        tokio::process::Command::new(any_object.create.binary.to_standard_binary_name())
-            .args(preprocess_args)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&include_code).await?;
-    }
+    let preprocess_args = gcc_args::update_build_object_args_to_just_output_preprocessed(
+        &any_object.create.args,
+        include_code_file.path(),
+    )?;
+    let child = tokio::process::Command::new(any_object.create.binary.to_standard_binary_name())
+        .args(preprocess_args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
     let child_output = child.wait_with_output().await?;
     if !child_output.status.success() {
         return Err(CommandOutput::from_process_output(child_output).into());
@@ -49,9 +46,11 @@ fn get_include_code_for_objects(
     objects: &NonEmpty<[ObjectData]>,
     config: &Config,
 ) -> Result<BString> {
+    let mut comment_lines = vec!["Include code for the following files:".into()];
     let mut ordered_unique_includes: Vec<&Path> = vec![];
     let mut include_defines: Vec<&BStr> = vec![];
     for object in objects {
+        comment_lines.push(object.local_code.local_code_file.to_string_lossy());
         for include in &object.local_code.global_includes {
             if ordered_unique_includes.contains(&include.as_path()) {
                 continue;
@@ -72,6 +71,7 @@ fn get_include_code_for_objects(
     get_include_code(
         &ordered_unique_includes,
         &include_defines,
+        &comment_lines,
         source_language,
         config,
     )
@@ -80,10 +80,14 @@ fn get_include_code_for_objects(
 fn get_include_code(
     include_paths: &[impl AsRef<Path>],
     defines: &[impl AsRef<BStr>],
+    comment_lines: &[impl AsRef<str>],
     language: CodeLanguage,
     config: &Config,
 ) -> Result<BString> {
     let mut headers_code = BString::new(Vec::new());
+    for line in comment_lines {
+        writeln!(headers_code, "// {}", line.as_ref())?;
+    }
     for define in defines {
         writeln!(headers_code, "{}", define.as_ref())?;
     }
