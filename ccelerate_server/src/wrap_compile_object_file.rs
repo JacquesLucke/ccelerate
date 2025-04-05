@@ -10,7 +10,7 @@ use std::{
 };
 
 use crate::{
-    CommandOutput, State, args_processing, config::Config, gcc_args, local_code::LocalCode,
+    CommandOutput, State, args_processing, config::Config, local_code::LocalCode,
     path_utils::shorten_path, task_periods::TaskPeriodInfo,
 };
 
@@ -67,8 +67,7 @@ async fn extract_local_code(
         dst_object_file: args_info.object_path.clone(),
     });
 
-    let preprocessing_args =
-        gcc_args::update_build_object_args_to_output_preprocessed_with_defines(args)?;
+    let preprocessing_args = args_processing::rewrite_to_extract_local_code(binary, args)?;
 
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(preprocessing_args)
@@ -83,6 +82,7 @@ async fn extract_local_code(
     }
     let preprocessed_code = child_result.stdout;
     task_period.finished_successfully();
+
     let task_period = state
         .task_periods
         .start(HandlePreprocessedTranslationUnitTaskInfo {

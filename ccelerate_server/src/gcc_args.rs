@@ -79,9 +79,7 @@ pub fn is_build_object_file(args: &[impl AsRef<OsStr>]) -> Result<bool> {
 
 /// Takes arguments that would build one object file and changes it so that it instead
 /// outputs the preprocessed code for the source file.
-pub fn update_build_object_args_to_output_preprocessed_with_defines(
-    args: &[impl AsRef<OsStr>],
-) -> Result<Vec<OsString>> {
+pub fn rewrite_to_extract_local_code(args: &[impl AsRef<OsStr>]) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
     args.args.retain(|arg| match arg {
         GccArg::Single(arg) => {
