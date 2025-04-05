@@ -8,7 +8,26 @@ use ccelerate_shared::RunRequestData;
 use crate::{
     State, ar_args,
     database::{FileRecord, store_file_record},
+    task_periods::TaskPeriodInfo,
 };
+
+struct BuildStaticArchiveInfo {
+    archive_name: String,
+}
+
+impl TaskPeriodInfo for BuildStaticArchiveInfo {
+    fn category(&self) -> String {
+        "Ar".to_string()
+    }
+
+    fn short_name(&self) -> String {
+        format!("Prepare: {}", self.archive_name)
+    }
+
+    fn log(&self) {
+        log::info!("Prepare: {}", self.archive_name);
+    }
+}
 
 pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
     let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
@@ -16,10 +35,9 @@ pub async fn handle_ar_request(request: &RunRequestData, state: &Data<State>) ->
     else {
         return HttpResponse::BadRequest().body("Arguments to ar do not build an archive");
     };
-    let task_period = state.task_periods.start(
-        "Ar",
-        &format!("Prepare: {}", ar_args.archive_name.to_string_lossy()),
-    );
+    let task_period = state.task_periods.start(BuildStaticArchiveInfo {
+        archive_name: ar_args.archive_name.to_string_lossy().to_string(),
+    });
     let Ok(_) = store_file_record(
         &state.conn.lock(),
         &ar_args.archive_path,

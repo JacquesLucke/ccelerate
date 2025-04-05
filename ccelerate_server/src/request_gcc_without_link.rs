@@ -21,7 +21,7 @@ use crate::{
     local_code::LocalCode,
     log_file,
     source_file::SourceFile,
-    task_log::{TaskInfo, log_task},
+    task_periods::TaskPeriodInfo,
 };
 
 struct PreprocessFileResult {
@@ -69,12 +69,9 @@ async fn preprocess_file<S: AsRef<OsStr>>(
         return Err(PreprocessFileError::CannotPreprocessLanguage);
     };
 
-    let task_period = log_task(
-        &PreprocessTranslationUnitTaskInfo {
-            dst_object_file: args_info.object_path.clone(),
-        },
-        state,
-    );
+    let task_period = state.task_periods.start(PreprocessTranslationUnitTaskInfo {
+        dst_object_file: args_info.object_path.clone(),
+    });
 
     let Ok(preprocessing_args) =
         gcc_args::update_build_object_args_to_output_preprocessed_with_defines(
@@ -115,12 +112,11 @@ async fn preprocess_file<S: AsRef<OsStr>>(
         .await;
     }
     task_period.finished_successfully();
-    let task_period = log_task(
-        &HandlePreprocessedTranslationUnitTaskInfo {
+    let task_period = state
+        .task_periods
+        .start(HandlePreprocessedTranslationUnitTaskInfo {
             dst_object_file: args_info.object_path.clone(),
-        },
-        state,
-    );
+        });
     let Ok(analysis) = LocalCode::from_preprocessed_code(
         preprocessed_code.as_bstr(),
         &args_info.source_path,
@@ -289,7 +285,7 @@ struct PreprocessTranslationUnitTaskInfo {
     dst_object_file: PathBuf,
 }
 
-impl TaskInfo for PreprocessTranslationUnitTaskInfo {
+impl TaskPeriodInfo for PreprocessTranslationUnitTaskInfo {
     fn category(&self) -> String {
         "Preprocess".to_string()
     }
@@ -313,7 +309,7 @@ struct HandlePreprocessedTranslationUnitTaskInfo {
     dst_object_file: PathBuf,
 }
 
-impl TaskInfo for HandlePreprocessedTranslationUnitTaskInfo {
+impl TaskPeriodInfo for HandlePreprocessedTranslationUnitTaskInfo {
     fn category(&self) -> String {
         "Local Code".to_string()
     }

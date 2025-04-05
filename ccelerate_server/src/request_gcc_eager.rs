@@ -8,17 +8,14 @@ use std::{
 use actix_web::HttpResponse;
 use ccelerate_shared::WrappedBinary;
 
-use crate::{
-    State,
-    task_log::{TaskInfo, log_task},
-};
+use crate::{State, task_periods::TaskPeriodInfo};
 
 struct EagerGccTaskInfo {
     binary: WrappedBinary,
     args: Vec<OsString>,
 }
 
-impl TaskInfo for EagerGccTaskInfo {
+impl TaskPeriodInfo for EagerGccTaskInfo {
     fn category(&self) -> String {
         "Eager".to_string()
     }
@@ -38,13 +35,10 @@ pub async fn handle_eager_gcc_request<S: AsRef<OsStr>>(
     cwd: &Path,
     state: &State,
 ) -> HttpResponse {
-    let task_period = log_task(
-        &EagerGccTaskInfo {
-            binary,
-            args: args.iter().map(|s| s.as_ref().to_owned()).collect(),
-        },
-        state,
-    );
+    let task_period = state.task_periods.start(EagerGccTaskInfo {
+        binary,
+        args: args.iter().map(|s| s.as_ref().to_owned()).collect(),
+    });
     let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(args)
         .current_dir(cwd)

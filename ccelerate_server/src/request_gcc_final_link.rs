@@ -24,7 +24,7 @@ use crate::{
     path_utils::shorten_path,
     source_file::SourceFile,
     state::State,
-    task_log::{TaskInfo, log_task},
+    task_periods::TaskPeriodInfo,
 };
 
 #[derive(Debug, Default)]
@@ -43,7 +43,7 @@ struct FindLinkSourcesTaskInfo {
     output: PathBuf,
 }
 
-impl TaskInfo for FindLinkSourcesTaskInfo {
+impl TaskPeriodInfo for FindLinkSourcesTaskInfo {
     fn category(&self) -> String {
         "Link Sources".to_string()
     }
@@ -62,12 +62,9 @@ fn find_link_sources(
     conn: &rusqlite::Connection,
     state: &Data<State>,
 ) -> Result<OriginalLinkSources> {
-    let task_period = log_task(
-        &FindLinkSourcesTaskInfo {
-            output: args_info.output.clone(),
-        },
-        state,
-    );
+    let task_period = state.task_periods.start(FindLinkSourcesTaskInfo {
+        output: args_info.output.clone(),
+    });
 
     let mut link_sources = OriginalLinkSources::default();
     for source in args_info.sources.iter() {
@@ -150,7 +147,7 @@ struct CompileChunk {
 
 struct GroupObjectsToChunksTaskInfo {}
 
-impl TaskInfo for GroupObjectsToChunksTaskInfo {
+impl TaskPeriodInfo for GroupObjectsToChunksTaskInfo {
     fn category(&self) -> String {
         "Group Chunks".to_string()
     }
@@ -168,7 +165,7 @@ fn known_object_files_to_chunks(
     original_object_records: &[FileRecord],
     state: &Data<State>,
 ) -> Result<Vec<CompileChunk>> {
-    let task_period = log_task(&GroupObjectsToChunksTaskInfo {}, state);
+    let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {});
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
@@ -224,18 +221,18 @@ async fn compile_chunk_in_chunks(
     Ok(left.into_iter().chain(right).collect())
 }
 
-struct CompileChunkTaskInfo<'a> {
-    sources: &'a [&'a Path],
+struct CompileChunkTaskInfo {
+    sources: Vec<PathBuf>,
 }
 
-impl TaskInfo for CompileChunkTaskInfo<'_> {
+impl TaskPeriodInfo for CompileChunkTaskInfo {
     fn category(&self) -> String {
         "Compile".to_string()
     }
 
     fn short_name(&self) -> String {
         let mut short_name = format!("Compile ({}): ", self.sources.len());
-        for source in self.sources {
+        for source in &self.sources {
             short_name.push_str(&shorten_path(source));
             short_name.push(' ');
         }
@@ -244,7 +241,7 @@ impl TaskInfo for CompileChunkTaskInfo<'_> {
 
     fn log(&self) {
         let mut msg = "Compile chunk: ".to_string();
-        for source in self.sources {
+        for source in &self.sources {
             msg.push_str("  ");
             msg.push_str(&shorten_path(source));
             msg.push('\n');
@@ -290,7 +287,9 @@ async fn compile_chunk_sources(
         preprocessed_language,
     )?;
 
-    let task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
+    let task_period = state.task_periods.start(CompileChunkTaskInfo {
+        sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+    });
 
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
         .args(build_args)
@@ -338,7 +337,7 @@ struct GetPreprocessedHeadersTaskInfo {
     headers_num: usize,
 }
 
-impl TaskInfo for GetPreprocessedHeadersTaskInfo {
+impl TaskPeriodInfo for GetPreprocessedHeadersTaskInfo {
     fn category(&self) -> String {
         "Headers".to_string()
     }
@@ -375,12 +374,9 @@ async fn get_compile_chunk_preprocessed_headers(
         }
     }
 
-    let task_period = log_task(
-        &GetPreprocessedHeadersTaskInfo {
-            headers_num: ordered_unique_includes.len(),
-        },
-        state,
-    );
+    let task_period = state.task_periods.start(GetPreprocessedHeadersTaskInfo {
+        headers_num: ordered_unique_includes.len(),
+    });
 
     let headers_code = get_compile_chunk_header_code(
         &ordered_unique_includes,
@@ -443,7 +439,7 @@ fn get_compile_chunk_header_code(
 
 struct CreateThinArchiveTaskInfo {}
 
-impl TaskInfo for CreateThinArchiveTaskInfo {
+impl TaskPeriodInfo for CreateThinArchiveTaskInfo {
     fn category(&self) -> String {
         "Archive".to_string()
     }
@@ -461,7 +457,7 @@ pub async fn create_thin_archive_for_objects(
     objects: &[PathBuf],
     state: &Data<State>,
 ) -> Result<PathBuf> {
-    let task_period = log_task(&CreateThinArchiveTaskInfo {}, state);
+    let task_period = state.task_periods.start(CreateThinArchiveTaskInfo {});
 
     let archive_name = format!("{}.a", uuid::Uuid::new_v4());
     let archive_dir = state.data_dir.join("archives").join(&archive_name[..2]);
@@ -490,7 +486,7 @@ struct FinalLinkTaskInfo {
     output: PathBuf,
 }
 
-impl TaskInfo for FinalLinkTaskInfo {
+impl TaskPeriodInfo for FinalLinkTaskInfo {
     fn category(&self) -> String {
         "Link".to_string()
     }
@@ -512,12 +508,9 @@ pub async fn final_link<S: AsRef<OsStr>>(
     state: &Data<State>,
     sources: &[PathBuf],
 ) -> Result<std::process::Output> {
-    let task_period = log_task(
-        &FinalLinkTaskInfo {
-            output: args_info.output.clone(),
-        },
-        state,
-    );
+    let task_period = state.task_periods.start(FinalLinkTaskInfo {
+        output: args_info.output.clone(),
+    });
 
     let new_sources: Vec<_> = sources
         .iter()

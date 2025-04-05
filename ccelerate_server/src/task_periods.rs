@@ -17,11 +17,16 @@ struct TaskPeriodsVec {
 }
 
 struct TaskPeriodStorage {
-    category: String,
-    name: String,
+    info: Box<dyn TaskPeriodInfo>,
     start_time: Instant,
     end_time: Arc<Mutex<Option<Instant>>>,
     finished_successfully: Arc<Mutex<bool>>,
+}
+
+pub trait TaskPeriodInfo: Send + Sync {
+    fn category(&self) -> String;
+    fn short_name(&self) -> String;
+    fn log(&self);
 }
 
 #[derive(Debug, Clone)]
@@ -49,12 +54,15 @@ impl TaskPeriods {
         }
     }
 
-    pub fn start(&self, category: &str, name: &str) -> TaskPeriodScope {
+    pub fn start<Info: TaskPeriodInfo + 'static + Send + Sync>(
+        &self,
+        info: Info,
+    ) -> TaskPeriodScope {
         let end_time = Arc::new(Mutex::new(None));
         let finished_successfully = Arc::new(Mutex::new(false));
+        info.log();
         let task = TaskPeriodStorage {
-            category: category.to_string(),
-            name: name.to_string(),
+            info: Box::new(info),
             start_time: Instant::now(),
             end_time: end_time.clone(),
             finished_successfully: finished_successfully.clone(),
@@ -86,8 +94,8 @@ impl TaskPeriods {
             .tasks
             .iter()
             .map(|t| TaskPeriod {
-                category: t.category.clone(),
-                name: t.name.clone(),
+                category: t.info.category(),
+                name: t.info.short_name(),
                 start: t.start_time,
                 duration: t.duration(),
                 active: t.is_running(),

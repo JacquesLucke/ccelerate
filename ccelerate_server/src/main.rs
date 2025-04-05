@@ -34,7 +34,6 @@ mod request_gcc_final_link;
 mod request_gcc_without_link;
 mod source_file;
 mod state;
-mod task_log;
 mod task_periods;
 mod tui;
 
