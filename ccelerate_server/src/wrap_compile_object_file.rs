@@ -15,69 +15,6 @@ use crate::{
     task_periods::TaskPeriodInfo,
 };
 
-struct PreprocessFileResult {
-    source_file: SourceFile,
-    preprocessed_language: CodeLanguage,
-    original_obj_output: PathBuf,
-    analysis: LocalCode,
-}
-
-async fn preprocess_file(
-    binary: WrappedBinary,
-    build_object_file_args: &[impl AsRef<OsStr>],
-    cwd: &Path,
-    state: &Arc<State>,
-    config: &Config,
-) -> Result<PreprocessFileResult> {
-    let args_info = gcc_args::BuildObjectFileInfo::from_args(cwd, build_object_file_args)?;
-    let preprocessed_language = args_info.source_language.to_preprocessed()?;
-
-    let task_period = state.task_periods.start(PreprocessTranslationUnitTaskInfo {
-        dst_object_file: args_info.object_path.clone(),
-    });
-
-    let preprocessing_args =
-        gcc_args::update_build_object_args_to_output_preprocessed_with_defines(
-            build_object_file_args,
-        )?;
-
-    let child = tokio::process::Command::new(binary.to_standard_binary_name())
-        .args(preprocessing_args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .current_dir(cwd)
-        .spawn()?;
-    let child_result = child.wait_with_output().await?;
-    if !child_result.status.success() {
-        return Err(CommandOutput::from_process_output(child_result).into());
-    }
-    let preprocessed_code = child_result.stdout;
-    task_period.finished_successfully();
-    let task_period = state
-        .task_periods
-        .start(HandlePreprocessedTranslationUnitTaskInfo {
-            dst_object_file: args_info.object_path.clone(),
-        });
-    let analysis = LocalCode::from_preprocessed_code(
-        preprocessed_code.as_bstr(),
-        &args_info.source_path,
-        config,
-    )
-    .await?;
-
-    task_period.finished_successfully();
-    Ok(PreprocessFileResult {
-        source_file: SourceFile {
-            path: args_info.source_path,
-            language_override: None,
-        },
-        preprocessed_language,
-        original_obj_output: args_info.object_path.clone(),
-        analysis,
-    })
-}
-
 pub async fn wrap_compile_object_file(
     binary: WrappedBinary,
     build_object_file_args: &[impl AsRef<OsStr>],
@@ -160,6 +97,69 @@ pub async fn wrap_compile_object_file(
     )?;
 
     Ok(CommandOutput::new_ok())
+}
+
+struct PreprocessFileResult {
+    source_file: SourceFile,
+    preprocessed_language: CodeLanguage,
+    original_obj_output: PathBuf,
+    analysis: LocalCode,
+}
+
+async fn preprocess_file(
+    binary: WrappedBinary,
+    build_object_file_args: &[impl AsRef<OsStr>],
+    cwd: &Path,
+    state: &Arc<State>,
+    config: &Config,
+) -> Result<PreprocessFileResult> {
+    let args_info = gcc_args::BuildObjectFileInfo::from_args(cwd, build_object_file_args)?;
+    let preprocessed_language = args_info.source_language.to_preprocessed()?;
+
+    let task_period = state.task_periods.start(PreprocessTranslationUnitTaskInfo {
+        dst_object_file: args_info.object_path.clone(),
+    });
+
+    let preprocessing_args =
+        gcc_args::update_build_object_args_to_output_preprocessed_with_defines(
+            build_object_file_args,
+        )?;
+
+    let child = tokio::process::Command::new(binary.to_standard_binary_name())
+        .args(preprocessing_args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .current_dir(cwd)
+        .spawn()?;
+    let child_result = child.wait_with_output().await?;
+    if !child_result.status.success() {
+        return Err(CommandOutput::from_process_output(child_result).into());
+    }
+    let preprocessed_code = child_result.stdout;
+    task_period.finished_successfully();
+    let task_period = state
+        .task_periods
+        .start(HandlePreprocessedTranslationUnitTaskInfo {
+            dst_object_file: args_info.object_path.clone(),
+        });
+    let analysis = LocalCode::from_preprocessed_code(
+        preprocessed_code.as_bstr(),
+        &args_info.source_path,
+        config,
+    )
+    .await?;
+
+    task_period.finished_successfully();
+    Ok(PreprocessFileResult {
+        source_file: SourceFile {
+            path: args_info.source_path,
+            language_override: None,
+        },
+        preprocessed_language,
+        original_obj_output: args_info.object_path.clone(),
+        analysis,
+    })
 }
 
 struct PreprocessTranslationUnitTaskInfo {
