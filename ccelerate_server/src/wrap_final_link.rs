@@ -15,14 +15,8 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    CommandOutput, ar_args,
-    code_language::CodeLanguage,
-    config::Config,
-    database::{FileRecord, load_file_record},
-    gcc_args,
-    path_utils::shorten_path,
-    source_file::SourceFile,
-    state::State,
+    CommandOutput, ar_args, code_language::CodeLanguage, config::Config, database::FileRecord,
+    gcc_args, path_utils::shorten_path, source_file::SourceFile, state::State,
     task_periods::TaskPeriodInfo,
 };
 
@@ -58,7 +52,6 @@ impl TaskPeriodInfo for FindLinkSourcesTaskInfo {
 
 fn find_link_sources(
     args_info: &gcc_args::LinkFileInfo,
-    conn: &rusqlite::Connection,
     state: &Arc<State>,
 ) -> Result<OriginalLinkSources> {
     let task_period = state.task_periods.start(FindLinkSourcesTaskInfo {
@@ -67,7 +60,7 @@ fn find_link_sources(
 
     let mut link_sources = OriginalLinkSources::default();
     for source in args_info.sources.iter() {
-        find_link_sources_for_file(&source.path, conn, &mut link_sources)?;
+        find_link_sources_for_file(&source.path, &mut link_sources, state)?;
     }
     task_period.finished_successfully();
     Ok(link_sources)
@@ -75,15 +68,15 @@ fn find_link_sources(
 
 fn find_link_sources_for_file(
     path: &Path,
-    conn: &rusqlite::Connection,
     link_sources: &mut OriginalLinkSources,
+    state: &Arc<State>,
 ) -> Result<()> {
     match path.extension() {
         Some(extension) if extension == "a" => {
-            find_link_sources_for_static_library(path, conn, link_sources)?;
+            find_link_sources_for_static_library(path, link_sources, state)?;
         }
         Some(extension) if extension == "o" => {
-            find_link_sources_for_object_file(path, conn, link_sources)?;
+            find_link_sources_for_object_file(path, link_sources, state)?;
         }
         _ => {
             link_sources.unknown_sources.push(path.to_owned());
@@ -94,13 +87,13 @@ fn find_link_sources_for_file(
 
 fn find_link_sources_for_static_library(
     library_path: &Path,
-    conn: &rusqlite::Connection,
     link_sources: &mut OriginalLinkSources,
+    state: &Arc<State>,
 ) -> Result<()> {
     if !link_sources.handled_paths.insert(library_path.to_owned()) {
         return Ok(());
     }
-    let Some(record) = load_file_record(conn, library_path) else {
+    let Some(record) = state.persistent_state.load(library_path) else {
         link_sources.unknown_sources.push(library_path.to_owned());
         return Ok(());
     };
@@ -112,20 +105,20 @@ fn find_link_sources_for_static_library(
     }
     let ar_args = ar_args::BuildStaticArchiveInfo::from_args(&record.cwd, &record.args)?;
     for source in ar_args.member_paths {
-        find_link_sources_for_file(&source, conn, link_sources)?;
+        find_link_sources_for_file(&source, link_sources, state)?;
     }
     Ok(())
 }
 
 fn find_link_sources_for_object_file(
     object_path: &Path,
-    conn: &rusqlite::Connection,
     link_sources: &mut OriginalLinkSources,
+    state: &Arc<State>,
 ) -> Result<()> {
     if !link_sources.handled_paths.insert(object_path.to_owned()) {
         return Ok(());
     }
-    let Some(record) = load_file_record(conn, object_path) else {
+    let Some(record) = state.persistent_state.load(object_path) else {
         link_sources.unknown_sources.push(object_path.to_owned());
         return Ok(());
     };
@@ -548,7 +541,7 @@ pub async fn wrap_final_link<S: AsRef<OsStr>>(
     config: &Arc<Config>,
 ) -> Result<CommandOutput> {
     let args_info = gcc_args::LinkFileInfo::from_args(cwd, original_args)?;
-    let link_sources = find_link_sources(&args_info, &state.conn.lock(), state)?;
+    let link_sources = find_link_sources(&args_info, state)?;
     let chunks = known_object_files_to_chunks(&link_sources.known_object_files, state)?;
 
     let handles = FuturesUnordered::new();

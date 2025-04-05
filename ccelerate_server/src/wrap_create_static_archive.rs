@@ -5,11 +5,7 @@ use std::{ffi::OsStr, path::Path, sync::Arc};
 use anyhow::Result;
 use ccelerate_shared::WrappedBinary;
 
-use crate::{
-    CommandOutput, State, ar_args,
-    database::{FileRecord, store_file_record},
-    task_periods::TaskPeriodInfo,
-};
+use crate::{CommandOutput, State, ar_args, database::FileRecord, task_periods::TaskPeriodInfo};
 
 struct BuildStaticArchiveInfo {
     archive_name: String,
@@ -39,8 +35,7 @@ pub async fn wrap_create_static_archive<Arg: AsRef<OsStr>>(
     let task_period = state.task_periods.start(BuildStaticArchiveInfo {
         archive_name: ar_args.archive_name.to_string_lossy().to_string(),
     });
-    store_file_record(
-        &state.conn.lock(),
+    state.persistent_state.store(
         &ar_args.archive_path,
         &FileRecord {
             cwd: cwd.to_owned(),

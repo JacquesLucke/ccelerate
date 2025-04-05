@@ -10,15 +10,8 @@ use std::{
 };
 
 use crate::{
-    CommandOutput, State,
-    code_language::CodeLanguage,
-    config::Config,
-    database::{FileRecord, store_file_record},
-    gcc_args,
-    local_code::LocalCode,
-    log_file,
-    path_utils::shorten_path,
-    source_file::SourceFile,
+    CommandOutput, State, code_language::CodeLanguage, config::Config, database::FileRecord,
+    gcc_args, local_code::LocalCode, path_utils::shorten_path, source_file::SourceFile,
     task_periods::TaskPeriodInfo,
 };
 
@@ -60,15 +53,6 @@ async fn preprocess_file<S: AsRef<OsStr>>(
         return Err(CommandOutput::from_process_output(child_result).into());
     }
     let preprocessed_code = child_result.stdout;
-    if state.cli.log_files {
-        let _ = log_file(
-            state,
-            &format!("Preprocessed {}", args_info.object_path.display()),
-            &preprocessed_code,
-            preprocessed_language.to_valid_ext(),
-        )
-        .await;
-    }
     task_period.finished_successfully();
     let task_period = state
         .task_periods
@@ -157,8 +141,7 @@ pub async fn wrap_compile_object_file<S: AsRef<OsStr>>(
     )
     .await?;
 
-    store_file_record(
-        &state.conn.lock(),
+    state.persistent_state.store(
         &preprocess_result.original_obj_output,
         &FileRecord {
             cwd: cwd.to_path_buf(),

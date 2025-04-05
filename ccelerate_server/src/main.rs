@@ -31,6 +31,7 @@ mod path_utils;
 mod preprocessor_directives;
 mod source_file;
 mod state;
+mod state_persistent;
 mod task_periods;
 mod tui;
 mod wrap_compile_object_file;
@@ -198,24 +199,6 @@ async fn handle_request(request: &RunRequestData, state: &Arc<State>) -> Result<
     }
 }
 
-async fn log_file(state: &Arc<State>, name: &str, data: &[u8], ext: &str) -> Result<()> {
-    let data_hash = twox_hash::XxHash64::oneshot(0, data);
-    let data_hash_str = format!("{:x}", data_hash);
-    let file_name = format!("{}.{}", data_hash_str, ext);
-    let file_dir = state.data_dir.join("log_files").join(&data_hash_str[..2]);
-    let file_path = file_dir.join(file_name);
-    tokio::fs::create_dir_all(file_dir).await?;
-    tokio::fs::write(&file_path, data).await?;
-
-    let time: chrono::DateTime<chrono::Utc> = chrono::Utc::now();
-    state.conn.lock().execute(
-        "INSERT OR REPLACE INTO LogFiles (name, path, time) VALUES (?1, ?2, ?3)",
-        rusqlite::params![name, file_path.to_string_lossy(), time.to_rfc3339()],
-    )?;
-
-    Ok(())
-}
-
 #[actix_web::post("/run")]
 async fn route_run(
     run_request: actix_web::web::Json<RunRequestDataWire>,
@@ -281,11 +264,10 @@ async fn main() -> Result<()> {
             .unwrap_or_else(|| PathBuf::from("./ccelerate_data")),
     );
     let db_path = data_dir.join("ccelerate.db");
-    let conn = database::load_or_create_db(&db_path)?;
     let addr = format!("127.0.0.1:{}", cli.port);
     let state = Arc::new(State {
         address: addr.clone(),
-        conn: Arc::new(Mutex::new(conn)),
+        persistent_state: state_persistent::PersistentState::new(&db_path)?,
         task_periods: TaskPeriods::new(),
         tasks_table_state: Arc::new(Mutex::new(TableState::default())),
         auto_scroll: Arc::new(Mutex::new(true)),

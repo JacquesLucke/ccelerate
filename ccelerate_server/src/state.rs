@@ -4,11 +4,14 @@ use std::{path::PathBuf, sync::Arc};
 
 use parking_lot::Mutex;
 
-use crate::{Cli, config::ConfigManager, parallel_pool::ParallelPool, task_periods::TaskPeriods};
+use crate::{
+    Cli, config::ConfigManager, parallel_pool::ParallelPool, state_persistent::PersistentState,
+    task_periods::TaskPeriods,
+};
 
 pub struct State {
     pub address: String,
-    pub conn: Arc<Mutex<rusqlite::Connection>>,
+    pub persistent_state: PersistentState,
     pub task_periods: TaskPeriods,
     pub tasks_table_state: Arc<Mutex<ratatui::widgets::TableState>>,
     pub auto_scroll: Arc<Mutex<bool>>,
