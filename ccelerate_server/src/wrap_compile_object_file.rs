@@ -11,8 +11,7 @@ use std::{
 
 use crate::{
     CommandOutput, State, code_language::CodeLanguage, config::Config, gcc_args,
-    local_code::LocalCode, path_utils::shorten_path, source_file::SourceFile,
-    task_periods::TaskPeriodInfo,
+    local_code::LocalCode, path_utils::shorten_path, task_periods::TaskPeriodInfo,
 };
 
 pub async fn wrap_compile_object_file(
@@ -66,7 +65,7 @@ async fn preprocess_file_in_pool(
 }
 
 struct PreprocessFileResult {
-    source_file: SourceFile,
+    source: PathBuf,
     preprocessed_language: CodeLanguage,
     original_obj_output: PathBuf,
     analysis: LocalCode,
@@ -118,10 +117,7 @@ async fn preprocess_file(
 
     task_period.finished_successfully();
     Ok(PreprocessFileResult {
-        source_file: SourceFile {
-            path: args_info.source_path,
-            language_override: None,
-        },
+        source: args_info.source_path,
         preprocessed_language,
         original_obj_output: args_info.object_path.clone(),
         analysis,
@@ -138,8 +134,7 @@ async fn write_local_code_file(
     );
     local_code_hash_str.truncate(8);
     let debug_name = preprocess_result
-        .source_file
-        .path
+        .source
         .file_name()
         .unwrap_or(OsStr::new("unknown"))
         .to_string_lossy();
