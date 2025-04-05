@@ -64,7 +64,7 @@ async fn route_index() -> impl actix_web::Responder {
     "ccelerator".to_string()
 }
 
-fn gcc_args_have_marker<S: AsRef<OsStr>>(args: &[S], marker: &str) -> bool {
+fn gcc_args_have_marker(args: &[impl AsRef<OsStr>], marker: &str) -> bool {
     for arg in args {
         if arg.as_ref().contains(marker) {
             return true;
@@ -73,7 +73,7 @@ fn gcc_args_have_marker<S: AsRef<OsStr>>(args: &[S], marker: &str) -> bool {
     false
 }
 
-fn gcc_args_or_cwd_have_marker<S: AsRef<OsStr>>(args: &[S], cwd: &Path, marker: &str) -> bool {
+fn gcc_args_or_cwd_have_marker(args: &[impl AsRef<OsStr>], cwd: &Path, marker: &str) -> bool {
     if gcc_args_have_marker(args, marker) {
         return true;
     }
@@ -83,11 +83,11 @@ fn gcc_args_or_cwd_have_marker<S: AsRef<OsStr>>(args: &[S], cwd: &Path, marker: 
     false
 }
 
-fn is_gcc_compiler_id_check<S: AsRef<OsStr>>(args: &[S], cwd: &Path) -> bool {
+fn is_gcc_compiler_id_check(args: &[impl AsRef<OsStr>], cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CompilerIdC")
 }
 
-fn is_gcc_cmakescratch<S: AsRef<OsStr>>(args: &[S], cwd: &Path) -> bool {
+fn is_gcc_cmakescratch(args: &[impl AsRef<OsStr>], cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CMakeScratch")
 }
 

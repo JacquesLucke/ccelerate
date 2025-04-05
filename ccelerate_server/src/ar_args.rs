@@ -19,7 +19,7 @@ pub struct BuildStaticArchiveInfo {
 }
 
 impl BuildStaticArchiveInfo {
-    pub fn from_args<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<BuildStaticArchiveInfo> {
+    pub fn from_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<BuildStaticArchiveInfo> {
         let args = parse_ar_args(args)?;
         if !args.operation.contains("c") {
             return Err(anyhow!("arguments don't create archive, no 'c' flag"));
@@ -40,9 +40,9 @@ impl BuildStaticArchiveInfo {
     }
 }
 
-pub fn make_args_to_build_thin_static_archive<P: AsRef<Path>>(
+pub fn make_args_to_build_thin_static_archive(
     archive_path: &Path,
-    member_paths: &[P],
+    member_paths: &[impl AsRef<Path>],
 ) -> Vec<OsString> {
     let mut args: Vec<OsString> = vec![];
     args.push("qc".into());
@@ -61,7 +61,7 @@ struct ArArgs<'a> {
     members: SmallVec<[&'a OsStr; 16]>,
 }
 
-fn parse_ar_args<S: AsRef<OsStr>>(args: &[S]) -> Result<ArArgs> {
+fn parse_ar_args(args: &[impl AsRef<OsStr>]) -> Result<ArArgs> {
     let mut operation = None;
     let mut archive = None;
     let mut members = SmallVec::new();

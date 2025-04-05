@@ -29,9 +29,9 @@ impl TaskPeriodInfo for EagerGccTaskInfo {
     }
 }
 
-pub async fn wrap_eager<S: AsRef<OsStr>>(
+pub async fn wrap_eager(
     binary: WrappedBinary,
-    args: &[S],
+    args: &[impl AsRef<OsStr>],
     cwd: &Path,
     state: &State,
 ) -> Result<CommandOutput> {

@@ -42,12 +42,12 @@ impl PersistentState {
         })
     }
 
-    pub fn update_object_file<Arg: AsRef<OsStr>>(
+    pub fn update_object_file(
         &self,
         object_path: &Path,
         binary: WrappedBinary,
         cwd: &Path,
-        args: &[Arg],
+        args: &[impl AsRef<OsStr>],
     ) -> Result<()> {
         let data = CompileObjectRecord {
             binary,
@@ -65,13 +65,13 @@ impl PersistentState {
         Ok(())
     }
 
-    pub fn update_object_file_local_code<P1: AsRef<Path>, P2: AsRef<Path>, B1: AsRef<BStr>>(
+    pub fn update_object_file_local_code(
         &self,
         object_path: &Path,
         local_code_file: &Path,
-        global_includes: &[P1],
-        include_defines: &[B1],
-        bad_includes: &[P2],
+        global_includes: &[impl AsRef<Path>],
+        include_defines: &[impl AsRef<BStr>],
+        bad_includes: &[impl AsRef<Path>],
     ) -> Result<()> {
         let data = ObjectLocalCodeRecord {
             local_code_file: local_code_file.to_path_buf(),
@@ -99,12 +99,12 @@ impl PersistentState {
         Ok(())
     }
 
-    pub fn update_archive_file<Arg: AsRef<OsStr>>(
+    pub fn update_archive_file(
         &self,
         archive_path: &Path,
         binary: WrappedBinary,
         cwd: &Path,
-        args: &[Arg],
+        args: &[impl AsRef<OsStr>],
     ) -> Result<()> {
         let data = CreateArchiveRecord {
             binary,

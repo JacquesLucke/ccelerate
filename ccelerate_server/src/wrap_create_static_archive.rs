@@ -25,9 +25,9 @@ impl TaskPeriodInfo for BuildStaticArchiveInfo {
     }
 }
 
-pub async fn wrap_create_static_archive<Arg: AsRef<OsStr>>(
+pub async fn wrap_create_static_archive(
     binary: WrappedBinary,
-    args: &[Arg],
+    args: &[impl AsRef<OsStr>],
     cwd: &Path,
     state: &Arc<State>,
 ) -> Result<CommandOutput> {

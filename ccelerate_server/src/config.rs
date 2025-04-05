@@ -49,7 +49,7 @@ impl ConfigManager {
         }
     }
 
-    pub fn config_for_paths<P: AsRef<std::path::Path>>(&self, paths: &[P]) -> Result<Arc<Config>> {
+    pub fn config_for_paths(&self, paths: &[impl AsRef<Path>]) -> Result<Arc<Config>> {
         let mut state = self.state.lock();
         let mut missing_config_dirs = vec![];
         let mut missing_config_files = vec![];
@@ -104,7 +104,7 @@ impl Config {
         }
     }
 
-    fn new_from_files<P: AsRef<Path>>(config_files: &[P]) -> Result<Self> {
+    fn new_from_files(config_files: &[impl AsRef<Path>]) -> Result<Self> {
         let mut config = Self::new();
         for path in config_files {
             let config_file = std::fs::read_to_string(path)?;

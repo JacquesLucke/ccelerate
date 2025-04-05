@@ -500,9 +500,9 @@ impl TaskPeriodInfo for FinalLinkTaskInfo {
     }
 }
 
-pub async fn final_link<S: AsRef<OsStr>>(
+pub async fn final_link(
     binary: WrappedBinary,
-    original_gcc_args: &[S],
+    original_gcc_args: &[impl AsRef<OsStr>],
     args_info: &gcc_args::LinkFileInfo,
     cwd: &Path,
     state: &Arc<State>,
@@ -538,9 +538,9 @@ pub async fn final_link<S: AsRef<OsStr>>(
     Ok(CommandOutput::from_process_output(child_output))
 }
 
-pub async fn wrap_final_link<S: AsRef<OsStr>>(
+pub async fn wrap_final_link(
     binary: WrappedBinary,
-    original_args: &[S],
+    original_args: &[impl AsRef<OsStr>],
     cwd: &Path,
     state: &Arc<State>,
     config: &Arc<Config>,

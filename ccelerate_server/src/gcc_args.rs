@@ -18,7 +18,7 @@ pub struct BuildObjectFileInfo {
 }
 
 impl BuildObjectFileInfo {
-    pub fn from_args<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<Self> {
+    pub fn from_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
         let args = GccArgsInfo::from_args(args)?;
         let Some(output) = args.get_single_output() else {
             return Err(anyhow!("There has to be one output"));
@@ -53,7 +53,7 @@ pub struct LinkFileInfo {
 }
 
 impl LinkFileInfo {
-    pub fn from_args<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<Self> {
+    pub fn from_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
         let args = GccArgsInfo::from_args(args)?;
         Ok(Self {
             sources: args.get_absolute_sources(cwd)?,
@@ -68,7 +68,7 @@ pub struct BuildFilesInfo {
 }
 
 impl BuildFilesInfo {
-    pub fn from_args<S: AsRef<OsStr>>(cwd: &Path, args: &[S]) -> Result<Self> {
+    pub fn from_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
         let args = GccArgsInfo::from_args(args)?;
         Ok(Self {
             sources: args.get_absolute_sources(cwd)?,
@@ -77,15 +77,15 @@ impl BuildFilesInfo {
     }
 }
 
-pub fn is_build_object_file<S: AsRef<OsStr>>(args: &[S]) -> Result<bool> {
+pub fn is_build_object_file(args: &[impl AsRef<OsStr>]) -> Result<bool> {
     let args = GccArgsInfo::from_args(args)?;
     Ok(args.has_single_arg_str("-c"))
 }
 
 /// Takes arguments that would build one object file and changes it so that it instead
 /// outputs the preprocessed code for the source file.
-pub fn update_build_object_args_to_output_preprocessed_with_defines<S: AsRef<OsStr>>(
-    args: &[S],
+pub fn update_build_object_args_to_output_preprocessed_with_defines(
+    args: &[impl AsRef<OsStr>],
 ) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
     args.args.retain(|arg| match arg {
@@ -114,8 +114,8 @@ pub fn update_build_object_args_to_output_preprocessed_with_defines<S: AsRef<OsS
     Ok(args.to_args_owned_vec())
 }
 
-pub fn update_build_object_args_to_just_output_preprocessed_from_stdin<S: AsRef<OsStr>>(
-    args: &[S],
+pub fn update_build_object_args_to_just_output_preprocessed_from_stdin(
+    args: &[impl AsRef<OsStr>],
     source_language: CodeLanguage,
 ) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
@@ -154,8 +154,8 @@ pub fn update_build_object_args_to_just_output_preprocessed_from_stdin<S: AsRef<
     Ok(args.to_args_owned_vec())
 }
 
-pub fn update_to_build_object_from_stdin<S: AsRef<OsStr>>(
-    args: &[S],
+pub fn update_to_build_object_from_stdin(
+    args: &[impl AsRef<OsStr>],
     output_path: &Path,
     language: CodeLanguage,
 ) -> Result<Vec<OsString>> {
@@ -182,8 +182,8 @@ pub fn update_to_build_object_from_stdin<S: AsRef<OsStr>>(
     Ok(args.to_args_owned_vec())
 }
 
-pub fn update_to_link_sources_as_group<S: AsRef<OsStr>>(
-    args: &[S],
+pub fn update_to_link_sources_as_group(
+    args: &[impl AsRef<OsStr>],
     sources: &[SourceFile],
 ) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
@@ -213,8 +213,8 @@ pub fn update_to_link_sources_as_group<S: AsRef<OsStr>>(
     Ok(args.to_args_owned_vec())
 }
 
-pub fn add_translation_unit_unspecific_args_to_key<S: AsRef<OsStr>>(
-    args: &[S],
+pub fn add_translation_unit_unspecific_args_to_key(
+    args: &[impl AsRef<OsStr>],
     key: &mut BString,
 ) -> Result<()> {
     let args = GccArgsInfo::from_args(args)?;

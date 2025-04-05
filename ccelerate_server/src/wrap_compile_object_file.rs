@@ -22,9 +22,9 @@ struct PreprocessFileResult {
     analysis: LocalCode,
 }
 
-async fn preprocess_file<S: AsRef<OsStr>>(
+async fn preprocess_file(
     binary: WrappedBinary,
-    build_object_file_args: &[S],
+    build_object_file_args: &[impl AsRef<OsStr>],
     cwd: &Path,
     state: &Arc<State>,
     config: &Config,
@@ -78,9 +78,9 @@ async fn preprocess_file<S: AsRef<OsStr>>(
     })
 }
 
-pub async fn wrap_compile_object_file<S: AsRef<OsStr>>(
+pub async fn wrap_compile_object_file(
     binary: WrappedBinary,
-    build_object_file_args: &[S],
+    build_object_file_args: &[impl AsRef<OsStr>],
     cwd: &Path,
     state: &Arc<State>,
     config: &Arc<Config>,
