@@ -6,8 +6,9 @@ use std::{
 use anyhow::Result;
 use anyhow::anyhow;
 use ccelerate_shared::WrappedBinary;
+use smallvec::SmallVec;
 
-use crate::{code_language::CodeLanguage, gcc_args};
+use crate::{code_language::CodeLanguage, gcc_args, source_file::SourceFile};
 
 pub struct BuildObjectFileInfo {
     pub source_path: PathBuf,
@@ -38,5 +39,26 @@ pub fn rewrite_to_extract_local_code(
     match binary {
         binary if binary.is_gcc_compatible() => gcc_args::rewrite_to_extract_local_code(args),
         _ => Err(anyhow!("Cannot rewrite args for binary: {:?}", binary)),
+    }
+}
+
+pub struct LinkFileInfo {
+    pub sources: SmallVec<[SourceFile; 16]>,
+    pub output: PathBuf,
+}
+
+impl LinkFileInfo {
+    pub fn from_args(
+        binary: WrappedBinary,
+        cwd: &Path,
+        args: &[impl AsRef<OsStr>],
+    ) -> Result<Self> {
+        match binary {
+            binary if binary.is_gcc_compatible() => Self::from_gcc_args(cwd, args),
+            _ => Err(anyhow!(
+                "Cannot extract build object args for binary: {:?}",
+                binary
+            )),
+        }
     }
 }

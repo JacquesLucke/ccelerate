@@ -9,7 +9,7 @@ use bstr::{BString, ByteVec};
 use os_str_bytes::OsStrBytesExt;
 use smallvec::{SmallVec, smallvec};
 
-use crate::args_processing::BuildObjectFileInfo;
+use crate::args_processing::{BuildObjectFileInfo, LinkFileInfo};
 use crate::{code_language::CodeLanguage, path_utils::make_absolute, source_file::SourceFile};
 
 impl BuildObjectFileInfo {
@@ -42,13 +42,8 @@ impl BuildObjectFileInfo {
     }
 }
 
-pub struct LinkFileInfo {
-    pub sources: SmallVec<[SourceFile; 16]>,
-    pub output: PathBuf,
-}
-
 impl LinkFileInfo {
-    pub fn from_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
+    pub fn from_gcc_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
         let args = GccArgsInfo::from_args(args)?;
         Ok(Self {
             sources: args.get_absolute_sources(cwd)?,

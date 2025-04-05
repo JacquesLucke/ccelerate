@@ -27,7 +27,7 @@ pub async fn wrap_final_link(
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<CommandOutput> {
-    let args_info = gcc_args::LinkFileInfo::from_args(cwd, original_args)?;
+    let args_info = args_processing::LinkFileInfo::from_args(binary, cwd, original_args)?;
     let link_sources = find_link_sources(&args_info, state)?;
     let chunks = known_object_files_to_chunks(&link_sources.known_object_files, state)?;
 
@@ -92,7 +92,7 @@ impl TaskPeriodInfo for FindLinkSourcesTaskInfo {
 }
 
 fn find_link_sources(
-    args_info: &gcc_args::LinkFileInfo,
+    args_info: &args_processing::LinkFileInfo,
     state: &Arc<State>,
 ) -> Result<OriginalLinkSources> {
     let task_period = state.task_periods.start(FindLinkSourcesTaskInfo {
@@ -550,7 +550,7 @@ impl TaskPeriodInfo for FinalLinkTaskInfo {
 pub async fn final_link(
     binary: WrappedBinary,
     original_gcc_args: &[impl AsRef<OsStr>],
-    args_info: &gcc_args::LinkFileInfo,
+    args_info: &args_processing::LinkFileInfo,
     cwd: &Path,
     state: &Arc<State>,
     sources: &[PathBuf],
