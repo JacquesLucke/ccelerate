@@ -20,11 +20,11 @@ impl TaskPeriodInfo for BuildStaticArchiveInfo {
         "Ar".to_string()
     }
 
-    fn short_name(&self) -> String {
-        format!("Prepare: {}", self.archive_name)
+    fn terminal_one_liner(&self) -> String {
+        self.archive_name.clone()
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Prepare: {}", self.archive_name);
     }
 }

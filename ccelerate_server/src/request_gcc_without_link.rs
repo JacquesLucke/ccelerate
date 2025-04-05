@@ -20,6 +20,7 @@ use crate::{
     gcc_args,
     local_code::LocalCode,
     log_file,
+    path_utils::shorten_path,
     source_file::SourceFile,
     task_periods::TaskPeriodInfo,
 };
@@ -193,10 +194,11 @@ pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
         }
     };
 
-    let local_code_hash_str = format!(
+    let mut local_code_hash_str = format!(
         "{:x}",
         twox_hash::XxHash64::oneshot(0, &preprocess_result.analysis.local_code)
     );
+    local_code_hash_str.truncate(8);
     let debug_name = preprocess_result
         .source_file
         .path
@@ -290,17 +292,11 @@ impl TaskPeriodInfo for PreprocessTranslationUnitTaskInfo {
         "Preprocess".to_string()
     }
 
-    fn short_name(&self) -> String {
-        format!(
-            "Preprocess: {}",
-            self.dst_object_file
-                .file_name()
-                .unwrap_or(OsStr::new("unknown"))
-                .to_string_lossy()
-        )
+    fn terminal_one_liner(&self) -> String {
+        shorten_path(&self.dst_object_file)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Preprocess: {}", self.dst_object_file.to_string_lossy());
     }
 }
@@ -314,17 +310,11 @@ impl TaskPeriodInfo for HandlePreprocessedTranslationUnitTaskInfo {
         "Local Code".to_string()
     }
 
-    fn short_name(&self) -> String {
-        format!(
-            "Handle preprocessed: {}",
-            self.dst_object_file
-                .file_name()
-                .unwrap_or(OsStr::new("unknown"))
-                .to_string_lossy()
-        )
+    fn terminal_one_liner(&self) -> String {
+        shorten_path(&self.dst_object_file)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!(
             "Handle preprocessed: {}",
             self.dst_object_file.to_string_lossy()

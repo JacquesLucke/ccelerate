@@ -20,11 +20,11 @@ impl TaskPeriodInfo for EagerGccTaskInfo {
         "Eager".to_string()
     }
 
-    fn short_name(&self) -> String {
+    fn terminal_one_liner(&self) -> String {
         format!("{} {:?}", self.binary, self.args)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("{} {:?}", self.binary, self.args);
     }
 }

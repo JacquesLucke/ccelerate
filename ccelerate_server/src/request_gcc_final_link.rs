@@ -45,14 +45,14 @@ struct FindLinkSourcesTaskInfo {
 
 impl TaskPeriodInfo for FindLinkSourcesTaskInfo {
     fn category(&self) -> String {
-        "Link Sources".to_string()
+        "Find Sources".to_string()
     }
 
-    fn short_name(&self) -> String {
-        format!("Find link sources for {}", shorten_path(&self.output))
+    fn terminal_one_liner(&self) -> String {
+        shorten_path(&self.output)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Find link sources for {}", self.output.to_string_lossy());
     }
 }
@@ -145,18 +145,20 @@ struct CompileChunk {
     records: Vec<FileRecord>,
 }
 
-struct GroupObjectsToChunksTaskInfo {}
+struct GroupObjectsToChunksTaskInfo {
+    num: usize,
+}
 
 impl TaskPeriodInfo for GroupObjectsToChunksTaskInfo {
     fn category(&self) -> String {
         "Group Chunks".to_string()
     }
 
-    fn short_name(&self) -> String {
-        "Group objects to chunks".to_string()
+    fn terminal_one_liner(&self) -> String {
+        format!("Objects: {}", self.num)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Group objects to chunks");
     }
 }
@@ -165,7 +167,9 @@ fn known_object_files_to_chunks(
     original_object_records: &[FileRecord],
     state: &Data<State>,
 ) -> Result<Vec<CompileChunk>> {
-    let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {});
+    let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {
+        num: original_object_records.len(),
+    });
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
@@ -230,16 +234,15 @@ impl TaskPeriodInfo for CompileChunkTaskInfo {
         "Compile".to_string()
     }
 
-    fn short_name(&self) -> String {
-        let mut short_name = format!("Compile ({}): ", self.sources.len());
-        for source in &self.sources {
-            short_name.push_str(&shorten_path(source));
-            short_name.push(' ');
-        }
-        short_name
+    fn terminal_one_liner(&self) -> String {
+        self.sources
+            .iter()
+            .map(|p| shorten_path(p))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         let mut msg = "Compile chunk: ".to_string();
         for source in &self.sources {
             msg.push_str("  ");
@@ -342,11 +345,11 @@ impl TaskPeriodInfo for GetPreprocessedHeadersTaskInfo {
         "Headers".to_string()
     }
 
-    fn short_name(&self) -> String {
-        format!("Get preprocessed headers: {}", self.headers_num)
+    fn terminal_one_liner(&self) -> String {
+        format!("Amount: {}", self.headers_num)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Get preprocessed headers: {}", self.headers_num);
     }
 }
@@ -444,11 +447,11 @@ impl TaskPeriodInfo for CreateThinArchiveTaskInfo {
         "Archive".to_string()
     }
 
-    fn short_name(&self) -> String {
+    fn terminal_one_liner(&self) -> String {
         "Create thin archive".to_string()
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Create thin archive");
     }
 }
@@ -491,11 +494,11 @@ impl TaskPeriodInfo for FinalLinkTaskInfo {
         "Link".to_string()
     }
 
-    fn short_name(&self) -> String {
-        format!("Final link for {}", shorten_path(&self.output))
+    fn terminal_one_liner(&self) -> String {
+        shorten_path(&self.output)
     }
 
-    fn log(&self) {
+    fn log_detailed(&self) {
         log::info!("Final link for {}", self.output.to_string_lossy());
     }
 }

@@ -25,8 +25,8 @@ struct TaskPeriodStorage {
 
 pub trait TaskPeriodInfo: Send + Sync {
     fn category(&self) -> String;
-    fn short_name(&self) -> String;
-    fn log(&self);
+    fn terminal_one_liner(&self) -> String;
+    fn log_detailed(&self);
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,7 @@ impl TaskPeriods {
     ) -> TaskPeriodScope {
         let end_time = Arc::new(Mutex::new(None));
         let finished_successfully = Arc::new(Mutex::new(false));
-        info.log();
+        info.log_detailed();
         let task = TaskPeriodStorage {
             info: Box::new(info),
             start_time: Instant::now(),
@@ -95,7 +95,7 @@ impl TaskPeriods {
             .iter()
             .map(|t| TaskPeriod {
                 category: t.info.category(),
-                name: t.info.short_name(),
+                name: t.info.terminal_one_liner(),
                 start: t.start_time,
                 duration: t.duration(),
                 active: t.is_running(),
