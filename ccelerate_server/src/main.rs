@@ -30,6 +30,7 @@ mod link_sources;
 mod local_code;
 mod parallel_pool;
 mod path_utils;
+mod preprocess_headers;
 mod preprocessor_directives;
 mod source_file;
 mod state;
