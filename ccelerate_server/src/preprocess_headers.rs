@@ -6,7 +6,7 @@ use nunny::NonEmpty;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    code_language::CodeLanguage, config::Config, gcc_args, state::State,
+    CommandOutput, code_language::CodeLanguage, config::Config, gcc_args, state::State,
     state_persistent::ObjectData, task_periods::TaskPeriodInfo,
 };
 
@@ -15,14 +15,12 @@ pub async fn get_preprocessed_headers(
     state: &Arc<State>,
     config: &Config,
 ) -> Result<BString> {
+    let include_code = get_include_code_for_objects(objects, config)?;
+
     let any_object = objects.first();
     let source_language =
         CodeLanguage::from_path(&any_object.local_code.local_code_file)?.to_non_preprocessed()?;
-
     let task_period = state.task_periods.start(GetPreprocessedHeadersTaskInfo {});
-
-    let include_code = get_include_code_for_objects(objects, config)?;
-
     let preprocess_args =
         gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
             &any_object.create.args,
@@ -40,10 +38,7 @@ pub async fn get_preprocessed_headers(
     }
     let child_output = child.wait_with_output().await?;
     if !child_output.status.success() {
-        return Err(anyhow::anyhow!(
-            "Preprocessing failed: {}",
-            String::from_utf8_lossy(&child_output.stderr)
-        ));
+        return Err(CommandOutput::from_process_output(child_output).into());
     }
     let preprocessed_headers = BString::from(child_output.stdout);
     task_period.finished_successfully();
