@@ -5,8 +5,8 @@ use bstr::{BStr, BString, ByteSlice};
 use nunny::NonEmpty;
 
 use crate::{
-    CommandOutput, code_language::CodeLanguage, config::Config, gcc_args, path_utils, state::State,
-    state_persistent::ObjectData, task_periods::TaskPeriodInfo,
+    CommandOutput, args_processing, code_language::CodeLanguage, config::Config, path_utils,
+    state::State, state_persistent::ObjectData, task_periods::TaskPeriodInfo,
 };
 
 pub async fn get_preprocessed_headers(
@@ -24,7 +24,8 @@ pub async fn get_preprocessed_headers(
     path_utils::ensure_directory_and_write(include_code_file.path(), &include_code).await?;
 
     let task_period = state.task_periods.start(GetPreprocessedHeadersTaskInfo {});
-    let preprocess_args = gcc_args::update_build_object_args_to_just_output_preprocessed(
+    let preprocess_args = args_processing::rewrite_to_get_preprocessed_headers(
+        any_object.create.binary,
         &any_object.create.args,
         include_code_file.path(),
     )?;

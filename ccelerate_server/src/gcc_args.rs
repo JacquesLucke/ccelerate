@@ -102,7 +102,7 @@ pub fn rewrite_to_extract_local_code(args: &[impl AsRef<OsStr>]) -> Result<Vec<O
     Ok(args.to_args_owned_vec())
 }
 
-pub fn update_build_object_args_to_just_output_preprocessed(
+pub fn rewrite_to_get_preprocessed_headers(
     args: &[impl AsRef<OsStr>],
     include_code_path: &Path,
 ) -> Result<Vec<OsString>> {

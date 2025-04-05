@@ -43,6 +43,19 @@ pub fn rewrite_to_extract_local_code(
     }
 }
 
+pub fn rewrite_to_get_preprocessed_headers(
+    binary: WrappedBinary,
+    args: &[impl AsRef<OsStr>],
+    include_code_path: &Path,
+) -> Result<Vec<OsString>> {
+    match binary {
+        binary if binary.is_gcc_compatible() => {
+            gcc_args::rewrite_to_get_preprocessed_headers(args, include_code_path)
+        }
+        _ => Err(anyhow!("Cannot rewrite args for binary: {:?}", binary)),
+    }
+}
+
 pub struct LinkFileInfo {
     pub sources: SmallVec<[SourceFile; 16]>,
     pub output: PathBuf,
