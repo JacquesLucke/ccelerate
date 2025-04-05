@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use actix_web::{HttpResponse, web::Data};
+use actix_web::web::Data;
 use anyhow::Result;
 use bstr::{BStr, BString, ByteSlice, ByteVec};
 use ccelerate_shared::WrappedBinary;
@@ -16,7 +16,7 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    ar_args,
+    CommandOutput, ar_args,
     code_language::CodeLanguage,
     config::Config,
     database::{FileRecord, load_file_record},
@@ -510,7 +510,7 @@ pub async fn final_link<S: AsRef<OsStr>>(
     cwd: &Path,
     state: &Data<State>,
     sources: &[PathBuf],
-) -> Result<std::process::Output> {
+) -> Result<CommandOutput> {
     let task_period = state.task_periods.start(FinalLinkTaskInfo {
         output: args_info.output.clone(),
     });
@@ -538,7 +538,7 @@ pub async fn final_link<S: AsRef<OsStr>>(
         ));
     }
     task_period.finished_successfully();
-    Ok(child_output)
+    Ok(CommandOutput::from_process_output(child_output))
 }
 
 pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
@@ -547,16 +547,10 @@ pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
     cwd: &Path,
     state: &Data<State>,
     config: &Arc<Config>,
-) -> HttpResponse {
-    let Ok(args_info) = gcc_args::LinkFileInfo::from_args(cwd, original_args) else {
-        return HttpResponse::BadRequest().body("Error parsing arguments");
-    };
-    let Ok(link_sources) = find_link_sources(&args_info, &state.conn.lock(), state) else {
-        return HttpResponse::BadRequest().body("Error finding link sources");
-    };
-    let Ok(chunks) = known_object_files_to_chunks(&link_sources.known_object_files, state) else {
-        return HttpResponse::BadRequest().body("Error chunking objects");
-    };
+) -> Result<CommandOutput> {
+    let args_info = gcc_args::LinkFileInfo::from_args(cwd, original_args)?;
+    let link_sources = find_link_sources(&args_info, &state.conn.lock(), state)?;
+    let chunks = known_object_files_to_chunks(&link_sources.known_object_files, state)?;
 
     let handles = FuturesUnordered::new();
     for chunk in chunks {
@@ -569,29 +563,15 @@ pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
     }
     let mut objects = Vec::new();
     for handle in handles {
-        match handle.await {
-            Ok(Ok(chunk_objects)) => {
-                objects.extend(chunk_objects);
-            }
-            Ok(Err(e)) => {
-                log::error!("Error compiling chunk: {:?}", e);
-                return HttpResponse::BadRequest().body(e.to_string());
-            }
-            Err(e) => {
-                log::error!("Error compiling chunk: {:?}", e);
-                return HttpResponse::InternalServerError().body(e.to_string());
-            }
-        }
+        objects.extend(handle.await??);
     }
 
-    let Ok(archive_path) = create_thin_archive_for_objects(&objects, state).await else {
-        return HttpResponse::BadRequest().body("Error creating thin archive");
-    };
+    let archive_path = create_thin_archive_for_objects(&objects, state).await?;
 
     let mut all_link_sources = vec![archive_path];
     all_link_sources.extend(link_sources.unknown_sources.into_iter());
 
-    let link_output = match final_link(
+    final_link(
         binary,
         original_args,
         &args_info,
@@ -600,20 +580,4 @@ pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
         &all_link_sources,
     )
     .await
-    {
-        Ok(output) => output,
-        Err(e) => {
-            log::error!("Error linking thin archive: {:?}", e);
-            return HttpResponse::BadRequest().body("Error linking thin archive");
-        }
-    };
-
-    HttpResponse::Ok().json(
-        ccelerate_shared::RunResponseData {
-            stdout: link_output.stdout,
-            stderr: link_output.stderr,
-            status: link_output.status.code().unwrap_or(1),
-        }
-        .to_wire(),
-    )
 }

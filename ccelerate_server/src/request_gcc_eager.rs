@@ -5,10 +5,10 @@ use std::{
     path::Path,
 };
 
-use actix_web::HttpResponse;
+use anyhow::Result;
 use ccelerate_shared::WrappedBinary;
 
-use crate::{State, task_periods::TaskPeriodInfo};
+use crate::{CommandOutput, State, task_periods::TaskPeriodInfo};
 
 struct EagerGccTaskInfo {
     binary: WrappedBinary,
@@ -34,7 +34,7 @@ pub async fn handle_eager_gcc_request<S: AsRef<OsStr>>(
     args: &[S],
     cwd: &Path,
     state: &State,
-) -> HttpResponse {
+) -> Result<CommandOutput> {
     let task_period = state.task_periods.start(EagerGccTaskInfo {
         binary,
         args: args.iter().map(|s| s.as_ref().to_owned()).collect(),
@@ -45,20 +45,8 @@ pub async fn handle_eager_gcc_request<S: AsRef<OsStr>>(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .spawn();
-    let Ok(child) = child else {
-        return HttpResponse::InternalServerError().body("Failed to spawn child");
-    };
-    let Ok(child_result) = child.wait_with_output().await else {
-        return HttpResponse::InternalServerError().body("Failed to wait on child");
-    };
+        .spawn()?;
+    let child_result = child.wait_with_output().await?;
     task_period.finished_successfully();
-    HttpResponse::Ok().json(
-        ccelerate_shared::RunResponseData {
-            stdout: child_result.stdout,
-            stderr: child_result.stderr,
-            status: child_result.status.code().unwrap_or(1),
-        }
-        .to_wire(),
-    )
+    Ok(CommandOutput::from_process_output(child_result))
 }

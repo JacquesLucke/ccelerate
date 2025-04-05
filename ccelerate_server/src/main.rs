@@ -9,7 +9,7 @@ use std::{
 
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
-use ccelerate_shared::{RunRequestData, RunRequestDataWire, WrappedBinary};
+use ccelerate_shared::{RunRequestData, RunRequestDataWire, RunResponseData, WrappedBinary};
 use config::ConfigManager;
 use os_str_bytes::OsStrBytesExt;
 use parallel_pool::ParallelPool;
@@ -87,7 +87,54 @@ fn is_gcc_cmakescratch<S: AsRef<OsStr>>(args: &[S], cwd: &Path) -> bool {
     gcc_args_or_cwd_have_marker(args, cwd, "CMakeScratch")
 }
 
-async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpResponse {
+#[derive(Debug, Clone)]
+pub struct CommandOutput {
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub status: i32,
+}
+
+impl std::error::Error for CommandOutput {}
+
+impl std::fmt::Display for CommandOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", String::from_utf8_lossy(&self.stdout))?;
+        write!(f, "{}", String::from_utf8_lossy(&self.stderr))?;
+        write!(f, "Status: {}", self.status)?;
+        Ok(())
+    }
+}
+
+impl CommandOutput {
+    pub fn new_ok() -> Self {
+        Self {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            status: 0,
+        }
+    }
+
+    pub fn from_result(result: anyhow::Result<CommandOutput>) -> Self {
+        match result {
+            Ok(output) => output,
+            Err(err) => CommandOutput {
+                stdout: Vec::new(),
+                stderr: format!("{err}").into_bytes(),
+                status: 1,
+            },
+        }
+    }
+
+    pub fn from_process_output(child: std::process::Output) -> Self {
+        Self {
+            stdout: child.stdout,
+            stderr: child.stderr,
+            status: child.status.code().unwrap_or(1),
+        }
+    }
+}
+
+async fn handle_request(request: &RunRequestData, state: &Data<State>) -> Result<CommandOutput> {
     match request.binary {
         WrappedBinary::Ar => {
             return request_ar::handle_ar_request(request, state).await;
@@ -106,13 +153,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 Ok(files) => files.output.is_some(),
                 Err(_) => false,
             };
-            let config = match state.config_manager.config_for_paths(&paths_for_config) {
-                Ok(config) => config,
-                Err(e) => {
-                    return HttpResponse::BadRequest()
-                        .body(format!("Error reading config file: {}", e));
-                }
-            };
+            let config = state.config_manager.config_for_paths(&paths_for_config)?;
             if is_gcc_cmakescratch(&request.args, &request.cwd)
                 || is_gcc_compiler_id_check(&request.args, &request.cwd)
                 || !has_output
@@ -126,8 +167,8 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                 )
                 .await;
             }
-            match gcc_args::is_build_object_file(&request.args) {
-                Ok(true) => {
+            match gcc_args::is_build_object_file(&request.args)? {
+                true => {
                     request_gcc_without_link::handle_gcc_without_link_request(
                         request.binary,
                         &request.args,
@@ -137,7 +178,7 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                     )
                     .await
                 }
-                Ok(false) => {
+                false => {
                     request_gcc_final_link::handle_gcc_final_link_request(
                         request.binary,
                         &request.args,
@@ -147,7 +188,6 @@ async fn handle_request(request: &RunRequestData, state: &Data<State>) -> HttpRe
                     )
                     .await
                 }
-                Err(e) => HttpResponse::BadRequest().body(format!("Error parsing arguments: {e}")),
             }
         }
     }
@@ -180,7 +220,15 @@ async fn route_run(
         log::error!("Could not parse: {:#?}", run_request);
         return HttpResponse::InternalServerError().body("Failed to parse request");
     };
-    handle_request(&run_request, &state).await
+    let output = CommandOutput::from_result(handle_request(&run_request, &state).await);
+    HttpResponse::Ok().json(
+        RunResponseData {
+            stdout: output.stdout,
+            stderr: output.stderr,
+            status: output.status,
+        }
+        .to_wire(),
+    )
 }
 
 async fn server_thread(state: Data<State>) {

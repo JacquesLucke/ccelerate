@@ -1,19 +1,17 @@
 #![deny(clippy::unwrap_used)]
 
-use actix_web::{HttpResponse, web::Data};
+use actix_web::web::Data;
 use anyhow::Result;
 use bstr::ByteSlice;
 use ccelerate_shared::WrappedBinary;
-use parking_lot::Mutex;
 use std::{
     ffi::OsStr,
     path::{Path, PathBuf},
-    process::ExitStatus,
     sync::Arc,
 };
 
 use crate::{
-    State,
+    CommandOutput, State,
     code_language::CodeLanguage,
     config::Config,
     database::{FileRecord, store_file_record},
@@ -32,75 +30,35 @@ struct PreprocessFileResult {
     analysis: LocalCode,
 }
 
-#[allow(dead_code)]
-#[derive(Debug)]
-enum PreprocessFileError {
-    MissingPrimaryOutput,
-    FailedToSpawn,
-    FailedToWaitForChild,
-    MultipleSourceFiles,
-    NoSourceFile,
-    FailedToReadSourceFile {
-        path: PathBuf,
-        err: tokio::io::Error,
-    },
-    AnalysisFailed,
-    FailedToDetermineLanguage,
-    CannotPreprocessLanguage,
-    PreprocessorFailed {
-        stdout: Vec<u8>,
-        stderr: Vec<u8>,
-        status: ExitStatus,
-    },
-    FailedParse,
-}
-
 async fn preprocess_file<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     build_object_file_args: &[S],
     cwd: &Path,
     state: &Data<State>,
     config: &Config,
-) -> Result<PreprocessFileResult, PreprocessFileError> {
-    let Ok(args_info) = gcc_args::BuildObjectFileInfo::from_args(cwd, build_object_file_args)
-    else {
-        return Err(PreprocessFileError::FailedParse);
-    };
-    let Ok(preprocessed_language) = args_info.source_language.to_preprocessed() else {
-        return Err(PreprocessFileError::CannotPreprocessLanguage);
-    };
+) -> Result<PreprocessFileResult> {
+    let args_info = gcc_args::BuildObjectFileInfo::from_args(cwd, build_object_file_args)?;
+    let preprocessed_language = args_info.source_language.to_preprocessed()?;
 
     let task_period = state.task_periods.start(PreprocessTranslationUnitTaskInfo {
         dst_object_file: args_info.object_path.clone(),
     });
 
-    let Ok(preprocessing_args) =
+    let preprocessing_args =
         gcc_args::update_build_object_args_to_output_preprocessed_with_defines(
             build_object_file_args,
-        )
-    else {
-        return Err(PreprocessFileError::FailedParse);
-    };
+        )?;
 
-    let Ok(child) = tokio::process::Command::new(binary.to_standard_binary_name())
+    let child = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(preprocessing_args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .current_dir(cwd)
-        .spawn()
-    else {
-        return Err(PreprocessFileError::FailedToSpawn);
-    };
-    let Ok(child_result) = child.wait_with_output().await else {
-        return Err(PreprocessFileError::FailedToWaitForChild);
-    };
+        .spawn()?;
+    let child_result = child.wait_with_output().await?;
     if !child_result.status.success() {
-        return Err(PreprocessFileError::PreprocessorFailed {
-            stdout: child_result.stdout,
-            stderr: child_result.stderr,
-            status: child_result.status,
-        });
+        return Err(CommandOutput::from_process_output(child_result).into());
     }
     let preprocessed_code = child_result.stdout;
     if state.cli.log_files {
@@ -118,15 +76,12 @@ async fn preprocess_file<S: AsRef<OsStr>>(
         .start(HandlePreprocessedTranslationUnitTaskInfo {
             dst_object_file: args_info.object_path.clone(),
         });
-    let Ok(analysis) = LocalCode::from_preprocessed_code(
+    let analysis = LocalCode::from_preprocessed_code(
         preprocessed_code.as_bstr(),
         &args_info.source_path,
         config,
     )
-    .await
-    else {
-        return Err(PreprocessFileError::AnalysisFailed);
-    };
+    .await?;
 
     task_period.finished_successfully();
     Ok(PreprocessFileResult {
@@ -146,53 +101,22 @@ pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
     cwd: &Path,
     state: &Data<State>,
     config: &Arc<Config>,
-) -> HttpResponse {
-    let preprocess_result = Arc::new(Mutex::new(None));
-    {
+) -> Result<CommandOutput> {
+    let preprocess_result = {
         let cwd = cwd.to_owned();
-        let preprocess_result = preprocess_result.clone();
         let state_clone = state.clone();
         let config = config.clone();
         let build_object_file_args: Vec<_> = build_object_file_args
             .iter()
             .map(|s| s.as_ref().to_owned())
             .collect();
-        let Ok(_) = state
+        state
             .pool
             .run(async move || {
-                let result =
-                    preprocess_file(binary, &build_object_file_args, &cwd, &state_clone, &config)
-                        .await;
-                preprocess_result.lock().replace(result);
+                preprocess_file(binary, &build_object_file_args, &cwd, &state_clone, &config).await
             })
-            .await
-        else {
-            return HttpResponse::InternalServerError().body("Failed to await preprocessing");
-        };
-    }
-    let preprocess_result = match preprocess_result.lock().take() {
-        Some(Ok(result)) => result,
-        Some(Err(PreprocessFileError::PreprocessorFailed {
-            stdout,
-            stderr,
-            status,
-        })) => {
-            return HttpResponse::Ok().json(
-                ccelerate_shared::RunResponseData {
-                    stdout,
-                    stderr,
-                    status: status.code().unwrap_or(1),
-                }
-                .to_wire(),
-            );
-        }
-        Some(Err(e)) => {
-            return HttpResponse::BadRequest().body(format!("Failed to preprocess file: {:?}", e));
-        }
-        None => {
-            return HttpResponse::InternalServerError().body("Failed to preprocess file");
-        }
-    };
+            .await?
+    }?;
 
     let mut local_code_hash_str = format!(
         "{:x}",
@@ -217,43 +141,24 @@ pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
         .join("preprocessed")
         .join(&local_code_hash_str[..2]);
     let preprocess_file_path = preprocess_file_dir.join(local_code_file_name);
-    match tokio::fs::create_dir_all(preprocess_file_dir).await {
-        Ok(()) => {}
-        Err(e) => {
-            return HttpResponse::InternalServerError()
-                .body(format!("Failed to create preprocess file directory: {e}"));
-        }
-    }
+    tokio::fs::create_dir_all(preprocess_file_dir).await?;
 
     let dummy_object = crate::ASSETS_DIR
         .get_file("dummy_object.o")
         .expect("file should exist");
-    match tokio::fs::write(
+    tokio::fs::write(
         &preprocess_result.original_obj_output,
         dummy_object.contents(),
     )
-    .await
-    {
-        Ok(_) => {}
-        Err(e) => {
-            return HttpResponse::InternalServerError().body(format!(
-                "Failed to write dummy object to {}: {}",
-                preprocess_result.original_obj_output.display(),
-                e
-            ));
-        }
-    }
+    .await?;
 
-    let Ok(_) = tokio::fs::write(
+    tokio::fs::write(
         &preprocess_file_path,
         &preprocess_result.analysis.local_code,
     )
-    .await
-    else {
-        return HttpResponse::InternalServerError().body("Failed to write local code");
-    };
+    .await?;
 
-    let Ok(_) = store_file_record(
+    store_file_record(
         &state.conn.lock(),
         &preprocess_result.original_obj_output,
         &FileRecord {
@@ -274,13 +179,9 @@ pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
                     .collect(),
             ),
         },
-    ) else {
-        return HttpResponse::InternalServerError().body("Failed to store db file");
-    };
+    )?;
 
-    HttpResponse::Ok().json(&ccelerate_shared::RunResponseDataWire {
-        ..Default::default()
-    })
+    Ok(CommandOutput::new_ok())
 }
 
 struct PreprocessTranslationUnitTaskInfo {
