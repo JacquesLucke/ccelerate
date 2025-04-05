@@ -12,6 +12,7 @@ struct TaskDurationTracing {
     dur: f64,
     args: serde_json::Value,
     tid: usize,
+    cat: String,
 }
 
 use anyhow::Result;
@@ -40,13 +41,19 @@ pub async fn export(
             serde_json::Value::String(period.name.clone()),
         );
 
+        let mut name = period.category.clone();
+        if !period.finished_successfully {
+            name.push_str(" (failed)");
+        }
+
         tracing_data.push(TaskDurationTracing {
-            name: period.category.clone(),
+            name,
             ph: "X".to_string(),
             ts: period.start.duration_since(start_instant).as_secs_f64() * 1_000_000f64,
             dur: period.duration.as_secs_f64() * 1_000_000f64,
             args: args.into(),
             tid: row_index,
+            cat: "".into(),
         });
     }
     let json_data = serde_json::to_string_pretty(&tracing_data)?;
