@@ -267,7 +267,7 @@ async fn main() -> Result<()> {
     let addr = format!("127.0.0.1:{}", cli.port);
     let state = Arc::new(State {
         address: addr.clone(),
-        persistent_state: state_persistent::PersistentState::new(&db_path)?,
+        persistent: state_persistent::PersistentState::new(&db_path)?,
         task_periods: TaskPeriods::new(),
         tasks_table_state: Arc::new(Mutex::new(TableState::default())),
         auto_scroll: Arc::new(Mutex::new(true)),

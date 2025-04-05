@@ -93,7 +93,7 @@ fn find_link_sources_for_static_library(
     if !link_sources.handled_paths.insert(library_path.to_owned()) {
         return Ok(());
     }
-    let Some(record) = state.persistent_state.get_archive_file(library_path) else {
+    let Some(record) = state.persistent.get_archive_file(library_path) else {
         link_sources.unknown_sources.push(library_path.to_owned());
         return Ok(());
     };
@@ -118,7 +118,7 @@ fn find_link_sources_for_object_file(
     if !link_sources.handled_paths.insert(object_path.to_owned()) {
         return Ok(());
     }
-    let Some(record) = state.persistent_state.get_object_file(object_path) else {
+    let Some(record) = state.persistent.get_object_file(object_path) else {
         link_sources.unknown_sources.push(object_path.to_owned());
         return Ok(());
     };

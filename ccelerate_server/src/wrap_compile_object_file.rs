@@ -42,9 +42,9 @@ async fn wrap_compile_object_file_impl(
     write_dummy_object_file(&args_info.object_path).await?;
 
     state
-        .persistent_state
+        .persistent
         .update_object_file(&args_info.object_path, binary, cwd, args)?;
-    state.persistent_state.update_object_file_local_code(
+    state.persistent.update_object_file_local_code(
         &args_info.object_path,
         &local_code_path,
         &local_code.global_includes,

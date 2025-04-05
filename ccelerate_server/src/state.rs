@@ -11,7 +11,7 @@ use crate::{
 
 pub struct State {
     pub address: String,
-    pub persistent_state: PersistentState,
+    pub persistent: PersistentState,
     pub task_periods: TaskPeriods,
     pub tasks_table_state: Arc<Mutex<ratatui::widgets::TableState>>,
     pub auto_scroll: Arc<Mutex<bool>>,

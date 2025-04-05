@@ -36,7 +36,7 @@ pub async fn wrap_create_static_archive(
         archive_name: ar_args.archive_name.to_string_lossy().to_string(),
     });
     state
-        .persistent_state
+        .persistent
         .update_archive_file(&ar_args.archive_path, binary, cwd, args)?;
 
     let dummy_archive = crate::ASSETS_DIR
