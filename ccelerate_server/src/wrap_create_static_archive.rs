@@ -34,7 +34,7 @@ struct BuildStaticArchiveInfo {
 
 impl TaskPeriodInfo for BuildStaticArchiveInfo {
     fn category(&self) -> String {
-        "Ar sdfds".to_string()
+        "Ar".to_string()
     }
 
     fn terminal_one_liner(&self) -> String {
