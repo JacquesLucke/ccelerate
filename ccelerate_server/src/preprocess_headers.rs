@@ -13,21 +13,21 @@ pub async fn get_preprocessed_headers(
     objects: &NonEmpty<[ObjectData]>,
     state: &Arc<State>,
     config: &Config,
-) -> Result<BString> {
+    output_path: &Path,
+) -> Result<()> {
     let any_object = objects.first();
     let source_language =
         CodeLanguage::from_path(&any_object.local_code.local_code_file)?.to_non_preprocessed()?;
-
     let include_code = get_include_code_for_objects(objects, config)?;
     let include_code_file =
         tempfile::NamedTempFile::with_suffix(format!(".{}", source_language.valid_ext()))?;
     path_utils::ensure_directory_and_write(include_code_file.path(), &include_code).await?;
-
     let task_period = state.task_periods.start(GetPreprocessedHeadersTaskInfo {});
     let preprocess_args = args_processing::rewrite_to_get_preprocessed_headers(
         any_object.create.binary,
         &any_object.create.args,
         include_code_file.path(),
+        output_path,
     )?;
     let child = tokio::process::Command::new(any_object.create.binary.to_standard_binary_name())
         .args(preprocess_args)
@@ -38,9 +38,8 @@ pub async fn get_preprocessed_headers(
     if !child_output.status.success() {
         return Err(CommandOutput::from_process_output(child_output).into());
     }
-    let preprocessed_headers = BString::from(child_output.stdout);
     task_period.finished_successfully();
-    Ok(preprocessed_headers)
+    Ok(())
 }
 
 fn get_include_code_for_objects(

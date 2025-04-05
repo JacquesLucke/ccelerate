@@ -105,6 +105,7 @@ pub fn rewrite_to_extract_local_code(args: &[impl AsRef<OsStr>]) -> Result<Vec<O
 pub fn rewrite_to_get_preprocessed_headers(
     args: &[impl AsRef<OsStr>],
     include_code_path: &Path,
+    output_path: &Path,
 ) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
     args.args.retain(|arg| match arg {
@@ -121,7 +122,7 @@ pub fn rewrite_to_get_preprocessed_headers(
         }
         GccArg::Dual(first, _) => {
             if *first == "-o" {
-                // Remove output file so that output is written to stdout.
+                // Remove output, it's added again below.
                 false
             } else if *first == "-MT" || *first == "-MF" {
                 // Remove some depsfile generation arguments.
@@ -135,6 +136,8 @@ pub fn rewrite_to_get_preprocessed_headers(
     });
     // Stop after preprocessing.
     args.push_single_arg_str("-E");
+    // Set output file.
+    args.push_dual_arg(OsStr::new("-o"), output_path.as_os_str());
     // Set input file.
     args.push_source_arg(include_code_path);
     Ok(args.to_args_owned_vec())
@@ -142,15 +145,25 @@ pub fn rewrite_to_get_preprocessed_headers(
 
 pub fn update_to_build_object_from_stdin(
     args: &[impl AsRef<OsStr>],
+    input_path: &Path,
     output_path: &Path,
-    language: CodeLanguage,
 ) -> Result<Vec<OsString>> {
     let mut args = GccArgsInfo::from_args(args)?;
     args.args.retain(|arg| match arg {
-        GccArg::Single(_) => true,
+        GccArg::Single(arg) => {
+            if *arg == "-MD" {
+                // Disable depsfile generation.
+                false
+            } else {
+                true
+            }
+        }
         GccArg::Dual(first, _) => {
             if *first == "-o" {
                 // Remove output file because it's replaced below.
+                false
+            } else if *first == "-MT" || *first == "-MF" {
+                // Remove some depsfile generation arguments.
                 false
             } else {
                 true
@@ -161,10 +174,8 @@ pub fn update_to_build_object_from_stdin(
     });
     // Set output file.
     args.push_dual_arg(OsStr::new("-o"), output_path.as_os_str());
-    // Set language for code going in stdin.
-    args.push_dual_arg_str("-x", language.to_gcc_x_arg());
-    // Tell gcc that code passed into stdin. This has to be the last argument.
-    args.push_single_arg_str("-");
+    // Set input file.
+    args.push_source_arg(input_path);
     Ok(args.to_args_owned_vec())
 }
 

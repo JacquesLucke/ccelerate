@@ -10,7 +10,6 @@ use anyhow::Result;
 use ccelerate_shared::WrappedBinary;
 use futures::stream::FuturesUnordered;
 use nunny::NonEmpty;
-use tokio::io::AsyncWriteExt;
 
 use crate::{
     CommandOutput, ar_args, args_processing,
@@ -123,6 +122,7 @@ async fn compile_compatible_objects(
     config: &Config,
 ) -> Result<PathBuf> {
     let any_object = objects.first();
+    let preprocessed_language = CodeLanguage::from_path(&any_object.local_code.local_code_file)?;
 
     let object_name = format!("{}.o", uuid::Uuid::new_v4());
     let object_path = state
@@ -132,14 +132,13 @@ async fn compile_compatible_objects(
         .join(object_name);
     path_utils::ensure_directory_for_file(&object_path).await?;
 
-    let preprocessed_headers = get_preprocessed_headers(objects, state, config).await?;
-
-    let preprocessed_language = CodeLanguage::from_path(&any_object.local_code.local_code_file)?;
-    let build_args = gcc_args::update_to_build_object_from_stdin(
-        &any_object.create.args,
-        &object_path,
-        preprocessed_language,
-    )?;
+    let preprocessed_source_file =
+        tempfile::NamedTempFile::with_suffix(format!(".{}", preprocessed_language.valid_ext()))?;
+    get_preprocessed_headers(objects, state, config, preprocessed_source_file.path()).await?;
+    let mut input_file = tokio::fs::OpenOptions::new()
+        .append(true)
+        .open(preprocessed_source_file.path())
+        .await?;
 
     let task_period = state.task_periods.start(CompileChunkTaskInfo {
         sources: objects
@@ -148,23 +147,28 @@ async fn compile_compatible_objects(
             .collect(),
     });
 
-    let mut child =
+    for object in objects {
+        tokio::io::copy(
+            &mut tokio::fs::File::open(&object.local_code.local_code_file).await?,
+            &mut input_file,
+        )
+        .await?;
+    }
+
+    let build_args = gcc_args::update_to_build_object_from_stdin(
+        &any_object.create.args,
+        preprocessed_source_file.path(),
+        &object_path,
+    )?;
+
+    let child_output =
         tokio::process::Command::new(any_object.create.binary.to_standard_binary_name())
             .args(build_args)
-            .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .spawn()?;
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(&preprocessed_headers).await?;
-        for record in objects {
-            let local_source_code = tokio::fs::read(&record.local_code.local_code_file).await?;
-            stdin.write_all(&local_source_code).await?;
-        }
-    } else {
-        return Err(anyhow::anyhow!("Failed to open stdin for child process"));
-    }
-    let child_output = child.wait_with_output().await?;
+            .spawn()?
+            .wait_with_output()
+            .await?;
     if !child_output.status.success() {
         return Err(CommandOutput::from_process_output(child_output).into());
     }

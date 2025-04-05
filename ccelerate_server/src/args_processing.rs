@@ -47,10 +47,11 @@ pub fn rewrite_to_get_preprocessed_headers(
     binary: WrappedBinary,
     args: &[impl AsRef<OsStr>],
     include_code_path: &Path,
+    output_path: &Path,
 ) -> Result<Vec<OsString>> {
     match binary {
         binary if binary.is_gcc_compatible() => {
-            gcc_args::rewrite_to_get_preprocessed_headers(args, include_code_path)
+            gcc_args::rewrite_to_get_preprocessed_headers(args, include_code_path, output_path)
         }
         _ => Err(anyhow!("Cannot rewrite args for binary: {:?}", binary)),
     }
