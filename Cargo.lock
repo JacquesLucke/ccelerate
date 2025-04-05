@@ -475,6 +475,7 @@ dependencies = [
  "glob",
  "include_dir",
  "log",
+ "nunny",
  "once_cell",
  "os_str_bytes",
  "parking_lot",
@@ -1627,6 +1628,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "nunny"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "14322bc44ac32006482d77e39a75b84e62f0f934b54583434724d21dd555d8a1"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

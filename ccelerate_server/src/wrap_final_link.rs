@@ -9,6 +9,7 @@ use std::{
 use anyhow::Result;
 use ccelerate_shared::WrappedBinary;
 use futures::stream::FuturesUnordered;
+use nunny::NonEmpty;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
@@ -63,7 +64,7 @@ pub async fn wrap_final_link(
 
 #[async_recursion::async_recursion]
 async fn compile_compatible_objects_in_chunks(
-    compatible_objects: &[ObjectData],
+    compatible_objects: &NonEmpty<[ObjectData]>,
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<Vec<PathBuf>> {
@@ -84,6 +85,8 @@ async fn compile_compatible_objects_in_chunks(
         }
     }
     let (left, right) = compatible_objects.split_at(compatible_objects.len() / 2);
+    let left = NonEmpty::<[_]>::new(left).expect("empty");
+    let right = NonEmpty::<[_]>::new(right).expect("empty");
     let (left, right) = tokio::try_join!(
         compile_compatible_objects_in_chunks(left, state, config),
         compile_compatible_objects_in_chunks(right, state, config)
@@ -93,11 +96,11 @@ async fn compile_compatible_objects_in_chunks(
 
 async fn compile_compatible_objects_in_pool(
     state: &Arc<State>,
-    objects: &[ObjectData],
+    objects: &NonEmpty<[ObjectData]>,
     config: &Arc<Config>,
 ) -> Result<PathBuf> {
     let state_clone = state.clone();
-    let objects = Arc::new(objects.to_vec());
+    let objects = nunny::Vec::new(objects.to_vec()).expect("empty");
     let config = config.clone();
     state
         .pool
@@ -109,18 +112,17 @@ async fn compile_compatible_objects_in_pool(
 
 async fn compile_compatible_objects(
     state: &Arc<State>,
-    objects: &[ObjectData],
+    objects: &NonEmpty<[ObjectData]>,
     config: &Config,
 ) -> Result<PathBuf> {
-    let any_object = objects
-        .first()
-        .expect("There has to be at least one record");
+    let any_object = objects.first();
 
     let object_name = format!("{}.o", uuid::Uuid::new_v4());
     let object_dir = state.data_dir.join("objects").join(&object_name[..2]);
     let object_path = object_dir.join(object_name);
     tokio::fs::create_dir_all(&object_dir).await?;
 
+    // let objects = NonEmpty::<[ObjectData]>::new(objects).ok_or_else(|| anyhow::anyhow!("empty"))?;
     let preprocessed_headers = get_preprocessed_headers(objects, state, config).await?;
 
     let preprocessed_language = CodeLanguage::from_path(&any_object.local_code.local_code_file)?;

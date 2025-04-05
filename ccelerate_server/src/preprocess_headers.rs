@@ -2,6 +2,7 @@ use std::{io::Write, path::Path, sync::Arc};
 
 use anyhow::Result;
 use bstr::{BStr, BString, ByteSlice};
+use nunny::NonEmpty;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
@@ -10,13 +11,11 @@ use crate::{
 };
 
 pub async fn get_preprocessed_headers(
-    objects: &[ObjectData],
+    objects: &NonEmpty<[ObjectData]>,
     state: &Arc<State>,
     config: &Config,
 ) -> Result<BString> {
-    let any_object = objects
-        .first()
-        .expect("There has to be at least one record");
+    let any_object = objects.first();
     let source_language =
         CodeLanguage::from_path(&any_object.local_code.local_code_file)?.to_non_preprocessed()?;
 
@@ -24,16 +23,13 @@ pub async fn get_preprocessed_headers(
 
     let include_code = get_include_code_for_objects(objects, config)?;
 
-    let first_record = objects
-        .first()
-        .expect("There has to be at least one record");
     let preprocess_args =
         gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
-            &first_record.create.args,
+            &any_object.create.args,
             source_language,
         )?;
     let mut child =
-        tokio::process::Command::new(first_record.create.binary.to_standard_binary_name())
+        tokio::process::Command::new(any_object.create.binary.to_standard_binary_name())
             .args(preprocess_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -54,7 +50,10 @@ pub async fn get_preprocessed_headers(
     Ok(preprocessed_headers)
 }
 
-fn get_include_code_for_objects(objects: &[ObjectData], config: &Config) -> Result<BString> {
+fn get_include_code_for_objects(
+    objects: &NonEmpty<[ObjectData]>,
+    config: &Config,
+) -> Result<BString> {
     let mut ordered_unique_includes: Vec<&Path> = vec![];
     let mut include_defines: Vec<&BStr> = vec![];
     for object in objects {
@@ -71,9 +70,7 @@ fn get_include_code_for_objects(objects: &[ObjectData], config: &Config) -> Resu
             include_defines.push(define.as_bstr());
         }
     }
-    let any_object = objects
-        .first()
-        .expect("There has to be at least one record");
+    let any_object = objects.first();
     let source_language =
         CodeLanguage::from_path(&any_object.local_code.local_code_file)?.to_non_preprocessed()?;
 

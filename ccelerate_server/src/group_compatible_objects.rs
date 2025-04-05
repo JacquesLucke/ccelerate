@@ -9,7 +9,7 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct CompatibleObjects {
-    pub objects: Vec<ObjectData>,
+    pub objects: nunny::Vec<ObjectData>,
 }
 
 pub fn group_compatible_objects(
@@ -22,10 +22,12 @@ pub fn group_compatible_objects(
     let mut chunks: HashMap<BString, CompatibleObjects> = HashMap::new();
     for object in objects {
         let key = create_object_compatibility_key(object)?;
-        let chunk = chunks.entry(key).or_insert_with(|| CompatibleObjects {
-            objects: Vec::new(),
-        });
-        chunk.objects.push(object.clone());
+        chunks
+            .entry(key)
+            .and_modify(|chunk| chunk.objects.push(object.clone()))
+            .or_insert_with(|| CompatibleObjects {
+                objects: nunny::Vec::of(object.clone()),
+            });
     }
     task_period.finished_successfully();
     Ok(chunks.into_values().collect())
