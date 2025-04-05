@@ -15,7 +15,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::{
     CommandOutput, ar_args, args_processing, code_language::CodeLanguage, config::Config, gcc_args,
-    group_compatible_objects::known_object_files_to_chunks, link_sources::find_link_sources,
+    group_compatible_objects::group_compatible_objects, link_sources::find_link_sources,
     path_utils::shorten_path, source_file::SourceFile, state::State, state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
 };
@@ -29,14 +29,14 @@ pub async fn wrap_final_link(
 ) -> Result<CommandOutput> {
     let args_info = args_processing::LinkFileInfo::from_args(binary, cwd, original_args)?;
     let link_sources = find_link_sources(&args_info, state)?;
-    let chunks = known_object_files_to_chunks(&link_sources.known_object_files, state)?;
+    let chunks = group_compatible_objects(&link_sources.known_object_files, state)?;
 
     let handles = FuturesUnordered::new();
     for chunk in chunks {
         let state = state.clone();
         let config = config.clone();
         let handle = tokio::task::spawn(async move {
-            compile_chunk_in_chunks(&chunk.records, &state, &config).await
+            compile_chunk_in_chunks(&chunk.objects, &state, &config).await
         });
         handles.push(handle);
     }

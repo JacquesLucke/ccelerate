@@ -9,20 +9,20 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct CompileChunk {
-    pub records: Vec<ObjectData>,
+pub struct CompatibleObjects {
+    pub objects: Vec<ObjectData>,
 }
 
-pub fn known_object_files_to_chunks(
-    original_object_records: &[ObjectData],
+pub fn group_compatible_objects(
+    objects: &[ObjectData],
     state: &Arc<State>,
-) -> Result<Vec<CompileChunk>> {
-    let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {
-        num: original_object_records.len(),
-    });
+) -> Result<Vec<CompatibleObjects>> {
+    let task_period = state
+        .task_periods
+        .start(GroupObjectsToChunksTaskInfo { num: objects.len() });
 
-    let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
-    for record in original_object_records {
+    let mut chunks: HashMap<BString, CompatibleObjects> = HashMap::new();
+    for record in objects {
         let info = args_processing::BuildObjectFileInfo::from_args(
             record.create.binary,
             &record.create.cwd,
@@ -46,10 +46,12 @@ pub fn known_object_files_to_chunks(
         for bad_include in &record.local_code.bad_includes {
             chunk_key.push_str(bad_include.as_os_str().as_encoded_bytes());
         }
-        let chunk = chunks.entry(chunk_key).or_insert_with(|| CompileChunk {
-            records: Vec::new(),
-        });
-        chunk.records.push(record.clone());
+        let chunk = chunks
+            .entry(chunk_key)
+            .or_insert_with(|| CompatibleObjects {
+                objects: Vec::new(),
+            });
+        chunk.objects.push(record.clone());
     }
     task_period.finished_successfully();
     Ok(chunks.into_values().collect())
