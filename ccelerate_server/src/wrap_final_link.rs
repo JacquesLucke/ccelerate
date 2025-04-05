@@ -15,7 +15,7 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    CommandOutput, ar_args, code_language::CodeLanguage, config::Config, gcc_args,
+    CommandOutput, ar_args, args_processing, code_language::CodeLanguage, config::Config, gcc_args,
     path_utils::shorten_path, source_file::SourceFile, state::State, state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
 };
@@ -165,8 +165,11 @@ fn known_object_files_to_chunks(
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
-        let info =
-            gcc_args::BuildObjectFileInfo::from_args(&record.create.cwd, &record.create.args)?;
+        let info = args_processing::BuildObjectFileInfo::from_args(
+            record.create.binary,
+            &record.create.cwd,
+            &record.create.args,
+        )?;
 
         let mut chunk_key = BString::new(Vec::new());
         chunk_key.push_str(
@@ -269,7 +272,8 @@ async fn compile_chunk_sources(
     let first_source_record = records
         .first()
         .expect("There has to be at least one record");
-    let source_language = gcc_args::BuildObjectFileInfo::from_args(
+    let source_language = args_processing::BuildObjectFileInfo::from_args(
+        first_source_record.create.binary,
         &first_source_record.create.cwd,
         &first_source_record.create.args,
     )?
@@ -328,7 +332,9 @@ async fn compile_chunk_sources_in_pool(
     let config = config.clone();
     state
         .pool
-        .run_separate_thread(async move || compile_chunk_sources(&state_clone, &records, &config).await)
+        .run_separate_thread(async move || {
+            compile_chunk_sources(&state_clone, &records, &config).await
+        })
         .await?
 }
 

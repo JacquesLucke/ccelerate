@@ -9,16 +9,11 @@ use bstr::{BString, ByteVec};
 use os_str_bytes::OsStrBytesExt;
 use smallvec::{SmallVec, smallvec};
 
+use crate::args_processing::BuildObjectFileInfo;
 use crate::{code_language::CodeLanguage, path_utils::make_absolute, source_file::SourceFile};
 
-pub struct BuildObjectFileInfo {
-    pub source_path: PathBuf,
-    pub source_language: CodeLanguage,
-    pub object_path: PathBuf,
-}
-
 impl BuildObjectFileInfo {
-    pub fn from_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
+    pub fn from_gcc_args(cwd: &Path, args: &[impl AsRef<OsStr>]) -> Result<Self> {
         let args = GccArgsInfo::from_args(args)?;
         let Some(output) = args.get_single_output() else {
             return Err(anyhow!("There has to be one output"));

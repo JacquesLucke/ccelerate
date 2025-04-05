@@ -20,6 +20,7 @@ use state::State;
 use task_periods::TaskPeriods;
 
 mod ar_args;
+mod args_processing;
 mod code_language;
 mod config;
 mod export_trace;
