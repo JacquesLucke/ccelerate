@@ -141,7 +141,13 @@ impl CommandOutput {
 async fn handle_request(request: &RunRequestData, state: &Arc<State>) -> Result<CommandOutput> {
     match request.binary {
         WrappedBinary::Ar => {
-            return request_ar::handle_ar_request(request, state).await;
+            return request_ar::handle_ar_request(
+                request.binary,
+                &request.args,
+                &request.cwd,
+                state,
+            )
+            .await;
         }
         WrappedBinary::Gcc | WrappedBinary::Gxx | WrappedBinary::Clang | WrappedBinary::Clangxx => {
             let files = gcc_args::BuildFilesInfo::from_args(&request.cwd, &request.args);

@@ -1,9 +1,9 @@
 #![deny(clippy::unwrap_used)]
 
-use std::{ffi::OsStr, sync::Arc};
+use std::{ffi::OsStr, path::Path, sync::Arc};
 
 use anyhow::Result;
-use ccelerate_shared::RunRequestData;
+use ccelerate_shared::WrappedBinary;
 
 use crate::{
     CommandOutput, State, ar_args,
@@ -29,12 +29,14 @@ impl TaskPeriodInfo for BuildStaticArchiveInfo {
     }
 }
 
-pub async fn handle_ar_request(
-    request: &RunRequestData,
+pub async fn handle_ar_request<Arg: AsRef<OsStr>>(
+    binary: WrappedBinary,
+    args: &[Arg],
+    cwd: &Path,
     state: &Arc<State>,
 ) -> Result<CommandOutput> {
-    let request_args_ref: Vec<&OsStr> = request.args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
-    let ar_args = ar_args::BuildStaticArchiveInfo::from_args(&request.cwd, &request_args_ref)?;
+    let request_args_ref: Vec<&OsStr> = args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
+    let ar_args = ar_args::BuildStaticArchiveInfo::from_args(cwd, &request_args_ref)?;
     let task_period = state.task_periods.start(BuildStaticArchiveInfo {
         archive_name: ar_args.archive_name.to_string_lossy().to_string(),
     });
@@ -42,9 +44,9 @@ pub async fn handle_ar_request(
         &state.conn.lock(),
         &ar_args.archive_path,
         &FileRecord {
-            cwd: request.cwd.clone(),
-            binary: request.binary,
-            args: request.args.clone(),
+            cwd: cwd.to_owned(),
+            binary,
+            args: args.iter().map(|s| s.as_ref().to_owned()).collect(),
             local_code_file: None,
             global_includes: None,
             include_defines: None,
