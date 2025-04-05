@@ -1,7 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
 use anyhow::Result;
-use bstr::ByteSlice;
+use bstr::{BString, ByteSlice};
 use ccelerate_shared::WrappedBinary;
 use std::{
     ffi::OsStr,
@@ -63,25 +63,7 @@ async fn extract_local_code(
     config: &Config,
     args_info: &args_processing::BuildObjectFileInfo,
 ) -> Result<LocalCode> {
-    let task_period = state.task_periods.start(PreprocessTranslationUnitTaskInfo {
-        dst_object_file: args_info.object_path.clone(),
-    });
-
-    let preprocessing_args = args_processing::rewrite_to_extract_local_code(binary, args)?;
-
-    let child = tokio::process::Command::new(binary.to_standard_binary_name())
-        .args(preprocessing_args)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .current_dir(cwd)
-        .spawn()?;
-    let child_result = child.wait_with_output().await?;
-    if !child_result.status.success() {
-        return Err(CommandOutput::from_process_output(child_result).into());
-    }
-    let preprocessed_code = child_result.stdout;
-    task_period.finished_successfully();
+    let preprocessed_code = extract_preprocessed_code(binary, args, cwd, state, args_info).await?;
 
     let task_period = state
         .task_periods
@@ -96,6 +78,32 @@ async fn extract_local_code(
     .await?;
     task_period.finished_successfully();
     Ok(analysis)
+}
+
+async fn extract_preprocessed_code(
+    binary: WrappedBinary,
+    args: &[impl AsRef<OsStr>],
+    cwd: &Path,
+    state: &Arc<State>,
+    args_info: &args_processing::BuildObjectFileInfo,
+) -> Result<BString> {
+    let task_period = state.task_periods.start(PreprocessTranslationUnitTaskInfo {
+        dst_object_file: args_info.object_path.clone(),
+    });
+    let preprocessing_args = args_processing::rewrite_to_extract_local_code(binary, args)?;
+    let child = tokio::process::Command::new(binary.to_standard_binary_name())
+        .args(preprocessing_args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .current_dir(cwd)
+        .spawn()?;
+    let child_result = child.wait_with_output().await?;
+    if !child_result.status.success() {
+        return Err(CommandOutput::from_process_output(child_result).into());
+    }
+    task_period.finished_successfully();
+    Ok(BString::new(child_result.stdout))
 }
 
 async fn write_local_code_file(
