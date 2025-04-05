@@ -6,7 +6,6 @@ use std::{
 };
 
 use parking_lot::Mutex;
-use serde::Serialize;
 
 pub struct TaskPeriods {
     tasks: Arc<Mutex<TaskPeriodsVec>>,
@@ -25,10 +24,11 @@ struct TaskPeriodStorage {
     finished_successfully: Arc<Mutex<bool>>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct TaskPeriod {
     pub category: String,
     pub name: String,
+    pub start: Instant,
     pub duration: Duration,
     pub active: bool,
     pub finished_successfully: bool,
@@ -88,6 +88,7 @@ impl TaskPeriods {
             .map(|t| TaskPeriod {
                 category: t.category.clone(),
                 name: t.name.clone(),
+                start: t.start_time,
                 duration: t.duration(),
                 active: t.is_running(),
                 finished_successfully: *t.finished_successfully.lock(),
