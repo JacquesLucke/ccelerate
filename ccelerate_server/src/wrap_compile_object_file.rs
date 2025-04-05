@@ -23,7 +23,7 @@ pub async fn wrap_compile_object_file(
 ) -> Result<CommandOutput> {
     state
         .pool
-        .run_same_thread(async move || {
+        .run_local(async move || {
             wrap_compile_object_file_impl(binary, args, cwd, state, config).await
         })
         .await

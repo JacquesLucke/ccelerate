@@ -15,7 +15,7 @@ impl ParallelPool {
         }
     }
 
-    pub fn run_separate_thread<F, Fut, Out>(&self, f: F) -> JoinHandle<Out>
+    pub fn run_spawned<F, Fut, Out>(&self, f: F) -> JoinHandle<Out>
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = Out> + Send + 'static,
@@ -28,7 +28,7 @@ impl ParallelPool {
         })
     }
 
-    pub async fn run_same_thread<F, Fut, Out>(&self, f: F) -> Out
+    pub async fn run_local<F, Fut, Out>(&self, f: F) -> Out
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Out>,

@@ -92,12 +92,28 @@ async fn compile_compatible_objects_in_chunks(
     Ok(left.into_iter().chain(right).collect())
 }
 
-async fn compile_chunk_sources(
+async fn compile_compatible_objects_in_pool(
     state: &Arc<State>,
-    records: &[ObjectData],
+    objects: &[ObjectData],
+    config: &Arc<Config>,
+) -> Result<PathBuf> {
+    let state_clone = state.clone();
+    let objects = Arc::new(objects.to_vec());
+    let config = config.clone();
+    state
+        .pool
+        .run_spawned(async move || {
+            compile_compatible_objects(&state_clone, &objects, &config).await
+        })
+        .await?
+}
+
+async fn compile_compatible_objects(
+    state: &Arc<State>,
+    objects: &[ObjectData],
     config: &Config,
 ) -> Result<PathBuf> {
-    let first_record = records
+    let any_object = objects
         .first()
         .expect("There has to be at least one record");
 
@@ -106,34 +122,31 @@ async fn compile_chunk_sources(
     let object_path = object_dir.join(object_name);
     tokio::fs::create_dir_all(&object_dir).await?;
 
-    let first_source_record = records
-        .first()
-        .expect("There has to be at least one record");
     let source_language = args_processing::BuildObjectFileInfo::from_args(
-        first_source_record.create.binary,
-        &first_source_record.create.cwd,
-        &first_source_record.create.args,
+        any_object.create.binary,
+        &any_object.create.cwd,
+        &any_object.create.args,
     )?
     .source_language;
     let preprocessed_language = source_language.to_preprocessed()?;
     let preprocessed_headers =
-        get_compile_chunk_preprocessed_headers(records, state, source_language, config).await?;
+        get_preprocessed_headers(objects, state, source_language, config).await?;
 
     let build_args = gcc_args::update_to_build_object_from_stdin(
-        &first_record.create.args,
+        &any_object.create.args,
         &object_path,
         preprocessed_language,
     )?;
 
     let task_period = state.task_periods.start(CompileChunkTaskInfo {
-        sources: records
+        sources: objects
             .iter()
             .map(|r| r.local_code.local_code_file.clone())
             .collect(),
     });
 
     let mut child =
-        tokio::process::Command::new(first_record.create.binary.to_standard_binary_name())
+        tokio::process::Command::new(any_object.create.binary.to_standard_binary_name())
             .args(build_args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
@@ -141,7 +154,7 @@ async fn compile_chunk_sources(
             .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&preprocessed_headers).await?;
-        for record in records {
+        for record in objects {
             let local_source_code = tokio::fs::read(&record.local_code.local_code_file).await?;
             stdin.write_all(&local_source_code).await?;
         }
@@ -150,32 +163,13 @@ async fn compile_chunk_sources(
     }
     let child_output = child.wait_with_output().await?;
     if !child_output.status.success() {
-        return Err(anyhow::anyhow!(
-            "Compilation failed failed: {}",
-            String::from_utf8_lossy(&child_output.stderr)
-        ));
+        return Err(CommandOutput::from_process_output(child_output).into());
     }
     task_period.finished_successfully();
     Ok(object_path)
 }
 
-async fn compile_compatible_objects_in_pool(
-    state: &Arc<State>,
-    records: &[ObjectData],
-    config: &Arc<Config>,
-) -> Result<PathBuf> {
-    let state_clone = state.clone();
-    let records = Arc::new(records.to_vec());
-    let config = config.clone();
-    state
-        .pool
-        .run_separate_thread(async move || {
-            compile_chunk_sources(&state_clone, &records, &config).await
-        })
-        .await?
-}
-
-async fn get_compile_chunk_preprocessed_headers(
+async fn get_preprocessed_headers(
     records: &[ObjectData],
     state: &Arc<State>,
     source_language: CodeLanguage,
