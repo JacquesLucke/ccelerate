@@ -1,7 +1,6 @@
 #![deny(clippy::unwrap_used)]
 
 use std::{
-    collections::HashMap,
     ffi::OsStr,
     io::Write,
     path::{Path, PathBuf},
@@ -9,15 +8,16 @@ use std::{
 };
 
 use anyhow::Result;
-use bstr::{BStr, BString, ByteSlice, ByteVec};
+use bstr::{BStr, BString, ByteSlice};
 use ccelerate_shared::WrappedBinary;
 use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
     CommandOutput, ar_args, args_processing, code_language::CodeLanguage, config::Config, gcc_args,
-    link_sources::find_link_sources, path_utils::shorten_path, source_file::SourceFile,
-    state::State, state_persistent::ObjectData, task_periods::TaskPeriodInfo,
+    group_compatible_objects::known_object_files_to_chunks, link_sources::find_link_sources,
+    path_utils::shorten_path, source_file::SourceFile, state::State, state_persistent::ObjectData,
+    task_periods::TaskPeriodInfo,
 };
 
 pub async fn wrap_final_link(
@@ -59,71 +59,6 @@ pub async fn wrap_final_link(
         &all_link_sources,
     )
     .await
-}
-
-#[derive(Debug, Clone)]
-struct CompileChunk {
-    records: Vec<ObjectData>,
-}
-
-struct GroupObjectsToChunksTaskInfo {
-    num: usize,
-}
-
-impl TaskPeriodInfo for GroupObjectsToChunksTaskInfo {
-    fn category(&self) -> String {
-        "Group Chunks".to_string()
-    }
-
-    fn terminal_one_liner(&self) -> String {
-        format!("Objects: {}", self.num)
-    }
-
-    fn log_detailed(&self) {
-        log::info!("Group objects to chunks");
-    }
-}
-
-fn known_object_files_to_chunks(
-    original_object_records: &[ObjectData],
-    state: &Arc<State>,
-) -> Result<Vec<CompileChunk>> {
-    let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {
-        num: original_object_records.len(),
-    });
-
-    let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
-    for record in original_object_records {
-        let info = args_processing::BuildObjectFileInfo::from_args(
-            record.create.binary,
-            &record.create.cwd,
-            &record.create.args,
-        )?;
-
-        let mut chunk_key = BString::new(Vec::new());
-        chunk_key.push_str(
-            record
-                .create
-                .binary
-                .to_standard_binary_name()
-                .as_encoded_bytes(),
-        );
-        chunk_key.push_str(info.source_language.to_valid_ext());
-        gcc_args::add_translation_unit_unspecific_args_to_key(&record.create.args, &mut chunk_key)?;
-        chunk_key.push_str(record.create.cwd.as_os_str().as_encoded_bytes());
-        for include_define in &record.local_code.include_defines {
-            chunk_key.push_str(include_define);
-        }
-        for bad_include in &record.local_code.bad_includes {
-            chunk_key.push_str(bad_include.as_os_str().as_encoded_bytes());
-        }
-        let chunk = chunks.entry(chunk_key).or_insert_with(|| CompileChunk {
-            records: Vec::new(),
-        });
-        chunk.records.push(record.clone());
-    }
-    task_period.finished_successfully();
-    Ok(chunks.into_values().collect())
 }
 
 #[async_recursion::async_recursion]
