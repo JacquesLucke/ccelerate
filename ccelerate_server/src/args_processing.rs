@@ -5,6 +5,7 @@ use std::{
 
 use anyhow::Result;
 use anyhow::anyhow;
+use bstr::BString;
 use ccelerate_shared::WrappedBinary;
 use smallvec::SmallVec;
 
@@ -60,5 +61,21 @@ impl LinkFileInfo {
                 binary
             )),
         }
+    }
+}
+
+pub fn add_object_compatibility_args_to_key(
+    binary: WrappedBinary,
+    args: &[impl AsRef<OsStr>],
+    key: &mut BString,
+) -> Result<()> {
+    match binary {
+        binary if binary.is_gcc_compatible() => {
+            gcc_args::add_translation_unit_unspecific_args_to_key(args, key)
+        }
+        _ => Err(anyhow!(
+            "Cannot add object compatibility args for binary: {:?}",
+            binary
+        )),
     }
 }
