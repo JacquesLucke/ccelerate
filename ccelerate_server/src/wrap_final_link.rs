@@ -15,8 +15,8 @@ use futures::stream::FuturesUnordered;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    CommandOutput, ar_args, code_language::CodeLanguage, config::Config, database::FileRecord,
-    gcc_args, path_utils::shorten_path, source_file::SourceFile, state::State,
+    CommandOutput, ar_args, code_language::CodeLanguage, config::Config, gcc_args,
+    path_utils::shorten_path, source_file::SourceFile, state::State, state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
 };
 
@@ -27,7 +27,7 @@ struct OriginalLinkSources {
     unknown_sources: Vec<PathBuf>,
     // Those object files are compiled from source here, so we know how they are
     // compiled exactly and can optimize that process.
-    known_object_files: Vec<FileRecord>,
+    known_object_files: Vec<ObjectData>,
 
     handled_paths: HashSet<PathBuf>,
 }
@@ -93,7 +93,7 @@ fn find_link_sources_for_static_library(
     if !link_sources.handled_paths.insert(library_path.to_owned()) {
         return Ok(());
     }
-    let Some(record) = state.persistent_state.load(library_path) else {
+    let Some(record) = state.persistent_state.get_archive_file(library_path) else {
         link_sources.unknown_sources.push(library_path.to_owned());
         return Ok(());
     };
@@ -118,11 +118,11 @@ fn find_link_sources_for_object_file(
     if !link_sources.handled_paths.insert(object_path.to_owned()) {
         return Ok(());
     }
-    let Some(record) = state.persistent_state.load(object_path) else {
+    let Some(record) = state.persistent_state.get_object_file(object_path) else {
         link_sources.unknown_sources.push(object_path.to_owned());
         return Ok(());
     };
-    if !record.binary.is_gcc_compatible() {
+    if !record.create.binary.is_gcc_compatible() {
         return Err(anyhow::anyhow!(
             "Object file not created by gcc compatible: {}",
             object_path.display()
@@ -134,7 +134,7 @@ fn find_link_sources_for_object_file(
 
 #[derive(Debug, Clone)]
 struct CompileChunk {
-    records: Vec<FileRecord>,
+    records: Vec<ObjectData>,
 }
 
 struct GroupObjectsToChunksTaskInfo {
@@ -156,7 +156,7 @@ impl TaskPeriodInfo for GroupObjectsToChunksTaskInfo {
 }
 
 fn known_object_files_to_chunks(
-    original_object_records: &[FileRecord],
+    original_object_records: &[ObjectData],
     state: &Arc<State>,
 ) -> Result<Vec<CompileChunk>> {
     let task_period = state.task_periods.start(GroupObjectsToChunksTaskInfo {
@@ -165,17 +165,24 @@ fn known_object_files_to_chunks(
 
     let mut chunks: HashMap<BString, CompileChunk> = HashMap::new();
     for record in original_object_records {
-        let info = gcc_args::BuildObjectFileInfo::from_args(&record.cwd, &record.args)?;
+        let info =
+            gcc_args::BuildObjectFileInfo::from_args(&record.create.cwd, &record.create.args)?;
 
         let mut chunk_key = BString::new(Vec::new());
-        chunk_key.push_str(record.binary.to_standard_binary_name().as_encoded_bytes());
+        chunk_key.push_str(
+            record
+                .create
+                .binary
+                .to_standard_binary_name()
+                .as_encoded_bytes(),
+        );
         chunk_key.push_str(info.source_language.to_valid_ext());
-        gcc_args::add_translation_unit_unspecific_args_to_key(&record.args, &mut chunk_key)?;
-        chunk_key.push_str(record.cwd.as_os_str().as_encoded_bytes());
-        for include_define in record.include_defines.iter().flatten() {
+        gcc_args::add_translation_unit_unspecific_args_to_key(&record.create.args, &mut chunk_key)?;
+        chunk_key.push_str(record.create.cwd.as_os_str().as_encoded_bytes());
+        for include_define in &record.local_code.include_defines {
             chunk_key.push_str(include_define);
         }
-        for bad_include in record.bad_includes.iter().flatten() {
+        for bad_include in &record.local_code.bad_includes {
             chunk_key.push_str(bad_include.as_os_str().as_encoded_bytes());
         }
         let chunk = chunks.entry(chunk_key).or_insert_with(|| CompileChunk {
@@ -189,7 +196,7 @@ fn known_object_files_to_chunks(
 
 #[async_recursion::async_recursion]
 async fn compile_chunk_in_chunks(
-    records: &[FileRecord],
+    records: &[ObjectData],
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<Vec<PathBuf>> {
@@ -247,14 +254,9 @@ impl TaskPeriodInfo for CompileChunkTaskInfo {
 
 async fn compile_chunk_sources(
     state: &Arc<State>,
-    records: &[FileRecord],
+    records: &[ObjectData],
     config: &Config,
 ) -> Result<PathBuf> {
-    let sources = records
-        .iter()
-        .flat_map(|r| &r.local_code_file)
-        .map(|p| p.as_path())
-        .collect::<Vec<_>>();
     let first_record = records
         .first()
         .expect("There has to be at least one record");
@@ -268,8 +270,8 @@ async fn compile_chunk_sources(
         .first()
         .expect("There has to be at least one record");
     let source_language = gcc_args::BuildObjectFileInfo::from_args(
-        &first_source_record.cwd,
-        &first_source_record.args,
+        &first_source_record.create.cwd,
+        &first_source_record.create.args,
     )?
     .source_language;
     let preprocessed_language = source_language.to_preprocessed()?;
@@ -277,28 +279,30 @@ async fn compile_chunk_sources(
         get_compile_chunk_preprocessed_headers(records, state, source_language, config).await?;
 
     let build_args = gcc_args::update_to_build_object_from_stdin(
-        &first_record.args,
+        &first_record.create.args,
         &object_path,
         preprocessed_language,
     )?;
 
     let task_period = state.task_periods.start(CompileChunkTaskInfo {
-        sources: sources.iter().map(|s| (*s).to_owned()).collect(),
+        sources: records
+            .iter()
+            .map(|r| r.local_code.local_code_file.clone())
+            .collect(),
     });
 
-    let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
-        .args(build_args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
+    let mut child =
+        tokio::process::Command::new(first_record.create.binary.to_standard_binary_name())
+            .args(build_args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&preprocessed_headers).await?;
         for record in records {
-            if let Some(local_code_path) = &record.local_code_file {
-                let local_source_code = tokio::fs::read(local_code_path).await?;
-                stdin.write_all(&local_source_code).await?;
-            }
+            let local_source_code = tokio::fs::read(&record.local_code.local_code_file).await?;
+            stdin.write_all(&local_source_code).await?;
         }
     } else {
         return Err(anyhow::anyhow!("Failed to open stdin for child process"));
@@ -316,7 +320,7 @@ async fn compile_chunk_sources(
 
 async fn compile_chunk_sources_in_pool(
     state: &Arc<State>,
-    records: &[FileRecord],
+    records: &[ObjectData],
     config: &Arc<Config>,
 ) -> Result<PathBuf> {
     let state_clone = state.clone();
@@ -347,7 +351,7 @@ impl TaskPeriodInfo for GetPreprocessedHeadersTaskInfo {
 }
 
 async fn get_compile_chunk_preprocessed_headers(
-    records: &[FileRecord],
+    records: &[ObjectData],
     state: &Arc<State>,
     source_language: CodeLanguage,
     config: &Config,
@@ -355,13 +359,13 @@ async fn get_compile_chunk_preprocessed_headers(
     let mut ordered_unique_includes: Vec<&Path> = vec![];
     let mut include_defines: Vec<&BStr> = vec![];
     for record in records {
-        for include in record.global_includes.iter().flatten() {
+        for include in &record.local_code.global_includes {
             if ordered_unique_includes.contains(&include.as_path()) {
                 continue;
             }
             ordered_unique_includes.push(include.as_path());
         }
-        for define in record.include_defines.iter().flatten() {
+        for define in &record.local_code.include_defines {
             if include_defines.contains(&define.as_bstr()) {
                 continue;
             }
@@ -385,15 +389,16 @@ async fn get_compile_chunk_preprocessed_headers(
         .expect("There has to be at least one record");
     let preprocess_args =
         gcc_args::update_build_object_args_to_just_output_preprocessed_from_stdin(
-            &first_record.args,
+            &first_record.create.args,
             source_language,
         )?;
-    let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
-        .args(preprocess_args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()?;
+    let mut child =
+        tokio::process::Command::new(first_record.create.binary.to_standard_binary_name())
+            .args(preprocess_args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(&headers_code).await?;
     }

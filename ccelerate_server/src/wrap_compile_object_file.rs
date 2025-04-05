@@ -10,8 +10,8 @@ use std::{
 };
 
 use crate::{
-    CommandOutput, State, code_language::CodeLanguage, config::Config, database::FileRecord,
-    gcc_args, local_code::LocalCode, path_utils::shorten_path, source_file::SourceFile,
+    CommandOutput, State, code_language::CodeLanguage, config::Config, gcc_args,
+    local_code::LocalCode, path_utils::shorten_path, source_file::SourceFile,
     task_periods::TaskPeriodInfo,
 };
 
@@ -141,26 +141,22 @@ pub async fn wrap_compile_object_file<S: AsRef<OsStr>>(
     )
     .await?;
 
-    state.persistent_state.store(
+    state.persistent_state.update_object_file(
         &preprocess_result.original_obj_output,
-        &FileRecord {
-            cwd: cwd.to_path_buf(),
-            binary,
-            args: build_object_file_args
-                .iter()
-                .map(|s| s.as_ref().to_owned())
-                .collect(),
-            local_code_file: Some(preprocess_file_path),
-            global_includes: Some(preprocess_result.analysis.global_includes),
-            include_defines: Some(preprocess_result.analysis.include_defines),
-            bad_includes: Some(
-                preprocess_result
-                    .analysis
-                    .bad_includes
-                    .into_iter()
-                    .collect(),
-            ),
-        },
+        binary,
+        cwd,
+        build_object_file_args,
+    )?;
+    state.persistent_state.update_object_file_local_code(
+        &preprocess_result.original_obj_output,
+        &preprocess_file_path,
+        &preprocess_result.analysis.global_includes,
+        &preprocess_result.analysis.include_defines,
+        &preprocess_result
+            .analysis
+            .bad_includes
+            .iter()
+            .collect::<Vec<_>>(),
     )?;
 
     Ok(CommandOutput::new_ok())

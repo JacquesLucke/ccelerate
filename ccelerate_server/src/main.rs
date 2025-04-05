@@ -22,7 +22,6 @@ use task_periods::TaskPeriods;
 mod ar_args;
 mod code_language;
 mod config;
-mod database;
 mod export_trace;
 mod gcc_args;
 mod local_code;
