@@ -25,6 +25,7 @@ mod code_language;
 mod config;
 mod export_trace;
 mod gcc_args;
+mod link_sources;
 mod local_code;
 mod parallel_pool;
 mod path_utils;
