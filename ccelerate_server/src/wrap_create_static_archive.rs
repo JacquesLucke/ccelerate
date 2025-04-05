@@ -29,14 +29,13 @@ impl TaskPeriodInfo for BuildStaticArchiveInfo {
     }
 }
 
-pub async fn handle_ar_request<Arg: AsRef<OsStr>>(
+pub async fn wrap_create_static_archive<Arg: AsRef<OsStr>>(
     binary: WrappedBinary,
     args: &[Arg],
     cwd: &Path,
     state: &Arc<State>,
 ) -> Result<CommandOutput> {
-    let request_args_ref: Vec<&OsStr> = args.iter().map(|s| s.as_ref()).collect::<Vec<_>>();
-    let ar_args = ar_args::BuildStaticArchiveInfo::from_args(cwd, &request_args_ref)?;
+    let ar_args = ar_args::BuildStaticArchiveInfo::from_args(cwd, args)?;
     let task_period = state.task_periods.start(BuildStaticArchiveInfo {
         archive_name: ar_args.archive_name.to_string_lossy().to_string(),
     });

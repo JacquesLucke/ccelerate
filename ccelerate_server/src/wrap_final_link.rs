@@ -540,7 +540,7 @@ pub async fn final_link<S: AsRef<OsStr>>(
     Ok(CommandOutput::from_process_output(child_output))
 }
 
-pub async fn handle_gcc_final_link_request<S: AsRef<OsStr>>(
+pub async fn wrap_final_link<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     original_args: &[S],
     cwd: &Path,

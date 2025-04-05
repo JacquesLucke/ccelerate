@@ -29,7 +29,7 @@ impl TaskPeriodInfo for EagerGccTaskInfo {
     }
 }
 
-pub async fn handle_eager_gcc_request<S: AsRef<OsStr>>(
+pub async fn wrap_eager<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     args: &[S],
     cwd: &Path,

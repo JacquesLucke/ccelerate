@@ -94,7 +94,7 @@ async fn preprocess_file<S: AsRef<OsStr>>(
     })
 }
 
-pub async fn handle_gcc_without_link_request<S: AsRef<OsStr>>(
+pub async fn wrap_compile_object_file<S: AsRef<OsStr>>(
     binary: WrappedBinary,
     build_object_file_args: &[S],
     cwd: &Path,

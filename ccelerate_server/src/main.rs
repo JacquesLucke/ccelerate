@@ -29,14 +29,14 @@ mod local_code;
 mod parallel_pool;
 mod path_utils;
 mod preprocessor_directives;
-mod request_ar;
-mod request_gcc_eager;
-mod request_gcc_final_link;
-mod request_gcc_without_link;
 mod source_file;
 mod state;
 mod task_periods;
 mod tui;
+mod wrap_compile_object_file;
+mod wrap_create_static_archive;
+mod wrap_eager;
+mod wrap_final_link;
 
 static ASSETS_DIR: include_dir::Dir = include_dir::include_dir!("$CARGO_MANIFEST_DIR/src/assets");
 
@@ -141,7 +141,7 @@ impl CommandOutput {
 async fn handle_request(request: &RunRequestData, state: &Arc<State>) -> Result<CommandOutput> {
     match request.binary {
         WrappedBinary::Ar => {
-            return request_ar::handle_ar_request(
+            return wrap_create_static_archive::wrap_create_static_archive(
                 request.binary,
                 &request.args,
                 &request.cwd,
@@ -169,17 +169,12 @@ async fn handle_request(request: &RunRequestData, state: &Arc<State>) -> Result<
                 || !has_output
                 || known_sources.iter().any(|p| config.is_eager_path(&p.path))
             {
-                return request_gcc_eager::handle_eager_gcc_request(
-                    request.binary,
-                    &request.args,
-                    &request.cwd,
-                    state,
-                )
-                .await;
+                return wrap_eager::wrap_eager(request.binary, &request.args, &request.cwd, state)
+                    .await;
             }
             match gcc_args::is_build_object_file(&request.args)? {
                 true => {
-                    request_gcc_without_link::handle_gcc_without_link_request(
+                    wrap_compile_object_file::wrap_compile_object_file(
                         request.binary,
                         &request.args,
                         &request.cwd,
@@ -189,7 +184,7 @@ async fn handle_request(request: &RunRequestData, state: &Arc<State>) -> Result<
                     .await
                 }
                 false => {
-                    request_gcc_final_link::handle_gcc_final_link_request(
+                    wrap_final_link::wrap_final_link(
                         request.binary,
                         &request.args,
                         &request.cwd,
