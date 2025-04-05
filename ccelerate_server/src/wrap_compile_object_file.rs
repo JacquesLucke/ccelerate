@@ -22,61 +22,10 @@ pub async fn wrap_compile_object_file(
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<CommandOutput> {
-    let preprocess_result = {
-        let cwd = cwd.to_owned();
-        let state_clone = state.clone();
-        let config = config.clone();
-        let build_object_file_args: Vec<_> = build_object_file_args
-            .iter()
-            .map(|s| s.as_ref().to_owned())
-            .collect();
-        state
-            .pool
-            .run(async move || {
-                preprocess_file(binary, &build_object_file_args, &cwd, &state_clone, &config).await
-            })
-            .await?
-    }?;
-
-    let mut local_code_hash_str = format!(
-        "{:x}",
-        twox_hash::XxHash64::oneshot(0, &preprocess_result.analysis.local_code)
-    );
-    local_code_hash_str.truncate(8);
-    let debug_name = preprocess_result
-        .source_file
-        .path
-        .file_name()
-        .unwrap_or(OsStr::new("unknown"))
-        .to_string_lossy();
-    let local_code_file_name = format!(
-        "{}_{}.{}",
-        local_code_hash_str,
-        debug_name,
-        preprocess_result.preprocessed_language.to_valid_ext()
-    );
-
-    let preprocess_file_dir = state
-        .data_dir
-        .join("preprocessed")
-        .join(&local_code_hash_str[..2]);
-    let preprocess_file_path = preprocess_file_dir.join(local_code_file_name);
-    tokio::fs::create_dir_all(preprocess_file_dir).await?;
-
-    let dummy_object = crate::ASSETS_DIR
-        .get_file("dummy_object.o")
-        .expect("file should exist");
-    tokio::fs::write(
-        &preprocess_result.original_obj_output,
-        dummy_object.contents(),
-    )
-    .await?;
-
-    tokio::fs::write(
-        &preprocess_file_path,
-        &preprocess_result.analysis.local_code,
-    )
-    .await?;
+    let preprocess_result =
+        preprocess_file_in_pool(binary, build_object_file_args, cwd, state, config).await?;
+    let local_code_path = write_local_code_file(&preprocess_result, state).await?;
+    write_dummy_object_file(&preprocess_result).await?;
 
     state.persistent_state.update_object_file(
         &preprocess_result.original_obj_output,
@@ -86,7 +35,7 @@ pub async fn wrap_compile_object_file(
     )?;
     state.persistent_state.update_object_file_local_code(
         &preprocess_result.original_obj_output,
-        &preprocess_file_path,
+        &local_code_path,
         &preprocess_result.analysis.global_includes,
         &preprocess_result.analysis.include_defines,
         &preprocess_result
@@ -97,6 +46,23 @@ pub async fn wrap_compile_object_file(
     )?;
 
     Ok(CommandOutput::new_ok())
+}
+
+async fn preprocess_file_in_pool(
+    binary: WrappedBinary,
+    args: &[impl AsRef<OsStr>],
+    cwd: &Path,
+    state: &Arc<State>,
+    config: &Arc<Config>,
+) -> Result<PreprocessFileResult> {
+    let cwd = cwd.to_owned();
+    let state_clone = state.clone();
+    let config = config.clone();
+    let args: Vec<_> = args.iter().map(|s| s.as_ref().to_owned()).collect();
+    state
+        .pool
+        .run(async move || preprocess_file(binary, &args, &cwd, &state_clone, &config).await)
+        .await?
 }
 
 struct PreprocessFileResult {
@@ -160,6 +126,55 @@ async fn preprocess_file(
         original_obj_output: args_info.object_path.clone(),
         analysis,
     })
+}
+
+async fn write_local_code_file(
+    preprocess_result: &PreprocessFileResult,
+    state: &Arc<State>,
+) -> Result<PathBuf> {
+    let mut local_code_hash_str = format!(
+        "{:x}",
+        twox_hash::XxHash64::oneshot(0, &preprocess_result.analysis.local_code)
+    );
+    local_code_hash_str.truncate(8);
+    let debug_name = preprocess_result
+        .source_file
+        .path
+        .file_name()
+        .unwrap_or(OsStr::new("unknown"))
+        .to_string_lossy();
+    let local_code_file_name = format!(
+        "{}_{}.{}",
+        local_code_hash_str,
+        debug_name,
+        preprocess_result.preprocessed_language.to_valid_ext()
+    );
+
+    let preprocess_file_dir = state
+        .data_dir
+        .join("preprocessed")
+        .join(&local_code_hash_str[..2]);
+    let preprocess_file_path = preprocess_file_dir.join(local_code_file_name);
+    tokio::fs::create_dir_all(preprocess_file_dir).await?;
+
+    tokio::fs::write(
+        &preprocess_file_path,
+        &preprocess_result.analysis.local_code,
+    )
+    .await?;
+    Ok(preprocess_file_path)
+}
+
+async fn write_dummy_object_file(preprocess_result: &PreprocessFileResult) -> Result<()> {
+    let dummy_object = crate::ASSETS_DIR
+        .get_file("dummy_object.o")
+        .expect("file should exist");
+    tokio::fs::write(
+        &preprocess_result.original_obj_output,
+        dummy_object.contents(),
+    )
+    .await?;
+    Ok(())
 }
 
 struct PreprocessTranslationUnitTaskInfo {
