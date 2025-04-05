@@ -272,7 +272,6 @@ async fn compile_chunk_sources(
     let object_path = object_dir.join(object_name);
     tokio::fs::create_dir_all(&object_dir).await?;
 
-    let task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
     let first_source_record = records
         .first()
         .expect("There has to be at least one record");
@@ -290,6 +289,8 @@ async fn compile_chunk_sources(
         &object_path,
         preprocessed_language,
     )?;
+
+    let task_period = log_task(&CompileChunkTaskInfo { sources: &sources }, state);
 
     let mut child = tokio::process::Command::new(first_record.binary.to_standard_binary_name())
         .args(build_args)
