@@ -20,6 +20,47 @@ use crate::{
     task_periods::TaskPeriodInfo,
 };
 
+pub async fn wrap_final_link(
+    binary: WrappedBinary,
+    original_args: &[impl AsRef<OsStr>],
+    cwd: &Path,
+    state: &Arc<State>,
+    config: &Arc<Config>,
+) -> Result<CommandOutput> {
+    let args_info = gcc_args::LinkFileInfo::from_args(cwd, original_args)?;
+    let link_sources = find_link_sources(&args_info, state)?;
+    let chunks = known_object_files_to_chunks(&link_sources.known_object_files, state)?;
+
+    let handles = FuturesUnordered::new();
+    for chunk in chunks {
+        let state = state.clone();
+        let config = config.clone();
+        let handle = tokio::task::spawn(async move {
+            compile_chunk_in_chunks(&chunk.records, &state, &config).await
+        });
+        handles.push(handle);
+    }
+    let mut objects = Vec::new();
+    for handle in handles {
+        objects.extend(handle.await??);
+    }
+
+    let archive_path = create_thin_archive_for_objects(&objects, state).await?;
+
+    let mut all_link_sources = vec![archive_path];
+    all_link_sources.extend(link_sources.unknown_sources.into_iter());
+
+    final_link(
+        binary,
+        original_args,
+        &args_info,
+        cwd,
+        state,
+        &all_link_sources,
+    )
+    .await
+}
+
 #[derive(Debug, Default)]
 struct OriginalLinkSources {
     // These are link sources that were not compiled here, so they were probably
@@ -542,45 +583,4 @@ pub async fn final_link(
     }
     task_period.finished_successfully();
     Ok(CommandOutput::from_process_output(child_output))
-}
-
-pub async fn wrap_final_link(
-    binary: WrappedBinary,
-    original_args: &[impl AsRef<OsStr>],
-    cwd: &Path,
-    state: &Arc<State>,
-    config: &Arc<Config>,
-) -> Result<CommandOutput> {
-    let args_info = gcc_args::LinkFileInfo::from_args(cwd, original_args)?;
-    let link_sources = find_link_sources(&args_info, state)?;
-    let chunks = known_object_files_to_chunks(&link_sources.known_object_files, state)?;
-
-    let handles = FuturesUnordered::new();
-    for chunk in chunks {
-        let state = state.clone();
-        let config = config.clone();
-        let handle = tokio::task::spawn(async move {
-            compile_chunk_in_chunks(&chunk.records, &state, &config).await
-        });
-        handles.push(handle);
-    }
-    let mut objects = Vec::new();
-    for handle in handles {
-        objects.extend(handle.await??);
-    }
-
-    let archive_path = create_thin_archive_for_objects(&objects, state).await?;
-
-    let mut all_link_sources = vec![archive_path];
-    all_link_sources.extend(link_sources.unknown_sources.into_iter());
-
-    final_link(
-        binary,
-        original_args,
-        &args_info,
-        cwd,
-        state,
-        &all_link_sources,
-    )
-    .await
 }
