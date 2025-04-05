@@ -29,14 +29,15 @@ pub async fn wrap_final_link(
 ) -> Result<CommandOutput> {
     let args_info = args_processing::LinkFileInfo::from_args(binary, cwd, original_args)?;
     let link_sources = find_link_sources(&args_info, state)?;
-    let chunks = group_compatible_objects(&link_sources.known_object_files, state)?;
+    let compatible_objects_groups =
+        group_compatible_objects(&link_sources.known_object_files, state)?;
 
     let handles = FuturesUnordered::new();
-    for chunk in chunks {
+    for compatible_objects in compatible_objects_groups {
         let state = state.clone();
         let config = config.clone();
         let handle = tokio::task::spawn(async move {
-            compile_chunk_in_chunks(&chunk.objects, &state, &config).await
+            compile_compatible_objects_in_chunks(&compatible_objects.objects, &state, &config).await
         });
         handles.push(handle);
     }
@@ -62,61 +63,33 @@ pub async fn wrap_final_link(
 }
 
 #[async_recursion::async_recursion]
-async fn compile_chunk_in_chunks(
-    records: &[ObjectData],
+async fn compile_compatible_objects_in_chunks(
+    compatible_objects: &[ObjectData],
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<Vec<PathBuf>> {
-    if records.is_empty() {
+    if compatible_objects.is_empty() {
         return Ok(vec![]);
     }
-    if records.len() <= 10 {
-        let result = compile_chunk_sources_in_pool(state, records, config).await;
+    if compatible_objects.len() <= 10 {
+        let result = compile_compatible_objects_in_pool(state, compatible_objects, config).await;
         match result {
             Ok(object) => {
                 return Ok(vec![object]);
             }
             Err(e) => {
-                if records.len() == 1 {
+                if compatible_objects.len() == 1 {
                     return Err(e);
                 }
             }
         }
     }
-    let (left, right) = records.split_at(records.len() / 2);
+    let (left, right) = compatible_objects.split_at(compatible_objects.len() / 2);
     let (left, right) = tokio::try_join!(
-        compile_chunk_in_chunks(left, state, config),
-        compile_chunk_in_chunks(right, state, config)
+        compile_compatible_objects_in_chunks(left, state, config),
+        compile_compatible_objects_in_chunks(right, state, config)
     )?;
     Ok(left.into_iter().chain(right).collect())
-}
-
-struct CompileChunkTaskInfo {
-    sources: Vec<PathBuf>,
-}
-
-impl TaskPeriodInfo for CompileChunkTaskInfo {
-    fn category(&self) -> String {
-        "Compile".to_string()
-    }
-
-    fn terminal_one_liner(&self) -> String {
-        self.sources
-            .iter()
-            .map(|p| shorten_path(p))
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
-
-    fn log_detailed(&self) {
-        let mut msg = "Compile chunk: ".to_string();
-        for source in &self.sources {
-            msg.push_str("  ");
-            msg.push_str(&shorten_path(source));
-            msg.push('\n');
-        }
-        log::info!("{}", msg);
-    }
 }
 
 async fn compile_chunk_sources(
@@ -186,7 +159,7 @@ async fn compile_chunk_sources(
     Ok(object_path)
 }
 
-async fn compile_chunk_sources_in_pool(
+async fn compile_compatible_objects_in_pool(
     state: &Arc<State>,
     records: &[ObjectData],
     config: &Arc<Config>,
@@ -200,24 +173,6 @@ async fn compile_chunk_sources_in_pool(
             compile_chunk_sources(&state_clone, &records, &config).await
         })
         .await?
-}
-
-struct GetPreprocessedHeadersTaskInfo {
-    headers_num: usize,
-}
-
-impl TaskPeriodInfo for GetPreprocessedHeadersTaskInfo {
-    fn category(&self) -> String {
-        "Headers".to_string()
-    }
-
-    fn terminal_one_liner(&self) -> String {
-        format!("Amount: {}", self.headers_num)
-    }
-
-    fn log_detailed(&self) {
-        log::info!("Get preprocessed headers: {}", self.headers_num);
-    }
 }
 
 async fn get_compile_chunk_preprocessed_headers(
@@ -307,22 +262,6 @@ fn get_compile_chunk_header_code(
     Ok(headers_code)
 }
 
-struct CreateThinArchiveTaskInfo {}
-
-impl TaskPeriodInfo for CreateThinArchiveTaskInfo {
-    fn category(&self) -> String {
-        "Archive".to_string()
-    }
-
-    fn terminal_one_liner(&self) -> String {
-        "Create thin archive".to_string()
-    }
-
-    fn log_detailed(&self) {
-        log::info!("Create thin archive");
-    }
-}
-
 pub async fn create_thin_archive_for_objects(
     objects: &[PathBuf],
     state: &Arc<State>,
@@ -350,24 +289,6 @@ pub async fn create_thin_archive_for_objects(
 
     task_period.finished_successfully();
     Ok(archive_path)
-}
-
-struct FinalLinkTaskInfo {
-    output: PathBuf,
-}
-
-impl TaskPeriodInfo for FinalLinkTaskInfo {
-    fn category(&self) -> String {
-        "Link".to_string()
-    }
-
-    fn terminal_one_liner(&self) -> String {
-        shorten_path(&self.output)
-    }
-
-    fn log_detailed(&self) {
-        log::info!("Final link for {}", self.output.to_string_lossy());
-    }
 }
 
 pub async fn final_link(
@@ -406,4 +327,84 @@ pub async fn final_link(
     }
     task_period.finished_successfully();
     Ok(CommandOutput::from_process_output(child_output))
+}
+
+struct CompileChunkTaskInfo {
+    sources: Vec<PathBuf>,
+}
+
+impl TaskPeriodInfo for CompileChunkTaskInfo {
+    fn category(&self) -> String {
+        "Compile".to_string()
+    }
+
+    fn terminal_one_liner(&self) -> String {
+        self.sources
+            .iter()
+            .map(|p| shorten_path(p))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn log_detailed(&self) {
+        let mut msg = "Compile chunk: ".to_string();
+        for source in &self.sources {
+            msg.push_str("  ");
+            msg.push_str(&shorten_path(source));
+            msg.push('\n');
+        }
+        log::info!("{}", msg);
+    }
+}
+
+struct FinalLinkTaskInfo {
+    output: PathBuf,
+}
+
+impl TaskPeriodInfo for FinalLinkTaskInfo {
+    fn category(&self) -> String {
+        "Link".to_string()
+    }
+
+    fn terminal_one_liner(&self) -> String {
+        shorten_path(&self.output)
+    }
+
+    fn log_detailed(&self) {
+        log::info!("Final link for {}", self.output.to_string_lossy());
+    }
+}
+
+struct CreateThinArchiveTaskInfo {}
+
+impl TaskPeriodInfo for CreateThinArchiveTaskInfo {
+    fn category(&self) -> String {
+        "Archive".to_string()
+    }
+
+    fn terminal_one_liner(&self) -> String {
+        "Create thin archive".to_string()
+    }
+
+    fn log_detailed(&self) {
+        log::info!("Create thin archive");
+    }
+}
+
+struct GetPreprocessedHeadersTaskInfo {
+    headers_num: usize,
+}
+
+impl TaskPeriodInfo for GetPreprocessedHeadersTaskInfo {
+    fn category(&self) -> String {
+        "Headers".to_string()
+    }
+
+    fn terminal_one_liner(&self) -> String {
+        format!("Amount: {}", self.headers_num)
+    }
+
+    fn log_detailed(&self) {
+        log::info!("Get preprocessed headers: {}", self.headers_num);
+    }
 }
