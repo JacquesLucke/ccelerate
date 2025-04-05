@@ -10,25 +10,6 @@ use ccelerate_shared::WrappedBinary;
 
 use crate::{CommandOutput, State, task_periods::TaskPeriodInfo};
 
-struct EagerGccTaskInfo {
-    binary: WrappedBinary,
-    args: Vec<OsString>,
-}
-
-impl TaskPeriodInfo for EagerGccTaskInfo {
-    fn category(&self) -> String {
-        "Eager".to_string()
-    }
-
-    fn terminal_one_liner(&self) -> String {
-        format!("{} {:?}", self.binary, self.args)
-    }
-
-    fn log_detailed(&self) {
-        log::info!("{} {:?}", self.binary, self.args);
-    }
-}
-
 pub async fn wrap_eager(
     binary: WrappedBinary,
     args: &[impl AsRef<OsStr>],
@@ -49,4 +30,23 @@ pub async fn wrap_eager(
     let child_result = child.wait_with_output().await?;
     task_period.finished_successfully();
     Ok(CommandOutput::from_process_output(child_result))
+}
+
+struct EagerGccTaskInfo {
+    binary: WrappedBinary,
+    args: Vec<OsString>,
+}
+
+impl TaskPeriodInfo for EagerGccTaskInfo {
+    fn category(&self) -> String {
+        "Eager".to_string()
+    }
+
+    fn terminal_one_liner(&self) -> String {
+        format!("{} {:?}", self.binary, self.args)
+    }
+
+    fn log_detailed(&self) {
+        log::info!("{} {:?}", self.binary, self.args);
+    }
 }
