@@ -8,6 +8,8 @@ use anyhow::Result;
 use anyhow::anyhow;
 use bstr::{BStr, BString, ByteSlice};
 
+use crate::path_utils;
+
 pub enum DirectivesUpdate {
     Unchanged,
     Changed,
@@ -60,8 +62,7 @@ pub async fn update_directives_file(
             return Ok(DirectivesUpdate::Unchanged);
         }
     }
-    tokio::fs::create_dir_all(derived_path.parent().expect("should be valid")).await?;
-    tokio::fs::write(&derived_path, updated_derived_code).await?;
+    path_utils::ensure_directory_and_write(&derived_path, &updated_derived_code).await?;
     Ok(DirectivesUpdate::Changed)
 }
 

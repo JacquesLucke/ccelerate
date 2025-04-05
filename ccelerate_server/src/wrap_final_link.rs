@@ -13,10 +13,17 @@ use nunny::NonEmpty;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    CommandOutput, ar_args, args_processing, code_language::CodeLanguage, config::Config, gcc_args,
-    group_compatible_objects::group_compatible_objects, link_sources::find_link_sources,
-    path_utils::shorten_path, preprocess_headers::get_preprocessed_headers,
-    source_file::SourceFile, state::State, state_persistent::ObjectData,
+    CommandOutput, ar_args, args_processing,
+    code_language::CodeLanguage,
+    config::Config,
+    gcc_args,
+    group_compatible_objects::group_compatible_objects,
+    link_sources::find_link_sources,
+    path_utils::{self, shorten_path},
+    preprocess_headers::get_preprocessed_headers,
+    source_file::SourceFile,
+    state::State,
+    state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
 };
 
@@ -118,9 +125,12 @@ async fn compile_compatible_objects(
     let any_object = objects.first();
 
     let object_name = format!("{}.o", uuid::Uuid::new_v4());
-    let object_dir = state.data_dir.join("objects").join(&object_name[..2]);
-    let object_path = object_dir.join(object_name);
-    tokio::fs::create_dir_all(&object_dir).await?;
+    let object_path = state
+        .data_dir
+        .join("objects")
+        .join(&object_name[..2])
+        .join(object_name);
+    path_utils::ensure_directory_for_file(&object_path).await?;
 
     // let objects = NonEmpty::<[ObjectData]>::new(objects).ok_or_else(|| anyhow::anyhow!("empty"))?;
     let preprocessed_headers = get_preprocessed_headers(objects, state, config).await?;
@@ -170,9 +180,12 @@ pub async fn create_thin_archive_for_objects(
     let task_period = state.task_periods.start(CreateThinArchiveTaskInfo {});
 
     let archive_name = format!("{}.a", uuid::Uuid::new_v4());
-    let archive_dir = state.data_dir.join("archives").join(&archive_name[..2]);
-    let archive_path = archive_dir.join(archive_name);
-    tokio::fs::create_dir_all(&archive_dir).await?;
+    let archive_path = state
+        .data_dir
+        .join("archives")
+        .join(&archive_name[..2])
+        .join(archive_name);
+    path_utils::ensure_directory_for_file(&archive_path).await?;
 
     let child = tokio::process::Command::new(WrappedBinary::Ar.to_standard_binary_name())
         .args(ar_args::make_args_to_build_thin_static_archive(

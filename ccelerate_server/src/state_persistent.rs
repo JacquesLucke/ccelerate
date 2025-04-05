@@ -9,15 +9,15 @@ use bstr::{BStr, BString};
 use ccelerate_shared::WrappedBinary;
 use parking_lot::Mutex;
 
+use crate::path_utils;
+
 pub struct PersistentState {
     pub conn: Arc<Mutex<rusqlite::Connection>>,
 }
 
 impl PersistentState {
-    pub fn new(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+    pub async fn new(path: &Path) -> Result<Self> {
+        path_utils::ensure_directory_for_file(path).await?;
         let db_migrations = rusqlite_migration::Migrations::new(vec![rusqlite_migration::M::up(
             "
             CREATE TABLE ObjectFiles(

@@ -10,8 +10,11 @@ use std::{
 };
 
 use crate::{
-    CommandOutput, State, args_processing, config::Config, local_code::LocalCode,
-    path_utils::shorten_path, task_periods::TaskPeriodInfo,
+    CommandOutput, State, args_processing,
+    config::Config,
+    local_code::LocalCode,
+    path_utils::{self, shorten_path},
+    task_periods::TaskPeriodInfo,
 };
 
 pub async fn wrap_compile_object_file(
@@ -128,14 +131,12 @@ async fn write_local_code_file(
         args_info.source_language.to_preprocessed()?.to_valid_ext()
     );
 
-    let preprocess_file_dir = state
+    let preprocess_file_path = state
         .data_dir
         .join("preprocessed")
-        .join(&local_code_hash_str[..2]);
-    let preprocess_file_path = preprocess_file_dir.join(local_code_file_name);
-    tokio::fs::create_dir_all(preprocess_file_dir).await?;
-
-    tokio::fs::write(&preprocess_file_path, &local_code.local_code).await?;
+        .join(&local_code_hash_str[..2])
+        .join(local_code_file_name);
+    path_utils::ensure_directory_and_write(&preprocess_file_path, &local_code.local_code).await?;
     Ok(preprocess_file_path)
 }
 
