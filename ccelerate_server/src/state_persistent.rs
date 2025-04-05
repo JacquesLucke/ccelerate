@@ -47,12 +47,12 @@ impl PersistentState {
         object_path: &Path,
         binary: WrappedBinary,
         cwd: &Path,
-        args: &[impl AsRef<OsStr>],
+        args: impl IntoIterator<Item = impl AsRef<OsStr>>,
     ) -> Result<()> {
         let data = CompileObjectRecord {
             binary,
             cwd: cwd.to_path_buf(),
-            args: args.iter().map(|s| s.as_ref().to_owned()).collect(),
+            args: args.into_iter().map(|s| s.as_ref().to_owned()).collect(),
         };
         self.conn.lock().execute(
             "INSERT OR REPLACE INTO ObjectFiles (path, build, build_debug, local_code, local_code_debug) VALUES (?1, ?2, ?3, NULL, NULL)",
@@ -69,22 +69,22 @@ impl PersistentState {
         &self,
         object_path: &Path,
         local_code_file: &Path,
-        global_includes: &[impl AsRef<Path>],
-        include_defines: &[impl AsRef<BStr>],
-        bad_includes: &[impl AsRef<Path>],
+        global_includes: impl IntoIterator<Item = impl AsRef<Path>>,
+        include_defines: impl IntoIterator<Item = impl AsRef<BStr>>,
+        bad_includes: impl IntoIterator<Item = impl AsRef<Path>>,
     ) -> Result<()> {
         let data = ObjectLocalCodeRecord {
             local_code_file: local_code_file.to_path_buf(),
             global_includes: global_includes
-                .iter()
+                .into_iter()
                 .map(|s| s.as_ref().to_path_buf())
                 .collect(),
             include_defines: include_defines
-                .iter()
+                .into_iter()
                 .map(|s| s.as_ref().to_owned())
                 .collect(),
             bad_includes: bad_includes
-                .iter()
+                .into_iter()
                 .map(|s| s.as_ref().to_path_buf())
                 .collect(),
         };
@@ -104,12 +104,12 @@ impl PersistentState {
         archive_path: &Path,
         binary: WrappedBinary,
         cwd: &Path,
-        args: &[impl AsRef<OsStr>],
+        args: impl IntoIterator<Item = impl AsRef<OsStr>>,
     ) -> Result<()> {
         let data = CreateArchiveRecord {
             binary,
             cwd: cwd.to_path_buf(),
-            args: args.iter().map(|s| s.as_ref().to_owned()).collect(),
+            args: args.into_iter().map(|s| s.as_ref().to_owned()).collect(),
         };
         self.conn.lock().execute(
             "INSERT OR REPLACE INTO ArchiveFiles (path, build, build_debug) VALUES (?1, ?2, ?3)",
