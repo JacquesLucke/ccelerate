@@ -7,6 +7,7 @@ use std::{
 use anyhow::Result;
 use bstr::{BStr, BString};
 use ccelerate_shared::WrappedBinary;
+use chrono::Utc;
 use parking_lot::Mutex;
 
 use crate::path_utils;
@@ -25,7 +26,8 @@ impl PersistentState {
                 build TEXT NOT NULL,
                 build_debug TEXT NOT NULL,
                 local_code TEXT,
-                local_code_debug TEXT
+                local_code_debug TEXT,
+                last_build TEXT NOT NULL
             );
             CREATE TABLE ArchiveFiles(
                 path TEXT NOT NULL PRIMARY KEY,
@@ -55,11 +57,12 @@ impl PersistentState {
             args: args.into_iter().map(|s| s.as_ref().to_owned()).collect(),
         };
         self.conn.lock().execute(
-            "INSERT OR REPLACE INTO ObjectFiles (path, build, build_debug, local_code, local_code_debug) VALUES (?1, ?2, ?3, NULL, NULL)",
+            "INSERT OR REPLACE INTO ObjectFiles (path, build, build_debug, local_code, local_code_debug, last_build) VALUES (?1, ?2, ?3, NULL, NULL, ?4)",
             rusqlite::params![
                 object_path.to_string_lossy(),
                 serde_json::to_string(&data.to_raw())?,
                 serde_json::to_string_pretty(&data.to_debug())?,
+                Utc::now().to_rfc3339(),
             ],
         )?;
         Ok(())
