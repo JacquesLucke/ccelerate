@@ -35,24 +35,9 @@ pub async fn wrap_final_link(
 ) -> Result<CommandOutput> {
     let args_info = args_processing::LinkFileInfo::from_args(binary, cwd, original_args)?;
     let link_sources = find_link_sources(&args_info, state)?;
-    let compatible_objects_groups =
-        group_compatible_objects(&link_sources.known_object_files, state)?;
-
-    let handles = FuturesUnordered::new();
-    for compatible_objects in compatible_objects_groups {
-        let state = state.clone();
-        let config = config.clone();
-        let handle = tokio::task::spawn(async move {
-            compile_compatible_objects_in_chunks(&compatible_objects.objects, &state, &config).await
-        });
-        handles.push(handle);
-    }
-    let mut objects = Vec::new();
-    for handle in handles {
-        objects.extend(handle.await??);
-    }
-
-    let archive_path = create_thin_archive_for_objects(&objects, state).await?;
+    let object_paths =
+        compile_objects_smart(&link_sources.known_object_files, state, config).await?;
+    let archive_path = create_thin_archive_for_objects(&object_paths, state).await?;
 
     let mut all_link_sources = vec![archive_path];
     all_link_sources.extend(link_sources.unknown_sources.into_iter());
@@ -66,6 +51,28 @@ pub async fn wrap_final_link(
         &all_link_sources,
     )
     .await
+}
+
+async fn compile_objects_smart(
+    objects: &[Arc<ObjectData>],
+    state: &Arc<State>,
+    config: &Arc<Config>,
+) -> Result<Vec<PathBuf>> {
+    let compatible_objects_groups = group_compatible_objects(objects, state)?;
+    let handles = FuturesUnordered::new();
+    for compatible_objects in compatible_objects_groups {
+        let state = state.clone();
+        let config = config.clone();
+        let handle = tokio::task::spawn(async move {
+            compile_compatible_objects_in_chunks(&compatible_objects.objects, &state, &config).await
+        });
+        handles.push(handle);
+    }
+    let mut objects = Vec::new();
+    for handle in handles {
+        objects.extend(handle.await??);
+    }
+    Ok(objects)
 }
 
 #[async_recursion::async_recursion]
