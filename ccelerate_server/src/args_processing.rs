@@ -57,6 +57,26 @@ pub fn rewrite_to_get_preprocessed_headers(
     }
 }
 
+pub fn rewrite_to_link_sources(
+    binary: WrappedBinary,
+    args: &[impl AsRef<OsStr>],
+    new_sources: &[impl AsRef<Path>],
+) -> Result<Vec<OsString>> {
+    match binary {
+        binary if binary.is_gcc_compatible() => gcc_args::rewrite_to_link_sources(
+            args,
+            &new_sources
+                .iter()
+                .map(|s| SourceFile {
+                    path: s.as_ref().to_owned(),
+                    language_override: None,
+                })
+                .collect::<Vec<_>>(),
+        ),
+        _ => Err(anyhow!("Cannot rewrite args for binary: {:?}", binary)),
+    }
+}
+
 pub struct LinkFileInfo {
     pub sources: SmallVec<[SourceFile; 16]>,
     pub output: PathBuf,

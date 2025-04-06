@@ -20,7 +20,6 @@ use crate::{
     link_sources::find_link_sources,
     path_utils::{self, shorten_path},
     preprocess_headers::get_preprocessed_headers,
-    source_file::SourceFile,
     state::State,
     state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
@@ -217,7 +216,7 @@ pub async fn create_thin_archive_for_objects(
 
 pub async fn final_link(
     binary: WrappedBinary,
-    original_gcc_args: &[impl AsRef<OsStr>],
+    original_args: &[impl AsRef<OsStr>],
     args_info: &args_processing::LinkFileInfo,
     cwd: &Path,
     state: &Arc<State>,
@@ -227,27 +226,17 @@ pub async fn final_link(
         output: args_info.output.clone(),
     });
 
-    let new_sources: Vec<_> = sources
-        .iter()
-        .map(|p| SourceFile {
-            path: p.clone(),
-            language_override: None,
-        })
-        .collect();
-    let link_args = gcc_args::update_to_link_sources_as_group(original_gcc_args, &new_sources)?;
-
-    let child = tokio::process::Command::new(binary.to_standard_binary_name())
+    let link_args = args_processing::rewrite_to_link_sources(binary, original_args, sources)?;
+    let child_output = tokio::process::Command::new(binary.to_standard_binary_name())
         .args(link_args)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .current_dir(cwd)
-        .spawn()?;
-    let child_output = child.wait_with_output().await?;
+        .spawn()?
+        .wait_with_output()
+        .await?;
     if !child_output.status.success() {
-        return Err(anyhow::anyhow!(
-            "Linking failed: {}",
-            String::from_utf8_lossy(&child_output.stderr)
-        ));
+        return Err(CommandOutput::from_process_output(child_output).into());
     }
     task_period.finished_successfully();
     Ok(CommandOutput::from_process_output(child_output))

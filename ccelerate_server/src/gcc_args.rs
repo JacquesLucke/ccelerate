@@ -179,7 +179,7 @@ pub fn update_to_build_object_from_stdin(
     Ok(args.to_args_owned_vec())
 }
 
-pub fn update_to_link_sources_as_group(
+pub fn rewrite_to_link_sources(
     args: &[impl AsRef<OsStr>],
     sources: &[SourceFile],
 ) -> Result<Vec<OsString>> {
