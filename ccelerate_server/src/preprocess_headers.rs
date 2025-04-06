@@ -10,7 +10,7 @@ use crate::{
 };
 
 pub async fn get_preprocessed_headers(
-    objects: &NonEmpty<[ObjectData]>,
+    objects: &NonEmpty<[Arc<ObjectData>]>,
     state: &Arc<State>,
     config: &Config,
     output_path: &Path,
@@ -43,7 +43,7 @@ pub async fn get_preprocessed_headers(
 }
 
 fn get_include_code_for_objects(
-    objects: &NonEmpty<[ObjectData]>,
+    objects: &NonEmpty<[Arc<ObjectData>]>,
     config: &Config,
 ) -> Result<BString> {
     let mut comment_lines = vec!["Include code for the following files:".into()];

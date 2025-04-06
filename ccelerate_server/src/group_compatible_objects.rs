@@ -9,11 +9,11 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct CompatibleObjects {
-    pub objects: nunny::Vec<ObjectData>,
+    pub objects: nunny::Vec<Arc<ObjectData>>,
 }
 
 pub fn group_compatible_objects(
-    objects: &[ObjectData],
+    objects: &[Arc<ObjectData>],
     state: &Arc<State>,
 ) -> Result<Vec<CompatibleObjects>> {
     let task_period = state

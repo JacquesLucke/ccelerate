@@ -70,7 +70,7 @@ pub async fn wrap_final_link(
 
 #[async_recursion::async_recursion]
 async fn compile_compatible_objects_in_chunks(
-    compatible_objects: &NonEmpty<[ObjectData]>,
+    compatible_objects: &NonEmpty<[Arc<ObjectData>]>,
     state: &Arc<State>,
     config: &Arc<Config>,
 ) -> Result<Vec<PathBuf>> {
@@ -102,7 +102,7 @@ async fn compile_compatible_objects_in_chunks(
 
 async fn compile_compatible_objects_in_pool(
     state: &Arc<State>,
-    objects: &NonEmpty<[ObjectData]>,
+    objects: &NonEmpty<[Arc<ObjectData>]>,
     config: &Arc<Config>,
 ) -> Result<PathBuf> {
     let state_clone = state.clone();
@@ -118,7 +118,7 @@ async fn compile_compatible_objects_in_pool(
 
 async fn compile_compatible_objects(
     state: &Arc<State>,
-    objects: &NonEmpty<[ObjectData]>,
+    objects: &NonEmpty<[Arc<ObjectData>]>,
     config: &Config,
 ) -> Result<PathBuf> {
     let any_object = objects.first();

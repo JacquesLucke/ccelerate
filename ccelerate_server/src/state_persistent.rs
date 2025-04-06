@@ -122,7 +122,7 @@ impl PersistentState {
         Ok(())
     }
 
-    pub fn get_object_file(&self, path: &Path) -> Option<ObjectData> {
+    pub fn get_object_file(&self, path: &Path) -> Option<Arc<ObjectData>> {
         self.conn
             .lock()
             .query_row(
@@ -138,10 +138,10 @@ impl PersistentState {
                     )
                     .map_err(|_| rusqlite::Error::InvalidQuery)
                     .map(|c| ObjectLocalCodeRecord::from_raw(&c))?;
-                    Ok(ObjectData {
+                    Ok(Arc::new(ObjectData {
                         create: CompileObjectRecord::from_raw(&build),
                         local_code,
-                    })
+                    }))
                 },
             )
             .ok()

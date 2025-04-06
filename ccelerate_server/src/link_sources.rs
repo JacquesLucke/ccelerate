@@ -18,7 +18,7 @@ pub struct OriginalLinkSources {
     pub unknown_sources: Vec<PathBuf>,
     // Those object files are compiled from source here, so we know how they are
     // compiled exactly and can optimize that process.
-    pub known_object_files: Vec<ObjectData>,
+    pub known_object_files: Vec<Arc<ObjectData>>,
 
     handled_paths: HashSet<PathBuf>,
 }
