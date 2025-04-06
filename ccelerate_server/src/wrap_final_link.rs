@@ -41,6 +41,8 @@ pub async fn wrap_final_link(
     let mut all_link_sources = vec![archive_path];
     all_link_sources.extend(link_sources.unknown_sources.into_iter());
 
+    state.persistent.store_objects_cache(&state.objects_cache)?;
+
     final_link(
         binary,
         original_args,

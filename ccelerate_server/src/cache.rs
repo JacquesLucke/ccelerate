@@ -51,4 +51,24 @@ impl<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + 'static> Cache<Key,
             }
         }
     }
+
+    pub fn get_entries(&self) -> Vec<CacheEntry<Key, Value>> {
+        self.map
+            .lock()
+            .iter()
+            .filter_map(|(key, value)| {
+                let value = value.value.borrow();
+                (*value).clone().map(|value| CacheEntry {
+                    key: key.clone(),
+                    value: value.clone(),
+                })
+            })
+            .collect::<Vec<_>>()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CacheEntry<Key, Value> {
+    pub key: Key,
+    pub value: Arc<Value>,
 }

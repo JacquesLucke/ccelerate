@@ -23,7 +23,7 @@ pub struct State {
     pub objects_cache: Cache<Vec<PathWithTime>, Result<PathBuf>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct PathWithTime {
     pub path: PathBuf,
     pub time: chrono::DateTime<chrono::FixedOffset>,

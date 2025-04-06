@@ -10,7 +10,7 @@ use ccelerate_shared::WrappedBinary;
 use chrono::Utc;
 use parking_lot::Mutex;
 
-use crate::path_utils;
+use crate::{cache::Cache, path_utils, state::PathWithTime};
 
 pub struct PersistentState {
     pub conn: Arc<Mutex<rusqlite::Connection>>,
@@ -33,6 +33,9 @@ impl PersistentState {
                 path TEXT NOT NULL PRIMARY KEY,
                 build TEXT NOT NULL,
                 build_debug TEXT NOT NULL
+            );
+            CREATE TABLE ObjectsCache(
+                entry TEXT NOT NULL
             );
             ",
         )]);
@@ -170,6 +173,57 @@ impl PersistentState {
             )
             .ok()
     }
+
+    fn store_flat_table(
+        &self,
+        table_name: &str,
+        entries: impl IntoIterator<Item = impl serde::Serialize>,
+    ) -> Result<()> {
+        let entries = entries
+            .into_iter()
+            .map(|entry| serde_json::to_string(&entry))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut conn = self.conn.lock();
+        let transaction = conn.transaction()?;
+        transaction.execute(&format!("DELETE FROM {}", table_name), [])?;
+        {
+            let mut statement =
+                transaction.prepare(&format!("INSERT INTO {} (entry) VALUES (?1)", table_name))?;
+            for entry in entries {
+                statement.execute(rusqlite::params![entry])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn store_objects_cache(
+        &self,
+        objects_cache: &Cache<Vec<PathWithTime>, Result<PathBuf>>,
+    ) -> Result<()> {
+        let entries = objects_cache.get_entries();
+        let entries = entries.iter().map(|entry| match entry.value.as_ref() {
+            Ok(value) => ObjectCacheEntry {
+                key: entry.key.clone(),
+                value: Some(value.to_path_buf()),
+                error_message: None,
+            },
+            Err(e) => ObjectCacheEntry {
+                key: entry.key.clone(),
+                value: None,
+                error_message: Some(e.to_string()),
+            },
+        });
+        self.store_flat_table("ObjectsCache", entries)
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ObjectCacheEntry {
+    key: Vec<PathWithTime>,
+    value: Option<PathBuf>,
+    error_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
