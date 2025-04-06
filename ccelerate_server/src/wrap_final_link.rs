@@ -20,7 +20,7 @@ use crate::{
     link_sources::find_link_sources,
     path_utils::{self, shorten_path},
     preprocess_headers::get_preprocessed_headers,
-    state::State,
+    state::{PathWithTime, State},
     state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
 };
@@ -84,14 +84,27 @@ async fn compile_compatible_objects_in_chunks(
         return Ok(vec![]);
     }
     if compatible_objects.len() <= 10 {
-        let result = compile_compatible_objects_in_pool(state, compatible_objects, config).await;
-        match result {
-            Ok(object) => {
-                return Ok(vec![object]);
+        let key = compatible_objects
+            .iter()
+            .map(|o| PathWithTime {
+                path: o.path.clone(),
+                time: o.last_build,
+            })
+            .collect::<Vec<_>>();
+        let result = state
+            .objects_cache
+            .get(&key, async || {
+                compile_compatible_objects_in_pool(state, compatible_objects, config).await
+            })
+            .await?;
+        match result.as_ref() {
+            Ok(object_path) => {
+                let object_path = object_path.clone();
+                return Ok(vec![object_path]);
             }
             Err(e) => {
                 if compatible_objects.len() == 1 {
-                    return Err(e);
+                    return Err(anyhow::anyhow!("{}", e));
                 }
             }
         }

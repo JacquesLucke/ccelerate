@@ -129,7 +129,7 @@ impl PersistentState {
         self.conn
             .lock()
             .query_row(
-                "SELECT build, local_code FROM ObjectFiles WHERE path = ?",
+                "SELECT build, local_code, last_build FROM ObjectFiles WHERE path = ?",
                 rusqlite::params!(path.to_string_lossy()),
                 |row| {
                     let build: String = row.get(0)?;
@@ -141,9 +141,14 @@ impl PersistentState {
                     )
                     .map_err(|_| rusqlite::Error::InvalidQuery)
                     .map(|c| ObjectLocalCodeRecord::from_raw(&c))?;
+                    let last_build: String = row.get(2)?;
+                    let last_build = chrono::DateTime::parse_from_rfc3339(&last_build)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
                     Ok(Arc::new(ObjectData {
+                        path: path.to_owned(),
                         create: CompileObjectRecord::from_raw(&build),
                         local_code,
+                        last_build,
                     }))
                 },
             )
@@ -169,8 +174,10 @@ impl PersistentState {
 
 #[derive(Debug, Clone)]
 pub struct ObjectData {
+    pub path: PathBuf,
     pub create: CompileObjectRecord,
     pub local_code: ObjectLocalCodeRecord,
+    pub last_build: chrono::DateTime<chrono::FixedOffset>,
 }
 
 #[derive(Debug, Clone)]

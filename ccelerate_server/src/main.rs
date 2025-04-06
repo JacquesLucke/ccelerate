@@ -9,6 +9,7 @@ use std::{
 
 use actix_web::{HttpResponse, web::Data};
 use anyhow::Result;
+use cache::Cache;
 use ccelerate_shared::{RunRequestData, RunRequestDataWire, RunResponseData, WrappedBinary};
 use config::ConfigManager;
 use os_str_bytes::OsStrBytesExt;
@@ -21,6 +22,7 @@ use task_periods::TaskPeriods;
 
 mod ar_args;
 mod args_processing;
+mod cache;
 mod code_language;
 mod config;
 mod export_trace;
@@ -282,6 +284,7 @@ async fn main() -> Result<()> {
         cli,
         data_dir,
         config_manager: ConfigManager::new(),
+        objects_cache: Cache::new(),
     });
 
     if state.cli.no_tui {
