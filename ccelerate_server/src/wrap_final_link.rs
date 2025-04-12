@@ -20,7 +20,7 @@ use crate::{
     link_sources::find_link_sources,
     path_utils::{self, shorten_path},
     preprocess_headers::get_preprocessed_headers,
-    state::{PathWithTime, State},
+    state::State,
     state_persistent::ObjectData,
     task_periods::TaskPeriodInfo,
 };
@@ -40,8 +40,6 @@ pub async fn wrap_final_link(
 
     let mut all_link_sources = vec![archive_path];
     all_link_sources.extend(link_sources.unknown_sources.into_iter());
-
-    state.persistent.store_objects_cache(&state.objects_cache)?;
 
     final_link(
         binary,
@@ -88,19 +86,19 @@ async fn compile_compatible_objects_in_chunks(
     if compatible_objects.len() <= 10 {
         let key = compatible_objects
             .iter()
-            .map(|o| PathWithTime {
-                path: o.path.clone(),
-                time: o.last_build,
-            })
+            .map(|o| o.path.as_path())
             .collect::<Vec<_>>();
+        let latest_build = compatible_objects
+            .iter()
+            .map(|o| o.last_build)
+            .max()
+            .expect("never empty");
         let result = state
             .objects_cache
-            .get(&key, async || {
-                Arc::new(
-                    compile_compatible_objects_in_pool(state, compatible_objects, config).await,
-                )
+            .get(&key, latest_build, async || {
+                compile_compatible_objects_in_pool(state, compatible_objects, config).await
             })
-            .await?;
+            .await;
         match result.as_ref() {
             Ok(object_path) => {
                 let object_path = object_path.clone();

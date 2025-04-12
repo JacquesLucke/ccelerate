@@ -10,7 +10,7 @@ use ccelerate_shared::WrappedBinary;
 use chrono::Utc;
 use parking_lot::Mutex;
 
-use crate::{cache::Cache, path_utils, state::PathWithTime};
+use crate::path_utils;
 
 pub struct PersistentState {
     pub conn: Arc<Mutex<rusqlite::Connection>>,
@@ -33,9 +33,6 @@ impl PersistentState {
                 path TEXT NOT NULL PRIMARY KEY,
                 build TEXT NOT NULL,
                 build_debug TEXT NOT NULL
-            );
-            CREATE TABLE ObjectsCache(
-                entry TEXT NOT NULL
             );
             ",
         )]);
@@ -174,7 +171,7 @@ impl PersistentState {
             .ok()
     }
 
-    fn store_flat_table(
+    fn _store_flat_table(
         &self,
         table_name: &str,
         entries: impl IntoIterator<Item = impl serde::Serialize>,
@@ -197,33 +194,6 @@ impl PersistentState {
         transaction.commit()?;
         Ok(())
     }
-
-    pub fn store_objects_cache(
-        &self,
-        objects_cache: &Cache<Vec<PathWithTime>, Arc<Result<PathBuf>>>,
-    ) -> Result<()> {
-        let entries = objects_cache.get_entries();
-        let entries = entries.iter().map(|entry| match entry.value.as_ref() {
-            Ok(value) => ObjectCacheEntry {
-                key: entry.key.clone(),
-                value: Some(value.to_path_buf()),
-                error_message: None,
-            },
-            Err(e) => ObjectCacheEntry {
-                key: entry.key.clone(),
-                value: None,
-                error_message: Some(e.to_string()),
-            },
-        });
-        self.store_flat_table("ObjectsCache", entries)
-    }
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
-struct ObjectCacheEntry {
-    key: Vec<PathWithTime>,
-    value: Option<PathBuf>,
-    error_message: Option<String>,
 }
 
 #[derive(Debug, Clone)]
