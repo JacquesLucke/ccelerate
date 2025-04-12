@@ -3,22 +3,22 @@ use std::sync::Arc;
 use anyhow::Result;
 use parking_lot::Mutex;
 
-pub struct Cache<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + 'static> {
+pub struct Cache<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + Clone + 'static> {
     map: Mutex<std::collections::HashMap<Key, Arc<CacheValue<Value>>>>,
 }
 
 struct CacheValue<Value> {
-    value: tokio::sync::watch::Receiver<Option<Arc<Value>>>,
+    value: tokio::sync::watch::Receiver<Option<Value>>,
 }
 
-impl<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + 'static> Cache<Key, Value> {
+impl<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + Clone + 'static> Cache<Key, Value> {
     pub fn new() -> Self {
         Self {
             map: Mutex::new(std::collections::HashMap::new()),
         }
     }
 
-    pub async fn get<F, Fut>(&self, key: &Key, f: F) -> Result<Arc<Value>>
+    pub async fn get<F, Fut>(&self, key: &Key, f: F) -> Result<Value>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = Value>,
@@ -39,7 +39,6 @@ impl<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + 'static> Cache<Key,
             match sender {
                 Some(sender) => {
                     let value = f().await;
-                    let value = Arc::new(value);
                     sender.send(Some(value.clone()))?;
                     Ok(value)
                 }
@@ -70,5 +69,5 @@ impl<Key: Eq + std::hash::Hash + Clone, Value: Send + Sync + 'static> Cache<Key,
 #[derive(Debug, Clone)]
 pub struct CacheEntry<Key, Value> {
     pub key: Key,
-    pub value: Arc<Value>,
+    pub value: Value,
 }

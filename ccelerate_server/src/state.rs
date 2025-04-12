@@ -20,7 +20,7 @@ pub struct State {
     pub cli: Cli,
     pub data_dir: PathBuf,
     pub config_manager: ConfigManager,
-    pub objects_cache: Cache<Vec<PathWithTime>, Result<PathBuf>>,
+    pub objects_cache: Cache<Vec<PathWithTime>, Arc<Result<PathBuf>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

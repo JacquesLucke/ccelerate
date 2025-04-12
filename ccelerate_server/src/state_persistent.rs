@@ -200,7 +200,7 @@ impl PersistentState {
 
     pub fn store_objects_cache(
         &self,
-        objects_cache: &Cache<Vec<PathWithTime>, Result<PathBuf>>,
+        objects_cache: &Cache<Vec<PathWithTime>, Arc<Result<PathBuf>>>,
     ) -> Result<()> {
         let entries = objects_cache.get_entries();
         let entries = entries.iter().map(|entry| match entry.value.as_ref() {

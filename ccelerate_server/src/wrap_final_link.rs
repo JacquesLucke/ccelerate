@@ -96,7 +96,9 @@ async fn compile_compatible_objects_in_chunks(
         let result = state
             .objects_cache
             .get(&key, async || {
-                compile_compatible_objects_in_pool(state, compatible_objects, config).await
+                Arc::new(
+                    compile_compatible_objects_in_pool(state, compatible_objects, config).await,
+                )
             })
             .await?;
         match result.as_ref() {
