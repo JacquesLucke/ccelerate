@@ -51,7 +51,7 @@ fn get_include_code_for_objects(
     let mut include_defines: Vec<&BStr> = vec![];
     for object in objects {
         comment_lines.push(object.local_code.local_code_file.to_string_lossy());
-        for include in &object.local_code.global_includes {
+        for include in &object.local_code.direct_includes {
             if ordered_unique_includes.contains(&include.as_path()) {
                 continue;
             }

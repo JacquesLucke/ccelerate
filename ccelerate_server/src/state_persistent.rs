@@ -72,12 +72,12 @@ impl PersistentState {
         &self,
         object_path: &Path,
         local_code_file: &Path,
-        global_includes: impl IntoIterator<Item = impl AsRef<Path>>,
+        direct_includes: impl IntoIterator<Item = impl AsRef<Path>>,
         include_defines: impl IntoIterator<Item = impl AsRef<BStr>>,
     ) -> Result<()> {
         let data = ObjectLocalCodeRecord {
             local_code_file: local_code_file.to_path_buf(),
-            global_includes: global_includes
+            direct_includes: direct_includes
                 .into_iter()
                 .map(|s| s.as_ref().to_path_buf())
                 .collect(),
@@ -251,19 +251,19 @@ impl CompileObjectRecord {
 #[derive(Debug, Clone)]
 pub struct ObjectLocalCodeRecord {
     pub local_code_file: PathBuf,
-    pub global_includes: Vec<PathBuf>,
+    pub direct_includes: Vec<PathBuf>,
     pub include_defines: Vec<BString>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ObjectLocalCodeRecordRaw {
     local_code_file: OsString,
-    global_includes: Vec<OsString>,
+    direct_includes: Vec<OsString>,
     include_defines: Vec<BString>,
 }
 #[derive(serde::Serialize)]
 struct ObjectLocalCodeRecordDebug {
     local_code_file: String,
-    global_includes: Vec<String>,
+    direct_includes: Vec<String>,
     include_defines: Vec<String>,
 }
 
@@ -271,8 +271,8 @@ impl ObjectLocalCodeRecord {
     fn from_raw(raw: &ObjectLocalCodeRecordRaw) -> Self {
         Self {
             local_code_file: raw.local_code_file.clone().into(),
-            global_includes: raw
-                .global_includes
+            direct_includes: raw
+                .direct_includes
                 .iter()
                 .map(|s| s.clone().into())
                 .collect(),
@@ -283,8 +283,8 @@ impl ObjectLocalCodeRecord {
     fn to_raw(&self) -> ObjectLocalCodeRecordRaw {
         ObjectLocalCodeRecordRaw {
             local_code_file: self.local_code_file.clone().into(),
-            global_includes: self
-                .global_includes
+            direct_includes: self
+                .direct_includes
                 .iter()
                 .map(|s| s.clone().into())
                 .collect(),
@@ -295,8 +295,8 @@ impl ObjectLocalCodeRecord {
     fn to_debug(&self) -> ObjectLocalCodeRecordDebug {
         ObjectLocalCodeRecordDebug {
             local_code_file: self.local_code_file.to_string_lossy().to_string(),
-            global_includes: self
-                .global_includes
+            direct_includes: self
+                .direct_includes
                 .iter()
                 .map(|s| s.to_string_lossy().to_string())
                 .collect(),

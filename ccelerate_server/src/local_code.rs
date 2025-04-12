@@ -14,10 +14,10 @@ use crate::{config::Config, path_utils::make_absolute};
 pub struct LocalCode {
     // Preprocessed code of the source file without any of the headers.
     pub local_code: BString,
-    // Global headers that are included in this file. Generally, all these headers
-    // should have include guards and their include order should not matter.
+    // Headers that are directly included by the local code of this file. Generally, all these headers
+    // should have include guards and ideally their include order does not matter.
     // This also includes standard library headers.
-    pub global_includes: Vec<PathBuf>,
+    pub direct_includes: Vec<PathBuf>,
     // Sometimes, implementation files define values that affect headers that are typically global.
     // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
     pub include_defines: Vec<BString>,
@@ -68,7 +68,7 @@ impl LocalCode {
                         if config.is_local_header(header_path) {
                             local_depth += 1;
                         } else {
-                            result.global_includes.push(header_path.to_owned());
+                            result.direct_includes.push(header_path.to_owned());
                         }
                     }
                     header_stack.push(header_path);
@@ -101,7 +101,7 @@ impl LocalCode {
         writeln!(result.local_code, "#pragma GCC diagnostic pop")?;
 
         result
-            .global_includes
+            .direct_includes
             .iter_mut()
             .for_each(|p| *p = make_absolute(source_dir, p));
 

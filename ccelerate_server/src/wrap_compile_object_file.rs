@@ -50,7 +50,7 @@ async fn wrap_compile_object_file_impl(
     state.persistent.update_object_file_local_code(
         &args_info.object_path,
         &local_code_path,
-        &local_code.global_includes,
+        &local_code.direct_includes,
         &local_code.include_defines,
     )?;
 
