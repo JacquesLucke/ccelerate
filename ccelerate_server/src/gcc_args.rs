@@ -9,7 +9,7 @@ use bstr::{BString, ByteVec};
 use os_str_bytes::OsStrBytesExt;
 use smallvec::{SmallVec, smallvec};
 
-use crate::args_processing::{BuildObjectFileInfo, LinkFileInfo};
+use crate::args_processing::{BuildObjectFileInfo, DepfileInfo, LinkFileInfo};
 use crate::{code_language::CodeLanguage, path_utils::make_absolute, source_file::SourceFile};
 
 impl BuildObjectFileInfo {
@@ -34,10 +34,25 @@ impl BuildObjectFileInfo {
             Some(language) => language,
             None => CodeLanguage::from_path(source.path)?,
         };
+        let depfile = if args.has_single_arg_str("-MD") {
+            let path = args
+                .get_depfile_path()
+                .ok_or_else(|| anyhow!("Failed to get path of depfile"))?;
+            let target = args
+                .get_depfile_target()
+                .ok_or_else(|| anyhow!("Failed to get target of depfile"))?;
+            Some(DepfileInfo {
+                _path: make_absolute(cwd, path),
+                _target: target.to_owned(),
+            })
+        } else {
+            None
+        };
         Ok(Self {
             source_path: make_absolute(cwd, source.path),
             source_language,
             object_path: make_absolute(cwd, Path::new(output)),
+            _depfile: depfile,
         })
     }
 }
@@ -324,6 +339,30 @@ impl<'a> GccArgsInfo<'a> {
             match arg {
                 GccArg::Dual(first, path) if *first == "-o" => {
                     return Some(Path::new(*path));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn get_depfile_path(&self) -> Option<&'a Path> {
+        for arg in &self.args {
+            match arg {
+                GccArg::Dual(first, second) if *first == "-MF" => {
+                    return Some(Path::new(*second));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
+    fn get_depfile_target(&self) -> Option<&'a OsStr> {
+        for arg in &self.args {
+            match arg {
+                GccArg::Dual(first, second) if *first == "-MT" => {
+                    return Some(second);
                 }
                 _ => {}
             }

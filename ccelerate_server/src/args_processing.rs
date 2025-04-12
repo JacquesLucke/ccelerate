@@ -11,10 +11,18 @@ use smallvec::SmallVec;
 
 use crate::{code_language::CodeLanguage, gcc_args, source_file::SourceFile};
 
+#[derive(Debug)]
 pub struct BuildObjectFileInfo {
     pub source_path: PathBuf,
     pub source_language: CodeLanguage,
     pub object_path: PathBuf,
+    pub _depfile: Option<DepfileInfo>,
+}
+
+#[derive(Debug)]
+pub struct DepfileInfo {
+    pub _path: PathBuf,
+    pub _target: OsString,
 }
 
 impl BuildObjectFileInfo {
