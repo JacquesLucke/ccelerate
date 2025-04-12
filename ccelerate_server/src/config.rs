@@ -25,7 +25,6 @@ pub struct Config {
     local_header_patterns: Vec<glob::Pattern>,
     include_defines: Vec<BString>,
     pure_c_header_patterns: Vec<glob::Pattern>,
-    bad_global_symbols_patterns: Vec<glob::Pattern>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -34,7 +33,6 @@ struct ConfigFile {
     local_header_patterns: Vec<String>,
     include_defines: Vec<String>,
     pure_c_header_patterns: Vec<String>,
-    bad_global_symbols_patterns: Vec<String>,
 }
 
 impl ConfigManager {
@@ -100,7 +98,6 @@ impl Config {
             local_header_patterns: Vec::new(),
             include_defines: Vec::new(),
             pure_c_header_patterns: Vec::new(),
-            bad_global_symbols_patterns: Vec::new(),
         }
     }
 
@@ -121,7 +118,6 @@ impl Config {
             add_patterns!(eager_patterns);
             add_patterns!(local_header_patterns);
             add_patterns!(pure_c_header_patterns);
-            add_patterns!(bad_global_symbols_patterns);
 
             config
                 .include_defines
@@ -145,12 +141,6 @@ impl Config {
 
     pub fn is_pure_c_header(&self, path: &Path) -> bool {
         self.pure_c_header_patterns
-            .iter()
-            .any(|pattern| pattern.matches_path(path))
-    }
-
-    pub fn has_bad_global_symbol(&self, path: &Path) -> bool {
-        self.bad_global_symbols_patterns
             .iter()
             .any(|pattern| pattern.matches_path(path))
     }

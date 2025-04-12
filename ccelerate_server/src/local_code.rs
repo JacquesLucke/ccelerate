@@ -1,7 +1,6 @@
 #![deny(clippy::unwrap_used)]
 
 use std::{
-    collections::HashSet,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -22,8 +21,6 @@ pub struct LocalCode {
     // Sometimes, implementation files define values that affect headers that are typically global.
     // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
     pub include_defines: Vec<BString>,
-    // Some headers are bad because they define symbols aliases that easily conflict with other code.
-    pub bad_includes: HashSet<PathBuf>,
 }
 
 impl LocalCode {
@@ -73,11 +70,6 @@ impl LocalCode {
                         } else {
                             result.global_includes.push(header_path.to_owned());
                         }
-                    }
-                    if !result.bad_includes.contains(header_path)
-                        && config.has_bad_global_symbol(header_path)
-                    {
-                        result.bad_includes.insert(header_path.to_owned());
                     }
                     header_stack.push(header_path);
                 } else if line_marker.is_return_to_file {

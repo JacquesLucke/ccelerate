@@ -52,7 +52,6 @@ async fn wrap_compile_object_file_impl(
         &local_code_path,
         &local_code.global_includes,
         &local_code.include_defines,
-        &local_code.bad_includes,
     )?;
 
     Ok(CommandOutput::new_ok())

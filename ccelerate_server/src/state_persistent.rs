@@ -74,7 +74,6 @@ impl PersistentState {
         local_code_file: &Path,
         global_includes: impl IntoIterator<Item = impl AsRef<Path>>,
         include_defines: impl IntoIterator<Item = impl AsRef<BStr>>,
-        bad_includes: impl IntoIterator<Item = impl AsRef<Path>>,
     ) -> Result<()> {
         let data = ObjectLocalCodeRecord {
             local_code_file: local_code_file.to_path_buf(),
@@ -85,10 +84,6 @@ impl PersistentState {
             include_defines: include_defines
                 .into_iter()
                 .map(|s| s.as_ref().to_owned())
-                .collect(),
-            bad_includes: bad_includes
-                .into_iter()
-                .map(|s| s.as_ref().to_path_buf())
                 .collect(),
         };
         self.conn.lock().execute(
@@ -258,21 +253,18 @@ pub struct ObjectLocalCodeRecord {
     pub local_code_file: PathBuf,
     pub global_includes: Vec<PathBuf>,
     pub include_defines: Vec<BString>,
-    pub bad_includes: Vec<PathBuf>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 struct ObjectLocalCodeRecordRaw {
     local_code_file: OsString,
     global_includes: Vec<OsString>,
     include_defines: Vec<BString>,
-    bad_includes: Vec<OsString>,
 }
 #[derive(serde::Serialize)]
 struct ObjectLocalCodeRecordDebug {
     local_code_file: String,
     global_includes: Vec<String>,
     include_defines: Vec<String>,
-    bad_includes: Vec<String>,
 }
 
 impl ObjectLocalCodeRecord {
@@ -285,7 +277,6 @@ impl ObjectLocalCodeRecord {
                 .map(|s| s.clone().into())
                 .collect(),
             include_defines: raw.include_defines.to_vec(),
-            bad_includes: raw.bad_includes.iter().map(|s| s.clone().into()).collect(),
         }
     }
 
@@ -298,7 +289,6 @@ impl ObjectLocalCodeRecord {
                 .map(|s| s.clone().into())
                 .collect(),
             include_defines: self.include_defines.to_vec(),
-            bad_includes: self.bad_includes.iter().map(|s| s.clone().into()).collect(),
         }
     }
 
@@ -311,11 +301,6 @@ impl ObjectLocalCodeRecord {
                 .map(|s| s.to_string_lossy().to_string())
                 .collect(),
             include_defines: self.include_defines.iter().map(|s| s.to_string()).collect(),
-            bad_includes: self
-                .bad_includes
-                .iter()
-                .map(|s| s.to_string_lossy().to_string())
-                .collect(),
         }
     }
 }

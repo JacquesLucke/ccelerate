@@ -53,9 +53,6 @@ fn create_object_compatibility_key(object: &ObjectData) -> Result<BString> {
     for include_define in &object.local_code.include_defines {
         key.push_str(include_define);
     }
-    for bad_include in &object.local_code.bad_includes {
-        key.push_str(bad_include.as_os_str().as_encoded_bytes());
-    }
     args_processing::add_object_compatibility_args_to_key(
         object.create.binary,
         &object.create.args,
