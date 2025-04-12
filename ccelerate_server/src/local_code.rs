@@ -1,6 +1,7 @@
 #![deny(clippy::unwrap_used)]
 
 use std::{
+    collections::HashSet,
     io::Write,
     path::{Path, PathBuf},
 };
@@ -18,6 +19,8 @@ pub struct LocalCode {
     // should have include guards and ideally their include order does not matter.
     // This also includes standard library headers.
     pub direct_includes: Vec<PathBuf>,
+    // All header files that are directly or indirectly included here.
+    pub all_includes: HashSet<PathBuf>,
     // Sometimes, implementation files define values that affect headers that are typically global.
     // E.g. `#define DNA_DEPRECATED_ALLOW` in Blender.
     pub include_defines: Vec<BString>,
@@ -36,6 +39,7 @@ impl LocalCode {
         };
 
         let mut result = LocalCode::default();
+        let mut all_includes = HashSet::new();
 
         writeln!(result.local_code, "#pragma GCC diagnostic push")?;
 
@@ -71,6 +75,7 @@ impl LocalCode {
                             result.direct_includes.push(header_path.to_owned());
                         }
                     }
+                    all_includes.insert(header_path);
                     header_stack.push(header_path);
                 } else if line_marker.is_return_to_file {
                     header_stack.pop();
@@ -104,6 +109,11 @@ impl LocalCode {
             .direct_includes
             .iter_mut()
             .for_each(|p| *p = make_absolute(source_dir, p));
+        result.all_includes = HashSet::from_iter(
+            all_includes
+                .into_iter()
+                .map(|p| make_absolute(source_dir, p)),
+        );
 
         Ok(result)
     }
