@@ -27,8 +27,8 @@ impl ObjectByInputsCache {
         build_object: F,
     ) -> Arc<Result<PathBuf>>
     where
-        F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<PathBuf>>,
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<PathBuf>> + Send + 'static,
     {
         self.cache
             .get(

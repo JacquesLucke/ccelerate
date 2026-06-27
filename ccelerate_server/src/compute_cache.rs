@@ -36,7 +36,7 @@ impl<
     pub async fn get<F, Fut>(&self, key: &Key, time: &KeyTime, f: F) -> Value
     where
         F: FnOnce() -> Fut,
-        Fut: Future<Output = Value>,
+        Fut: Future<Output = Value> + Send + 'static,
     {
         let (sender, cache_value) = {
             let mut map = self.map.lock();
@@ -68,17 +68,38 @@ impl<
         };
         match sender {
             Some(sender) => {
-                let value = f().await;
-                sender.send(Some(value.clone())).ok();
-                value
+                // Detach the computation into its own task so that it always runs to
+                // completion (and stores its result) even if this caller's future is
+                // dropped. Dropping the join handle does not abort the spawned task, so
+                // a cancelled caller can no longer leave waiters with a closed channel.
+                let future = f();
+                let handle = tokio::task::spawn(async move {
+                    let value = future.await;
+                    sender.send(Some(value.clone())).ok();
+                    value
+                });
+                match handle.await {
+                    Ok(value) => value,
+                    // The task is never aborted, so a join error means the computation
+                    // itself panicked. Re-raise that panic in this caller.
+                    Err(join_error) => std::panic::resume_unwind(join_error.into_panic()),
+                }
             }
             None => {
                 let mut receiver = cache_value.value.clone();
+                // Clone the value out (and drop the borrow guard) before any await, so
+                // the non-Send `Ref` is not held across the recompute below.
                 let value = receiver
                     .wait_for(|v| v.is_some())
                     .await
-                    .expect("the channel is never closed");
-                value.clone().expect("has to be available")
+                    .map(|value| value.clone().expect("has to be available"))
+                    .ok();
+                match value {
+                    Some(value) => value,
+                    // The producing task panicked and dropped the channel without
+                    // sending. Recompute here so this caller still makes progress.
+                    None => f().await,
+                }
             }
         }
     }

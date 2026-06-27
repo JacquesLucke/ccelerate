@@ -93,10 +93,21 @@ async fn compile_compatible_objects_in_chunks(
             .map(|o| o.last_build)
             .max()
             .expect("never empty");
+        // The cache runs the computation in a detached task, so the closure must own
+        // everything it needs (it may outlive this caller).
+        let state_for_build = state.clone();
+        let config_for_build = config.clone();
+        let objects_for_build =
+            nunny::Vec::new(compatible_objects.to_vec()).expect("never empty");
         let result = state
             .objects_cache
-            .get(&key, latest_build, async || {
-                compile_compatible_objects_in_pool(state, compatible_objects, config).await
+            .get(&key, latest_build, move || async move {
+                compile_compatible_objects_in_pool(
+                    &state_for_build,
+                    &objects_for_build,
+                    &config_for_build,
+                )
+                .await
             })
             .await;
         match result.as_ref() {

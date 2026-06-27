@@ -1,0 +1,18 @@
+eager_patterns = []
+local_header_patterns = [
+    "/**/list_sort_impl.h",
+    "/**/dna_includes_as_strings.h",
+    "/**/dna_rename_defs.h",
+    "/**/RNA_enum_items.hh",
+    "/**/UI_icons.hh",
+    "/**/radial_tiling_shared.hh",
+    "/**/PipeWireSymbols.h",
+    "/**/generic_alloc_impl.h",
+]
+include_defines = [
+    "GHASH_INTERNAL_API",
+    "DNA_DEPRECATED_ALLOW",
+    "DNA_NO_EXTERNAL_CONSTRUCTORS",
+    "USE_GPU_PY_MATRIX_API",
+]
+pure_c_header_patterns = []
