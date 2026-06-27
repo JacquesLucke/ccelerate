@@ -61,7 +61,7 @@ struct ArArgs<'a> {
     members: SmallVec<[&'a OsStr; 16]>,
 }
 
-fn parse_ar_args(args: &[impl AsRef<OsStr>]) -> Result<ArArgs> {
+fn parse_ar_args(args: &[impl AsRef<OsStr>]) -> Result<ArArgs<'_>> {
     let mut operation = None;
     let mut archive = None;
     let mut members = SmallVec::new();

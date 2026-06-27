@@ -53,12 +53,11 @@ impl LocalCode {
             let is_local = header_stack.len() == local_depth;
             let line = line.as_bstr();
             if line.starts_with(b"#define ") {
-                if is_local {
-                    if let Ok(macro_def) = MacroDefinition::parse(line) {
-                        if config.is_include_define(macro_def.name) {
-                            result.include_defines.push(line.to_owned());
-                        }
-                    }
+                if is_local
+                    && let Ok(macro_def) = MacroDefinition::parse(line)
+                    && config.is_include_define(macro_def.name)
+                {
+                    result.include_defines.push(line.to_owned());
                 }
             } else if let Some(_undef) = line.strip_prefix(b"#undef ") {
                 continue;

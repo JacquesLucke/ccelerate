@@ -88,12 +88,11 @@ impl<
         F: FnMut(&Key, &KeyTime, &Value),
     {
         for (key, values_for_key) in self.map.lock().iter() {
-            if let Some(max_time) = values_for_key.values_by_key.keys().max() {
-                if let Some(value) = values_for_key.values_by_key.get(max_time) {
-                    if let Some(value) = value.value.borrow().as_ref() {
-                        f(key, max_time, value);
-                    }
-                }
+            if let Some(max_time) = values_for_key.values_by_key.keys().max()
+                && let Some(value) = values_for_key.values_by_key.get(max_time)
+                && let Some(value) = value.value.borrow().as_ref()
+            {
+                f(key, max_time, value);
             }
         }
     }
