@@ -58,3 +58,20 @@ add_ccelerate_wrapper(ccelerate_clang Clang)
 add_ccelerate_wrapper(ccelerate_clang++ Clangxx)
 add_ccelerate_wrapper(ccelerate_ar Ar)
 add_ccelerate_wrapper(ccelerate_cmake CMake)
+
+add_executable(integration_tests
+  ./src/integration_tests.cc
+)
+set_target_properties(integration_tests PROPERTIES
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
+  CXX_EXTENSIONS OFF
+)
+target_link_libraries(integration_tests PRIVATE
+  fmt::fmt
+  reproc
+  reproc++
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME integration_tests COMMAND integration_tests)
