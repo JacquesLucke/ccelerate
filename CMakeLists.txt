@@ -22,6 +22,9 @@ find_package(reproc++ CONFIG REQUIRED)
 # Prepare TBB library.
 find_package(TBB CONFIG REQUIRED)
 
+# Prepare CLI11 library.
+find_package(CLI11 CONFIG REQUIRED)
+
 # Setup ccelerate executable.
 add_executable(ccelerate
   ./src/main.cc
@@ -38,6 +41,7 @@ target_link_libraries(ccelerate PRIVATE
   reproc
   reproc++
   TBB::tbb
+  CLI11::CLI11
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 
@@ -75,7 +79,7 @@ target_link_libraries(integration_tests PRIVATE
   fmt::fmt
   reproc
   reproc++
+  CLI11::CLI11
   GTest::gtest
-  GTest::gtest_main
 )
-add_test(NAME integration_tests COMMAND integration_tests)
+add_test(NAME integration_tests COMMAND integration_tests --repo-dir ${CMAKE_CURRENT_SOURCE_DIR})

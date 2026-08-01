@@ -1,10 +1,24 @@
 // SPDX-License-Identifier: MIT
 
+#include <CLI/CLI.hpp>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <gtest/gtest.h>
 #include <random>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
+
+namespace ccelerate::tests {
+
+struct Args {
+  std::filesystem::path repo_dir;
+  std::filesystem::path test_projects_dir;
+
+  static Args &get() {
+    static Args args;
+    return args;
+  }
+};
 
 static std::string get_random_endpoint() {
   static std::random_device rd;
@@ -48,17 +62,14 @@ struct ProcessResult {
 };
 
 static std::optional<ProcessResult>
-run_wrapper_process(const CcelerateServerContext &server_ctx,
-                    const std::vector<std::string> &args) {
-  reproc::options options;
-  const std::vector<std::pair<std::string, std::string>> extra_env = {
-      std::make_pair("CCELERATE_ENDPOINT", server_ctx.endpoint())};
-  options.env.extra = extra_env;
+run_and_get_result(const std::vector<std::string> &args,
+                   reproc::options options = {}) {
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
   std::error_code ec = proc.start(args, options);
-  EXPECT_FALSE(ec) << "Failed to start process: " << ec.message();
+  EXPECT_FALSE(ec) << "Failed to start process: " << ec.message() << " --- "
+                   << fmt::format("{}", fmt::join(args, " "));
   std::string stdout;
   std::string stderr;
   ec = reproc::drain(proc, reproc::sink::string(stdout),
@@ -71,7 +82,17 @@ run_wrapper_process(const CcelerateServerContext &server_ctx,
                        proc.wait(reproc::infinite).first};
 }
 
-TEST(InvokeCommand, ClangNoArgs) {
+static std::optional<ProcessResult>
+run_wrapper_process(const CcelerateServerContext &server_ctx,
+                    const std::vector<std::string> &args) {
+  reproc::options options;
+  const std::vector<std::pair<std::string, std::string>> extra_env = {
+      std::make_pair("CCELERATE_ENDPOINT", server_ctx.endpoint())};
+  options.env.extra = extra_env;
+  return run_and_get_result(args, std::move(options));
+}
+
+TEST(Integration, ClangNoArgs) {
   CcelerateServerContext server_ctx;
   const std::optional<ProcessResult> result =
       run_wrapper_process(server_ctx, {"./ccelerate_clang"});
@@ -79,4 +100,41 @@ TEST(InvokeCommand, ClangNoArgs) {
   EXPECT_EQ(result->stdout, "");
   EXPECT_EQ(result->stderr, "clang: error: no input files\n");
   EXPECT_EQ(result->exit_code, 1);
+}
+
+TEST(Integration, HelloWorld) {
+  const Args &args = Args::get();
+  const std::filesystem::path project_dir =
+      args.test_projects_dir / "hello_world";
+  const std::filesystem::path output_file = "./tests_tmp/hello_world";
+  std::filesystem::create_directories(output_file.parent_path());
+  CcelerateServerContext server_ctx;
+  run_wrapper_process(server_ctx, {"./ccelerate_clang", "-o", output_file,
+                                   project_dir / "hello_world.cc"});
+  const std::optional<ProcessResult> result =
+      run_wrapper_process(server_ctx, {output_file});
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result->stdout, "Hello World!\n");
+  EXPECT_EQ(result->stderr, "");
+  EXPECT_EQ(result->exit_code, 0);
+}
+
+} // namespace ccelerate::tests
+
+int main(int argc, char **argv) {
+  using namespace ccelerate::tests;
+  ::testing::InitGoogleTest(&argc, argv);
+
+  CLI::App app{"Integration tests for ccelerate"};
+  argv = app.ensure_utf8(argv);
+
+  Args &args = Args::get();
+  app.add_option("--repo-dir", args.repo_dir,
+                 "Path to the ccelerate repository")
+      ->required();
+
+  CLI11_PARSE(app, argc, argv);
+
+  args.test_projects_dir = args.repo_dir / "src" / "tests" / "test_projects";
+  return RUN_ALL_TESTS();
 }
