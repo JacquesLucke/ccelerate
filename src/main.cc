@@ -5,11 +5,11 @@
 #include <reproc++/reproc.hpp>
 #include <tbb/task_arena.h>
 #include <tbb/task_group.h>
-#include <whereami.h>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
 #include "default_endpoint.hh"
+#include "get_current_executable_path.hh"
 #include "program_wrapper.hh"
 
 namespace ccelerate {
@@ -146,22 +146,9 @@ handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
   }
 }
 
-static std::filesystem::path get_executable_path() {
-  int length = wai_getExecutablePath(NULL, 0, NULL);
-  if (length <= 0)
-    return {};
-
-  std::vector<char> buffer(length + 1);
-  int dirname_length = 0;
-  wai_getExecutablePath(buffer.data(), length, &dirname_length);
-  buffer[length] = '\0';
-
-  return std::filesystem::path(buffer.data());
-}
-
 int ccelerate_main(const int argc, char **argv) {
   GlobalState &global_state = get_global_state();
-  global_state.binary_path = get_executable_path();
+  global_state.binary_path = get_current_executable_path();
 
   try {
     zmq::socket_t external_sock(global_state.ctx, zmq::socket_type::router);

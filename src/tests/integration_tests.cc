@@ -9,6 +9,7 @@
 #include <reproc++/reproc.hpp>
 
 #include "../default_endpoint.hh"
+#include "../get_current_executable_path.hh"
 
 namespace ccelerate::tests {
 
@@ -17,6 +18,7 @@ struct Args {
   std::filesystem::path repo_dir;
   std::filesystem::path test_projects_dir;
   std::filesystem::path test_out_dir;
+  std::filesystem::path test_build_dir;
 
   static Args &get() {
     static Args args;
@@ -51,9 +53,9 @@ public:
           std::make_pair("CCELERATE_ENDPOINT", endpoint_)};
       options.env.extra = extra_env;
 
-      std::vector<std::string> args;
-      args.push_back("./ccelerate");
-      const std::error_code ec = server_process_.start(args, options);
+      std::vector<std::string> cmd_args;
+      cmd_args.push_back(args.test_build_dir / "ccelerate");
+      const std::error_code ec = server_process_.start(cmd_args, options);
       EXPECT_FALSE(ec) << "Failed to start server: " << ec.message();
     }
   }
@@ -112,9 +114,10 @@ run_wrapper_process(const CcelerateServerContext &server_ctx,
 }
 
 TEST(Integration, ClangNoArgs) {
+  const Args &args = Args::get();
   CcelerateServerContext server_ctx;
-  const std::optional<ProcessResult> result =
-      run_wrapper_process(server_ctx, {"./ccelerate_clang"});
+  const std::optional<ProcessResult> result = run_wrapper_process(
+      server_ctx, {args.test_build_dir / "ccelerate_clang"});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "");
   EXPECT_NE(result->stderr.find("no input files"), std::string::npos);
@@ -128,8 +131,9 @@ TEST(Integration, HelloWorld) {
   const std::filesystem::path output_file = args.test_out_dir / "hello_world";
   std::filesystem::create_directories(output_file.parent_path());
   CcelerateServerContext server_ctx;
-  run_wrapper_process(server_ctx, {"./ccelerate_clang", "-o", output_file,
-                                   project_dir / "hello_world.cc"});
+  run_wrapper_process(server_ctx,
+                      {args.test_build_dir / "ccelerate_clang", "-o",
+                       output_file, project_dir / "hello_world.cc"});
   const std::optional<ProcessResult> result = run_and_get_result({output_file});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "Hello World!\n");
@@ -144,11 +148,13 @@ TEST(Integration, BasicCMake) {
   const std::filesystem::path output_dir = args.test_out_dir / "basic_cmake";
   std::filesystem::create_directories(output_dir);
   CcelerateServerContext server_ctx;
-  run_wrapper_process(
-      server_ctx, {"./ccelerate_cmake", "-B", output_dir, "-S", project_dir},
-      true);
-  run_wrapper_process(server_ctx, {"./ccelerate_cmake", "--build", output_dir},
+  run_wrapper_process(server_ctx,
+                      {args.test_build_dir / "ccelerate_cmake", "-B",
+                       output_dir, "-S", project_dir},
                       true);
+  run_wrapper_process(
+      server_ctx,
+      {args.test_build_dir / "ccelerate_cmake", "--build", output_dir}, true);
   const std::optional<ProcessResult> result =
       run_and_get_result({output_dir / "basic_cmake"});
   ASSERT_TRUE(result);
@@ -176,7 +182,8 @@ int main(int argc, char **argv) {
   CLI11_PARSE(app, argc, argv);
 
   args.test_projects_dir = args.repo_dir / "src" / "tests" / "test_projects";
-  args.test_out_dir = "./tests_tmp";
+  args.test_build_dir = ccelerate::get_current_executable_path().parent_path();
+  args.test_out_dir = args.test_build_dir / "tests_tmp";
 
   std::filesystem::remove_all(args.test_out_dir);
   return RUN_ALL_TESTS();
