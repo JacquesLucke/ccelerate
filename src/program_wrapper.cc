@@ -49,6 +49,7 @@ int call(const int argc, char **argv) {
 
     fmt::print(stdout, "{}", program_result.stdout);
     fmt::print(stderr, "{}", program_result.stderr);
+    return program_result.exit_code;
   } catch (const zmq::error_t &e) {
     fmt::print("Communication error: {}\n", e.what());
     return 1;
@@ -62,7 +63,7 @@ int call(const int argc, char **argv) {
     fmt::print("Exception: {}\n", e.what());
     return 1;
   }
-  return 0;
+  return 1;
 }
 
 } // namespace ccelerate

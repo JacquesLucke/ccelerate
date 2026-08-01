@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+#include <reproc++/drain.hpp>
+#include <reproc++/reproc.hpp>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
@@ -31,9 +33,31 @@ int ccelerate_main(const int argc, char **argv) {
           .convert(call);
       fmt::println("call: {}", call);
 
+      reproc::options options;
+      options.working_directory = call.cwd.c_str();
+      options.redirect.out.type = reproc::redirect::pipe;
+      options.redirect.err.type = reproc::redirect::pipe;
+      reproc::process proc;
+      std::vector<std::string> args;
+      args.push_back(std::string(to_string(call.program)));
+      for (const auto &arg : call.args) {
+        args.push_back(arg);
+      }
+      std::error_code ec = proc.start(args, options);
       WrappedProgramResult program_result;
-      program_result.stdout = "Hello world!\n";
-      program_result.stderr = "";
+      if (!ec) {
+        ec = reproc::drain(proc, reproc::sink::string(program_result.stdout),
+                           reproc::sink::string(program_result.stderr));
+        if (!ec) {
+          std::tie(program_result.exit_code, ec) = proc.wait(reproc::infinite);
+        } else {
+          program_result.exit_code = 1;
+          program_result.stderr = ec.message();
+        }
+      } else {
+        program_result.exit_code = 1;
+        program_result.stderr = ec.message();
+      }
 
       msgpack::sbuffer response;
       msgpack::pack(response, program_result);
@@ -44,7 +68,6 @@ int ccelerate_main(const int argc, char **argv) {
       (void)socket.send(zmq::message_t(response.data(), response.size()),
                         zmq::send_flags::none);
     }
-
   } catch (const std::exception &e) {
     fmt::print("Exception: {}\n", e.what());
     return 1;

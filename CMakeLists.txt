@@ -15,6 +15,10 @@ find_package(cppzmq CONFIG REQUIRED)
 # Setup msgpack library.
 find_package(msgpack-cxx CONFIG REQUIRED)
 
+# Setup reproc library.
+find_package(reproc CONFIG REQUIRED)
+find_package(reproc++ CONFIG REQUIRED)
+
 # Setup ccelerate executable.
 add_executable(ccelerate
   ./src/main.cc
@@ -28,6 +32,8 @@ target_link_libraries(ccelerate PRIVATE
   fmt::fmt
   cppzmq-static
   msgpack-cxx
+  reproc
+  reproc++
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 

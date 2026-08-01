@@ -46,6 +46,7 @@ inline std::string_view to_string(const WrappedProgram wrapped_program) {
 struct WrappedProgramResult {
   std::string stdout;
   std::string stderr;
+  int exit_code;
 
   MSGPACK_DEFINE(stdout, stderr);
 };
