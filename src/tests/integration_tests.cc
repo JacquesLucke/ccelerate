@@ -117,7 +117,7 @@ TEST(Integration, ClangNoArgs) {
   const Args &args = Args::get();
   CcelerateServerContext server_ctx;
   const std::optional<ProcessResult> result = run_wrapper_process(
-      server_ctx, {args.test_build_dir / "ccelerate_clang"});
+      server_ctx, {args.test_build_dir / "ccelerate_clang++"});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "");
   EXPECT_NE(result->stderr.find("no input files"), std::string::npos);
@@ -132,7 +132,7 @@ TEST(Integration, HelloWorld) {
   std::filesystem::create_directories(output_file.parent_path());
   CcelerateServerContext server_ctx;
   run_wrapper_process(server_ctx,
-                      {args.test_build_dir / "ccelerate_clang", "-o",
+                      {args.test_build_dir / "ccelerate_clang++", "-o",
                        output_file, project_dir / "hello_world.cc"});
   const std::optional<ProcessResult> result = run_and_get_result({output_file});
   ASSERT_TRUE(result);

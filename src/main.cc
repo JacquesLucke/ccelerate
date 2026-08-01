@@ -11,6 +11,7 @@
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/VirtualFileSystem.h>
+#include <llvm/TargetParser/Host.h>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 #include <tbb/task_arena.h>
@@ -140,10 +141,13 @@ static void handle_cmake_call(std::vector<zmq::message_t> &request_frames,
 
 static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
                               const WrappedProgramCall &call) {
-  auto fs = llvm::vfs::getRealFileSystem();
-  std::vector<const char *> clang_args;
+  // TODO: Need to get header files compatible with the linked clang version.
+  std::string clang_path = "/usr/bin/clang-18";
+
+  std::vector<const char *> driver_args;
+  driver_args.push_back(clang_path.c_str());
   for (const std::string &arg : call.args) {
-    clang_args.push_back(arg.c_str());
+    driver_args.push_back(arg.c_str());
   }
 
   llvm::SmallVector<char> captured_stdout;
@@ -167,16 +171,30 @@ static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
 
   WrappedProgramResult result;
 
-  if (clang::CompilerInvocation::CreateFromArgs(
-          clang.getInvocation(), clang_args, diags,
-          to_string(call.program).c_str())) {
-    clang::ExecuteCompilerInvocation(&clang);
+  std::string target_triple = llvm::sys::getProcessTriple();
+  clang::driver::Driver driver(clang_path, target_triple, diags);
+  std::unique_ptr<clang::driver::Compilation> compilation{
+      driver.BuildCompilation(driver_args)};
+  int exit_code = 0;
+  if (compilation && !compilation->containsError()) {
+    llvm::SmallVector<std::pair<int, const clang::driver::Command *>, 4>
+        failing_commands;
+    for (auto &job : compilation->getJobs()) {
+      job.Print(llvm::outs(), "\n", true, nullptr);
+    }
+    exit_code = driver.ExecuteCompilation(*compilation, failing_commands);
+  } else {
+    exit_code = 1;
   }
+  // if (clang.getDiagnostics().hasErrorOccurred()) {
+  //   exit_code = 1;
+  // }
+
   stderr_stream.flush();
   result.stderr = captured_stderr;
   result.stdout.insert(result.stdout.end(), captured_stdout.begin(),
                        captured_stdout.end());
-  result.exit_code = clang.getDiagnostics().getNumErrors() == 0 ? 0 : 1;
+  result.exit_code = exit_code;
 
   send_program_result(request_frames, result);
 }
