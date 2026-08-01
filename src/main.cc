@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 
+#include <clang/Basic/Version.h>
 #include <clang/CodeGen/CodeGenAction.h>
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
@@ -143,6 +144,8 @@ static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
                               const WrappedProgramCall &call) {
   // TODO: Need to get header files compatible with the linked clang version.
   std::string clang_path = "/usr/bin/clang-18";
+  // 18.1.6
+  fmt::println("{}", clang::getClangFullVersion());
 
   std::vector<const char *> driver_args;
   driver_args.push_back(clang_path.c_str());
@@ -179,9 +182,9 @@ static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
   if (compilation && !compilation->containsError()) {
     llvm::SmallVector<std::pair<int, const clang::driver::Command *>, 4>
         failing_commands;
-    for (auto &job : compilation->getJobs()) {
-      job.Print(llvm::outs(), "\n", true, nullptr);
-    }
+    // for (auto &job : compilation->getJobs()) {
+    //   job.Print(llvm::outs(), "\n", true, nullptr);
+    // }
     exit_code = driver.ExecuteCompilation(*compilation, failing_commands);
   } else {
     exit_code = 1;
