@@ -142,15 +142,18 @@ static void handle_cmake_call(std::vector<zmq::message_t> &request_frames,
 
 static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
                               const WrappedProgramCall &call) {
-  // TODO: Need to get header files compatible with the linked clang version.
-  std::string clang_path = "/usr/bin/clang-18";
-  // 18.1.6
-  fmt::println("{}", clang::getClangFullVersion());
+  const GlobalState &global_state = get_global_state();
+  std::string clang_path = global_state.binary_path.parent_path() /
+                           "vcpkg_installed/x64-linux/tools/llvm" /
+                           to_string(call.program);
 
   std::vector<const char *> driver_args;
   driver_args.push_back(clang_path.c_str());
   for (const std::string &arg : call.args) {
     driver_args.push_back(arg.c_str());
+    if (arg == "-o") {
+      int a = 0;
+    }
   }
 
   llvm::SmallVector<char> captured_stdout;
@@ -174,17 +177,23 @@ static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
 
   WrappedProgramResult result;
 
+  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> vfs =
+      llvm::vfs::createPhysicalFileSystem();
+  std::error_code ec = vfs->setCurrentWorkingDirectory(call.cwd);
+  (void)ec;
+
   std::string target_triple = llvm::sys::getProcessTriple();
-  clang::driver::Driver driver(clang_path, target_triple, diags);
+  clang::driver::Driver driver(clang_path, target_triple, diags,
+                               "clang LLVM Compiler", vfs);
   std::unique_ptr<clang::driver::Compilation> compilation{
       driver.BuildCompilation(driver_args)};
   int exit_code = 0;
   if (compilation && !compilation->containsError()) {
     llvm::SmallVector<std::pair<int, const clang::driver::Command *>, 4>
         failing_commands;
-    // for (auto &job : compilation->getJobs()) {
-    //   job.Print(llvm::outs(), "\n", true, nullptr);
-    // }
+    for (auto &job : compilation->getJobs()) {
+      job.Print(llvm::outs(), "\n", true, nullptr);
+    }
     exit_code = driver.ExecuteCompilation(*compilation, failing_commands);
   } else {
     exit_code = 1;
