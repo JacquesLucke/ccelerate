@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 
+#include <filesystem>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 #include <tbb/task_arena.h>
 #include <tbb/task_group.h>
+#include <whereami.h>
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
@@ -15,6 +17,7 @@ namespace ccelerate {
 static std::string inproc_endpoint = "inproc://server";
 
 struct GlobalState {
+  std::filesystem::path binary_path;
   zmq::context_t ctx;
   tbb::task_group task_group;
 };
@@ -40,26 +43,14 @@ static ThreadState &get_thread_state() {
 }
 
 static void
-handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
+pass_through_external_call(std::vector<zmq::message_t> &request_frames,
+                           const std::vector<std::string> &args,
+                           reproc::options options) {
   ThreadState &thread_state = get_thread_state();
 
-  const zmq::message_t &actual_message = request_frames.end()[-1];
-  WrappedProgramCall call;
-  msgpack::unpack(actual_message.data<char>(), actual_message.size())
-      .get()
-      .convert(call);
-  fmt::println("call: {}", call);
-
-  reproc::options options;
-  options.working_directory = call.cwd.c_str();
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
-  std::vector<std::string> args;
-  args.push_back(std::string(to_string(call.program)));
-  for (const auto &arg : call.args) {
-    args.push_back(arg);
-  }
   std::error_code ec = proc.start(args, options);
   WrappedProgramResult program_result;
   if (!ec) {
@@ -92,8 +83,85 @@ handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
       zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
 }
 
+static void
+handle_eager_program_call(std::vector<zmq::message_t> &request_frames,
+                          const WrappedProgramCall &call) {
+  reproc::options options;
+  options.working_directory = call.cwd.c_str();
+  std::vector<std::string> args;
+  args.push_back(std::string(to_string(call.program)));
+  for (const auto &arg : call.args) {
+    args.push_back(arg);
+  }
+  pass_through_external_call(request_frames, args, std::move(options));
+}
+
+static void handle_cmake_call(std::vector<zmq::message_t> &request_frames,
+                              const WrappedProgramCall &call) {
+  const GlobalState &global_state = get_global_state();
+  const std::filesystem::path dir = global_state.binary_path.parent_path();
+
+  reproc::options options;
+  options.working_directory = call.cwd.c_str();
+  const std::vector<std::pair<std::string, std::string>> extra_env = {
+      {"CC", dir / "ccelerate_clang"},
+      {"CXX", dir / "ccelerate_clang++"},
+  };
+  options.env.extra = extra_env;
+  std::vector<std::string> args;
+  args.push_back("cmake");
+  bool has_build_arg = false;
+  for (const auto &arg : call.args) {
+    args.push_back(arg);
+    if (arg == "--build") {
+      has_build_arg = true;
+    }
+  }
+  if (!has_build_arg) {
+    args.push_back(
+        fmt::format("-DCMAKE_AR={}", (dir / "ccelerate_ar").string()));
+  }
+  pass_through_external_call(request_frames, args, std::move(options));
+}
+
+static void
+handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
+
+  const zmq::message_t &actual_message = request_frames.end()[-1];
+  WrappedProgramCall call;
+  msgpack::unpack(actual_message.data<char>(), actual_message.size())
+      .get()
+      .convert(call);
+  fmt::println("call: {}", call);
+  switch (call.program) {
+  case WrappedProgram::Clang:
+  case WrappedProgram::Clangxx:
+  case WrappedProgram::Ar: {
+    handle_eager_program_call(request_frames, call);
+    break;
+  }
+  case WrappedProgram::CMake:
+    handle_cmake_call(request_frames, call);
+    break;
+  }
+}
+
+static std::filesystem::path get_executable_path() {
+  int length = wai_getExecutablePath(NULL, 0, NULL);
+  if (length <= 0)
+    return {};
+
+  std::vector<char> buffer(length + 1);
+  int dirname_length = 0;
+  wai_getExecutablePath(buffer.data(), length, &dirname_length);
+  buffer[length] = '\0';
+
+  return std::filesystem::path(buffer.data());
+}
+
 int ccelerate_main(const int argc, char **argv) {
   GlobalState &global_state = get_global_state();
+  global_state.binary_path = get_executable_path();
 
   try {
     zmq::socket_t external_sock(global_state.ctx, zmq::socket_type::router);

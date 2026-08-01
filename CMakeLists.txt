@@ -3,27 +3,16 @@ project(ccelerate)
 
 enable_testing()
 
-# Setup GTest library.
+# Find dependencies.
 find_package(GTest CONFIG REQUIRED)
-
-# Setup fmt library.
 find_package(fmt CONFIG REQUIRED)
-
-# Setup cppzmq library.
 find_package(cppzmq CONFIG REQUIRED)
-
-# Setup msgpack library.
 find_package(msgpack-cxx CONFIG REQUIRED)
-
-# Setup reproc library.
 find_package(reproc CONFIG REQUIRED)
 find_package(reproc++ CONFIG REQUIRED)
-
-# Prepare TBB library.
 find_package(TBB CONFIG REQUIRED)
-
-# Prepare CLI11 library.
 find_package(CLI11 CONFIG REQUIRED)
+find_package(unofficial-whereami CONFIG REQUIRED)
 
 # Setup ccelerate executable.
 add_executable(ccelerate
@@ -42,6 +31,7 @@ target_link_libraries(ccelerate PRIVATE
   reproc++
   TBB::tbb
   CLI11::CLI11
+  unofficial::whereami::whereami
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 

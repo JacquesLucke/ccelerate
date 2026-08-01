@@ -6,6 +6,7 @@
     "gtest",
     "reproc",
     "tbb",
-    "cli11"
+    "cli11",
+    "whereami"
   ]
 }

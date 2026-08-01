@@ -16,6 +16,7 @@ struct Args {
   bool use_external_server = false;
   std::filesystem::path repo_dir;
   std::filesystem::path test_projects_dir;
+  std::filesystem::path test_out_dir;
 
   static Args &get() {
     static Args args;
@@ -75,7 +76,8 @@ struct ProcessResult {
 
 static std::optional<ProcessResult>
 run_and_get_result(const std::vector<std::string> &args,
-                   reproc::options options = {}) {
+                   reproc::options options = {},
+                   const bool expect_exit_0 = false) {
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
@@ -90,18 +92,23 @@ run_and_get_result(const std::vector<std::string> &args,
   if (ec) {
     return std::nullopt;
   }
-  return ProcessResult{std::move(stdout), std::move(stderr),
-                       proc.wait(reproc::infinite).first};
+  const int exit_code = proc.wait(reproc::infinite).first;
+  if (expect_exit_0) {
+    EXPECT_EQ(exit_code, 0) << "Process exited with non-zero code. --- "
+                            << fmt::format("{}", fmt::join(args, " "));
+  }
+  return ProcessResult{std::move(stdout), std::move(stderr), exit_code};
 }
 
 static std::optional<ProcessResult>
 run_wrapper_process(const CcelerateServerContext &server_ctx,
-                    const std::vector<std::string> &args) {
+                    const std::vector<std::string> &args,
+                    const bool expect_exit_0 = false) {
   reproc::options options;
   const std::vector<std::pair<std::string, std::string>> extra_env = {
       std::make_pair("CCELERATE_ENDPOINT", server_ctx.endpoint())};
   options.env.extra = extra_env;
-  return run_and_get_result(args, std::move(options));
+  return run_and_get_result(args, std::move(options), expect_exit_0);
 }
 
 TEST(Integration, ClangNoArgs) {
@@ -118,15 +125,34 @@ TEST(Integration, HelloWorld) {
   const Args &args = Args::get();
   const std::filesystem::path project_dir =
       args.test_projects_dir / "hello_world";
-  const std::filesystem::path output_file = "./tests_tmp/hello_world";
+  const std::filesystem::path output_file = args.test_out_dir / "hello_world";
   std::filesystem::create_directories(output_file.parent_path());
   CcelerateServerContext server_ctx;
   run_wrapper_process(server_ctx, {"./ccelerate_clang", "-o", output_file,
                                    project_dir / "hello_world.cc"});
-  const std::optional<ProcessResult> result =
-      run_wrapper_process(server_ctx, {output_file});
+  const std::optional<ProcessResult> result = run_and_get_result({output_file});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "Hello World!\n");
+  EXPECT_EQ(result->stderr, "");
+  EXPECT_EQ(result->exit_code, 0);
+}
+
+TEST(Integration, BasicCMake) {
+  const Args &args = Args::get();
+  const std::filesystem::path project_dir =
+      args.test_projects_dir / "basic_cmake";
+  const std::filesystem::path output_dir = args.test_out_dir / "basic_cmake";
+  std::filesystem::create_directories(output_dir);
+  CcelerateServerContext server_ctx;
+  run_wrapper_process(
+      server_ctx, {"./ccelerate_cmake", "-B", output_dir, "-S", project_dir},
+      true);
+  run_wrapper_process(server_ctx, {"./ccelerate_cmake", "--build", output_dir},
+                      true);
+  const std::optional<ProcessResult> result =
+      run_and_get_result({output_dir / "basic_cmake"});
+  ASSERT_TRUE(result);
+  EXPECT_EQ(result->stdout, "It worked!\n");
   EXPECT_EQ(result->stderr, "");
   EXPECT_EQ(result->exit_code, 0);
 }
@@ -144,11 +170,14 @@ int main(int argc, char **argv) {
   app.add_option("--repo-dir", args.repo_dir,
                  "Path to the ccelerate repository")
       ->required();
-  app.add_flag("--use-external-server", args.use_external_server,
+  app.add_flag("--external-server", args.use_external_server,
                "Use an existing external ccelerate server for the tests");
 
   CLI11_PARSE(app, argc, argv);
 
   args.test_projects_dir = args.repo_dir / "src" / "tests" / "test_projects";
+  args.test_out_dir = "./tests_tmp";
+
+  std::filesystem::remove_all(args.test_out_dir);
   return RUN_ALL_TESTS();
 }
