@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
 
   CLI11_PARSE(app, argc, argv);
 
-  args.test_projects_dir = args.repo_dir / "src" / "tests" / "test_projects";
+  args.test_projects_dir = args.repo_dir / "test_projects";
   args.test_build_dir = ccelerate::get_current_executable_path().parent_path();
   args.test_out_dir = args.test_build_dir / "tests_tmp";
 

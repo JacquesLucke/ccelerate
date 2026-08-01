@@ -9,9 +9,7 @@
       "cacheVariables": {
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_LINKER_TYPE": "MOLD",
-        "CMAKE_TOOLCHAIN_FILE": "./vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "CMAKE_CXX_FLAGS_INIT": "--coverage",
-        "CMAKE_C_FLAGS_INIT": "--coverage"
+        "CMAKE_TOOLCHAIN_FILE": "./vcpkg/scripts/buildsystems/vcpkg.cmake"
       }
     },
     {

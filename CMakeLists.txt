@@ -71,5 +71,6 @@ target_link_libraries(integration_tests PRIVATE
   reproc++
   CLI11::CLI11
   GTest::gtest
+  unofficial::whereami::whereami
 )
 add_test(NAME integration_tests COMMAND integration_tests --repo-dir ${CMAKE_CURRENT_SOURCE_DIR})
