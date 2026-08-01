@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: MIT
 
+#include <clang/CodeGen/CodeGenAction.h>
+#include <clang/Driver/Compilation.h>
+#include <clang/Driver/Driver.h>
+#include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/FrontendOptions.h>
+#include <clang/Frontend/TextDiagnosticPrinter.h>
+#include <clang/FrontendTool/Utils.h>
 #include <filesystem>
+#include <llvm/Config/llvm-config.h>
+#include <llvm/Support/TargetSelect.h>
+#include <llvm/Support/VirtualFileSystem.h>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 #include <tbb/task_arena.h>
@@ -42,12 +52,29 @@ static ThreadState &get_thread_state() {
   return thread_state;
 }
 
+static void send_program_result(std::vector<zmq::message_t> &request_frames,
+                                const WrappedProgramResult &result) {
+  ThreadState &thread_state = get_thread_state();
+  msgpack::sbuffer response;
+  msgpack::pack(response, result);
+
+  for (zmq::message_t &frame : request_frames) {
+    if (!frame.more()) {
+      /* The last frame is the actual message. */
+      break;
+    }
+    zmq::message_t msg;
+    msg.copy(frame);
+    (void)thread_state.iproc_socket.send(msg, zmq::send_flags::sndmore);
+  }
+  (void)thread_state.iproc_socket.send(
+      zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
+}
+
 static void
 pass_through_external_call(std::vector<zmq::message_t> &request_frames,
                            const std::vector<std::string> &args,
                            reproc::options options) {
-  ThreadState &thread_state = get_thread_state();
-
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
@@ -67,20 +94,7 @@ pass_through_external_call(std::vector<zmq::message_t> &request_frames,
     program_result.stderr = ec.message();
   }
 
-  msgpack::sbuffer response;
-  msgpack::pack(response, program_result);
-
-  for (zmq::message_t &frame : request_frames) {
-    if (!frame.more()) {
-      /* The last frame is the actual message. */
-      break;
-    }
-    zmq::message_t msg;
-    msg.copy(frame);
-    (void)thread_state.iproc_socket.send(msg, zmq::send_flags::sndmore);
-  }
-  (void)thread_state.iproc_socket.send(
-      zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
+  send_program_result(request_frames, program_result);
 }
 
 static void
@@ -124,6 +138,49 @@ static void handle_cmake_call(std::vector<zmq::message_t> &request_frames,
   pass_through_external_call(request_frames, args, std::move(options));
 }
 
+static void handle_clang_call(std::vector<zmq::message_t> &request_frames,
+                              const WrappedProgramCall &call) {
+  auto fs = llvm::vfs::getRealFileSystem();
+  std::vector<const char *> clang_args;
+  for (const std::string &arg : call.args) {
+    clang_args.push_back(arg.c_str());
+  }
+
+  llvm::SmallVector<char> captured_stdout;
+  std::string captured_stderr;
+
+  llvm::raw_string_ostream stderr_stream(captured_stderr);
+
+  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_ops =
+      new clang::DiagnosticOptions();
+  clang::TextDiagnosticPrinter *diag_client =
+      new clang::TextDiagnosticPrinter(stderr_stream, &*diag_ops);
+  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+      new clang::DiagnosticIDs());
+
+  clang::DiagnosticsEngine diags(diag_id, diag_ops, diag_client);
+
+  clang::CompilerInstance clang;
+  clang.createDiagnostics(diag_client, false);
+  clang.setOutputStream(
+      std::make_unique<llvm::raw_svector_ostream>(captured_stdout));
+
+  WrappedProgramResult result;
+
+  if (clang::CompilerInvocation::CreateFromArgs(
+          clang.getInvocation(), clang_args, diags,
+          to_string(call.program).c_str())) {
+    clang::ExecuteCompilerInvocation(&clang);
+  }
+  stderr_stream.flush();
+  result.stderr = captured_stderr;
+  result.stdout.insert(result.stdout.end(), captured_stdout.begin(),
+                       captured_stdout.end());
+  result.exit_code = clang.getDiagnostics().getNumErrors() == 0 ? 0 : 1;
+
+  send_program_result(request_frames, result);
+}
+
 static void
 handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
 
@@ -135,7 +192,10 @@ handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
   fmt::println("call: {}", call);
   switch (call.program) {
   case WrappedProgram::Clang:
-  case WrappedProgram::Clangxx:
+  case WrappedProgram::Clangxx: {
+    handle_clang_call(request_frames, call);
+    break;
+  }
   case WrappedProgram::Ar: {
     handle_eager_program_call(request_frames, call);
     break;

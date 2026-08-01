@@ -29,18 +29,27 @@ struct WrappedProgramCall {
   MSGPACK_DEFINE(program, cwd, args);
 };
 
-inline std::string_view to_string(const WrappedProgram wrapped_program) {
+inline const std::string &to_string(const WrappedProgram wrapped_program) {
   switch (wrapped_program) {
-  case WrappedProgram::Clang:
-    return "clang";
-  case WrappedProgram::Clangxx:
-    return "clang++";
-  case WrappedProgram::Ar:
-    return "ar";
-  case WrappedProgram::CMake:
-    return "cmake";
+  case WrappedProgram::Clang: {
+    static const std::string str = "clang";
+    return str;
   }
-  return "unknown";
+  case WrappedProgram::Clangxx: {
+    static const std::string str = "clang++";
+    return str;
+  }
+  case WrappedProgram::Ar: {
+    static const std::string str = "ar";
+    return str;
+  }
+  case WrappedProgram::CMake: {
+    static const std::string str = "cmake";
+    return str;
+  }
+  }
+  static const std::string unknown = "unknown";
+  return unknown;
 }
 
 struct WrappedProgramResult {
