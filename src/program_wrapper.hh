@@ -58,12 +58,4 @@ inline std::string format_as(const WrappedProgramCall &call) {
                      fmt::join(call.args, " "));
 }
 
-inline std::string get_socket_endpoint() {
-  const char *endpoint = std::getenv("CCELERATE_ENDPOINT");
-  if (endpoint) {
-    return endpoint;
-  }
-  return "ipc:///tmp/ccelerate.ipc";
-}
-
 } // namespace ccelerate

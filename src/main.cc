@@ -7,6 +7,7 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "default_endpoint.hh"
 #include "program_wrapper.hh"
 
 namespace ccelerate {
@@ -96,7 +97,7 @@ int ccelerate_main(const int argc, char **argv) {
 
   try {
     zmq::socket_t external_sock(global_state.ctx, zmq::socket_type::router);
-    const std::string endpoint = get_socket_endpoint();
+    const std::string endpoint = get_default_ccelerate_endpoint();
     external_sock.bind(endpoint);
     fmt::println("Listening on {}", endpoint);
 
