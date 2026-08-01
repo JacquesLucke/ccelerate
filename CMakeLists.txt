@@ -60,7 +60,7 @@ add_ccelerate_wrapper(ccelerate_ar Ar)
 add_ccelerate_wrapper(ccelerate_cmake CMake)
 
 add_executable(integration_tests
-  ./src/integration_tests.cc
+  ./src/tests/integration_tests.cc
 )
 set_target_properties(integration_tests PROPERTIES
   CXX_STANDARD 20
