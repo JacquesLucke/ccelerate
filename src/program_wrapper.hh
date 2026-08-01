@@ -46,9 +46,11 @@ inline std::string_view to_string(const WrappedProgram wrapped_program) {
 struct WrappedProgramResult {
   std::string stdout;
   std::string stderr;
-  int exit_code;
 
-  MSGPACK_DEFINE(stdout, stderr);
+  // Exit code is only set when the process finished.
+  std::optional<int> exit_code;
+
+  MSGPACK_DEFINE(stdout, stderr, exit_code);
 };
 
 inline std::string format_as(const WrappedProgramCall &call) {

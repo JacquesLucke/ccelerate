@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <zmq.hpp>
+#include <zmq_addon.hpp>
 
 #include "program_wrapper.hh"
 
@@ -20,10 +21,12 @@ int call(const int argc, char **argv) {
     call.args.push_back(argv[i]);
   }
 
+  zmq::message_t identity_msg;
+
   try {
     // Connect to the ccelerate server which will actually do the work.
     zmq::context_t ctx;
-    zmq::socket_t socket(ctx, zmq::socket_type::req);
+    zmq::socket_t socket(ctx, zmq::socket_type::dealer);
     const std::string endpoint = get_socket_endpoint();
     socket.connect(endpoint);
 
@@ -32,24 +35,32 @@ int call(const int argc, char **argv) {
     msgpack::pack(request, call);
 
     // Send call to the server. Return value can be ignored in blocking mode.
+    socket.send(identity_msg, zmq::send_flags::sndmore);
     (void)socket.send(
         zmq::buffer(std::string_view(request.data(), request.size())),
         zmq::send_flags::none);
 
-    // Receive response from the server. Return value can be ignored in blocking
-    // mode.
-    zmq::message_t response;
-    (void)socket.recv(response, zmq::recv_flags::none);
+    while (true) {
+      std::vector<zmq::message_t> recv_parts;
+      // Receive response from the server. Return value can be ignored in
+      // blocking mode.
+      (void)zmq::recv_multipart(socket, std::back_inserter(recv_parts));
+      if (recv_parts.size() < 2) {
+        throw std::runtime_error("Invalid response");
+      }
+      const zmq::message_t &response = recv_parts.end()[-1];
 
-    // Parse the response struct.
-    WrappedProgramResult program_result;
-    msgpack::unpack(response.data<char>(), response.size())
-        .get()
-        .convert(program_result);
-
-    fmt::print(stdout, "{}", program_result.stdout);
-    fmt::print(stderr, "{}", program_result.stderr);
-    return program_result.exit_code;
+      // Parse the response struct.
+      WrappedProgramResult program_result;
+      msgpack::unpack(response.data<char>(), response.size())
+          .get()
+          .convert(program_result);
+      fmt::print(stdout, "{}", program_result.stdout);
+      fmt::print(stderr, "{}", program_result.stderr);
+      if (program_result.exit_code) {
+        return *program_result.exit_code;
+      }
+    }
   } catch (const zmq::error_t &e) {
     fmt::print("Communication error: {}\n", e.what());
     return 1;
