@@ -19,6 +19,9 @@ find_package(msgpack-cxx CONFIG REQUIRED)
 find_package(reproc CONFIG REQUIRED)
 find_package(reproc++ CONFIG REQUIRED)
 
+# Prepare TBB library.
+find_package(TBB CONFIG REQUIRED)
+
 # Setup ccelerate executable.
 add_executable(ccelerate
   ./src/main.cc
@@ -34,6 +37,7 @@ target_link_libraries(ccelerate PRIVATE
   msgpack-cxx
   reproc
   reproc++
+  TBB::tbb
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 
