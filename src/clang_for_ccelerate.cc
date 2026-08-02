@@ -97,7 +97,9 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
 }
 
 int clang_ops_main(const int argc, char **argv) {
-  CLI::App app{"clang_ops"};
+  CLI::App app{"clang_for_ccelerate"};
+  app.description("A utility used by ccelerate to do clang specific things "
+                  "like argument parsing");
   CLI::App &parse_args_cmd = *app.add_subcommand("parse_args");
   Cmd_ParseArgs parse_args;
   parse_args_cmd.add_option("--cwd", parse_args.cwd)->required();
