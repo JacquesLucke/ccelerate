@@ -78,7 +78,21 @@ void send_response_final(const ClientID &client_id,
   send_response_frame(client_id, frame);
 }
 
+static void send_response_error(const ClientID &client_id,
+                                const string_view message) {
+  send_response_final(
+      client_id, "", fmt::format("ccelerate: {}\n", message), 1);
+}
+
 static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
+  // A valid request has at least and id frame, one empty frame and the message.
+  if (request_frames.size() <= 2) {
+    fmt::println(stderr,
+                 "Ignoring malformed request with {} frame(s).",
+                 request_frames.size());
+    return;
+  }
+
   Request request;
   for (auto &frame : request_frames) {
     if (frame.size() > 0) {
@@ -87,15 +101,29 @@ static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
   }
   const std::string message = request_frames.end()[-1].to_string();
 
-  // TODO: Error handling.
-  wrap_io::CallRequest call;
-  msgpack::unpack(message.data(), message.size()).get().convert(call);
+  try {
+    wrap_io::CallRequest call;
+    msgpack::unpack(message.data(), message.size()).get().convert(call);
 
-  request.args = std::move(call.args);
-  request.working_dir = std::move(call.working_dir);
-  request.program = call.program;
+    request.args = std::move(call.args);
+    request.working_dir = std::move(call.working_dir);
+    request.program = call.program;
 
-  handle_request(request);
+    handle_request(request);
+  } catch (const msgpack::parse_error &e) {
+    send_response_error(request.client_id,
+                        fmt::format("Could not parse request: {}", e.what()));
+  } catch (const msgpack::type_error &e) {
+    send_response_error(request.client_id,
+                        fmt::format("Unexpected request format: {}", e.what()));
+  } catch (const std::exception &e) {
+    send_response_error(
+        request.client_id,
+        fmt::format("Error while handling request: {}", e.what()));
+  } catch (...) {
+    send_response_error(request.client_id,
+                        "Unknown error while handling request");
+  }
 }
 
 int ccelerate_main(const int argc, char **argv) {
