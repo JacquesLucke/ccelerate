@@ -8,6 +8,7 @@
     "tbb",
     "cli11",
     "whereami",
-    "tl-expected"
+    "tl-expected",
+    "spdlog"
   ]
 }

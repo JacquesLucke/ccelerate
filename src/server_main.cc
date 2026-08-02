@@ -2,6 +2,7 @@
 
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
+#include <spdlog/spdlog.h>
 #include <tbb/task_arena.h>
 #include <tbb/task_group.h>
 #include <zmq.hpp>
@@ -82,6 +83,7 @@ void send_response_final(const ClientID &client_id,
 
 static void send_response_error(const ClientID &client_id,
                                 const string_view message) {
+  spdlog::error("{}", message);
   send_response_final(
       client_id, "", fmt::format("ccelerate: {}\n", message), 1);
 }
@@ -150,7 +152,7 @@ int ccelerate_main(const int argc, char **argv) {
     zmq::socket_t external_sock(global_state.ctx, zmq::socket_type::router);
     const string endpoint = get_default_ccelerate_endpoint();
     external_sock.bind(endpoint);
-    fmt::println("Listening on {}", endpoint);
+    spdlog::info("Listening on {}", endpoint);
 
     // Initialize internal socket for receiving messages that should be
     // forwarded to the wrapper processes.

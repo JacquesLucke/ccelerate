@@ -24,6 +24,7 @@ find_package(TBB CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(unofficial-whereami CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 add_subdirectory(src/base)
 add_subdirectory(src/tests)
@@ -43,6 +44,7 @@ target_link_libraries(ccelerate PRIVATE
   CLI11::CLI11
   tl::expected
   ccelerate::base
+  spdlog::spdlog
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 
@@ -56,6 +58,7 @@ function(add_ccelerate_wrapper wrapper_name type)
     msgpack-cxx
     tl::expected
     ccelerate::base
+    spdlog::spdlog
   )
   target_compile_definitions(${wrapper_name} PRIVATE MSGPACK_NO_BOOST)
   target_compile_definitions(${wrapper_name} PRIVATE CCELERATE_WRAP_TYPE=${type})
