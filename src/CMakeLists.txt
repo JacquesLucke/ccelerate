@@ -60,6 +60,7 @@ target_link_libraries(clang_ops PRIVATE
   tl::expected
   ccelerate::base
   spdlog::spdlog
+  CLI11::CLI11
   ${llvm_libs}
   ${clang_libs}
 )
