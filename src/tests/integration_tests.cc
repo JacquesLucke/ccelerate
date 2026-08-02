@@ -118,6 +118,7 @@ static void test_simple_cmake_project(const string_view project_name,
 
   const path project_dir = args.test_projects_dir / project_name;
   const path output_dir = args.test_out_dir / project_name;
+  std::filesystem::remove_all(output_dir);
   std::filesystem::create_directories(output_dir);
 
   const ProcessResult configure_result =
@@ -158,6 +159,10 @@ int main(int argc, char **argv) {
   using namespace ccelerate::tests;
   ::testing::InitGoogleTest(&argc, argv);
 
+  if (testing::GTEST_FLAG(list_tests)) {
+    return RUN_ALL_TESTS();
+  }
+
   CLI::App app{"Integration tests for ccelerate"};
   argv = app.ensure_utf8(argv);
 
@@ -175,6 +180,5 @@ int main(int argc, char **argv) {
   args.binary_dir = ccelerate::get_current_executable_path().parent_path();
   args.test_out_dir = args.binary_dir / "tests_tmp";
 
-  std::filesystem::remove_all(args.test_out_dir);
   return RUN_ALL_TESTS();
 }

@@ -14,4 +14,8 @@ target_link_libraries(integration_tests PRIVATE
   ccelerate::base
   spdlog::spdlog
 )
-add_test(NAME integration_tests COMMAND integration_tests --repo-dir ${CMAKE_SOURCE_DIR})
+
+include(GoogleTest)
+gtest_discover_tests(integration_tests
+  EXTRA_ARGS --repo-dir ${CMAKE_SOURCE_DIR}
+)
