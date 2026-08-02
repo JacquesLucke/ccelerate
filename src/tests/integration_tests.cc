@@ -9,14 +9,14 @@
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 
-#include "../base/error_code.hh"
-#include "../base/filesystem.hh"
-#include "../base/get_current_executable_path.hh"
-#include "../base/pair.hh"
-#include "../base/run_process.hh"
-#include "../base/string.hh"
-#include "../base/vector.hh"
-#include "../default_endpoint.hh"
+#include "base/error_code.hh"
+#include "base/filesystem.hh"
+#include "base/get_current_executable_path.hh"
+#include "base/pair.hh"
+#include "base/run_process.hh"
+#include "base/string.hh"
+#include "base/vector.hh"
+#include "default_endpoint.hh"
 
 namespace ccelerate::tests {
 
@@ -25,7 +25,7 @@ struct Args {
   path repo_dir;
   path test_projects_dir;
   path test_out_dir;
-  path test_build_dir;
+  path binary_dir;
 
   static Args &get() {
     static Args args;
@@ -62,7 +62,7 @@ public:
       options.env.extra = env;
 
       vector<string> cmd_args;
-      cmd_args.push_back(args.test_build_dir / "ccelerate");
+      cmd_args.push_back(args.binary_dir / "ccelerate");
       const error_code ec = server_process_.start(cmd_args, options);
       EXPECT_FALSE(ec) << "Failed to start server: " << ec.message();
     }
@@ -81,7 +81,7 @@ TEST(Integration, ClangNoArgs) {
   CcelerateServerContext server_ctx;
   const ProcessResult result =
       run_process(ProcessArgs()
-                      .arg(args.test_build_dir / "ccelerate_clang")
+                      .arg(args.binary_dir / "ccelerate_clang")
                       .envs(server_ctx.env));
   EXPECT_EQ(result.exit_code(), 1);
   EXPECT_EQ(result.stdout, "");
@@ -98,7 +98,7 @@ TEST(Integration, HelloWorld) {
 
   const ProcessResult build_result =
       run_process(ProcessArgs()
-                      .args({args.test_build_dir / "ccelerate_clang", "-o",
+                      .args({args.binary_dir / "ccelerate_clang", "-o",
                              output_file, project_dir / "hello_world.cc"})
                       .envs(server_ctx.env));
   ASSERT_EQ(build_result.exit_code(), 0);
@@ -119,16 +119,15 @@ TEST(Integration, BasicCMake) {
 
   const ProcessResult configure_result =
       run_process(ProcessArgs()
-                      .args({args.test_build_dir / "ccelerate_cmake", "-B",
+                      .args({args.binary_dir / "ccelerate_cmake", "-B",
                              output_dir, "-S", project_dir})
                       .envs(server_ctx.env));
   ASSERT_EQ(configure_result.exit_code(), 0);
 
-  const ProcessResult build_result =
-      run_process(ProcessArgs()
-                      .args({args.test_build_dir / "ccelerate_cmake", "--build",
-                             output_dir})
-                      .envs(server_ctx.env));
+  const ProcessResult build_result = run_process(
+      ProcessArgs()
+          .args({args.binary_dir / "ccelerate_cmake", "--build", output_dir})
+          .envs(server_ctx.env));
   ASSERT_EQ(build_result.exit_code(), 0);
 
   const ProcessResult run_result =
@@ -157,8 +156,8 @@ int main(int argc, char **argv) {
   CLI11_PARSE(app, argc, argv);
 
   args.test_projects_dir = args.repo_dir / "test_projects";
-  args.test_build_dir = ccelerate::get_current_executable_path().parent_path();
-  args.test_out_dir = args.test_build_dir / "tests_tmp";
+  args.binary_dir = ccelerate::get_current_executable_path().parent_path();
+  args.test_out_dir = args.binary_dir / "tests_tmp";
 
   std::filesystem::remove_all(args.test_out_dir);
   return RUN_ALL_TESTS();

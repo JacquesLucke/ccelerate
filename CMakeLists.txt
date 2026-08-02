@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(ccelerate)
 
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/bin CACHE PATH "default install path" FORCE)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+endif()
+
 enable_testing()
 
 # Find dependencies.
@@ -16,6 +21,7 @@ find_package(unofficial-whereami CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 
 add_subdirectory(src/base)
+add_subdirectory(src/tests)
 
 # Setup ccelerate executable.
 add_executable(ccelerate
@@ -63,22 +69,3 @@ add_ccelerate_wrapper(ccelerate_clang Clang)
 add_ccelerate_wrapper(ccelerate_clang++ Clangxx)
 add_ccelerate_wrapper(ccelerate_ar Ar)
 add_ccelerate_wrapper(ccelerate_cmake CMake)
-
-add_executable(integration_tests
-  ./src/tests/integration_tests.cc
-)
-set_target_properties(integration_tests PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
-target_link_libraries(integration_tests PRIVATE
-  fmt::fmt
-  reproc
-  reproc++
-  CLI11::CLI11
-  GTest::gtest
-  tl::expected
-  ccelerate::base
-)
-add_test(NAME integration_tests COMMAND integration_tests --repo-dir ${CMAKE_CURRENT_SOURCE_DIR})
