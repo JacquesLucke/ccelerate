@@ -16,6 +16,7 @@
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/TargetParser/Host.h>
 
+#include "clang_for_ccelerate_io.hh"
 #include "get_current_executable_path.hh"
 #include "string.hh"
 
@@ -29,8 +30,8 @@ struct Cmd_ParseArgs {
 
 static int handle__parse_args(const Cmd_ParseArgs &args) {
   const path self_path = get_current_executable_path();
-  std::string clang_path =
-      self_path / "../vcpkg_installed/x64-linux/tools/llvm" / args.binary;
+  std::string clang_path = self_path.parent_path().parent_path() /
+                           "vcpkg_installed/x64-linux/tools/llvm" / args.binary;
 
   vector<const char *> driver_args;
   driver_args.push_back(clang_path.c_str());
@@ -70,29 +71,21 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
     fmt::println(stderr, "Compilation contains error");
     return 1;
   }
-  llvm::SmallVector<std::pair<int, const clang::driver::Command *>, 4>
-      failing_commands;
-  for (auto &job : compilation->getJobs()) {
-    fmt::println("Job: {}", job.getExecutable());
-    fmt::println(" Inputs:");
-    auto input_infos = job.getInputInfos();
-    for (const auto &input_info : input_infos) {
-      fmt::println("  {}", input_info.getAsString());
-    }
-    auto output_files = job.getOutputFilenames();
-    fmt::println(" Outputs:");
-    for (const auto &output_file : output_files) {
-      fmt::println("  {}", output_file);
-    }
-    fmt::println(" Args:");
-    auto job_args = job.getArguments();
-    for (const auto &arg : job_args) {
-      fmt::println("  {}", arg);
-    }
-    fmt::println("\n");
 
-    // job.Print(llvm::outs(), "\n", true, nullptr);
+  clang_io::ParsedArgs parsed_args;
+
+  for (auto &job : compilation->getJobs()) {
+    clang_io::Command command;
+    command.executable = job.getExecutable();
+    for (const auto &arg : job.getArguments()) {
+      command.args.push_back(arg);
+    }
+    parsed_args.commands.push_back(command);
   }
+
+  msgpack::sbuffer buffer;
+  msgpack::pack(buffer, parsed_args);
+  fwrite(buffer.data(), buffer.size(), 1, stdout);
   return 0;
 }
 

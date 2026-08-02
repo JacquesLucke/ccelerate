@@ -81,8 +81,7 @@ void send_response_final(const ClientID &client_id,
   send_response_frame(client_id, frame);
 }
 
-static void send_response_error(const ClientID &client_id,
-                                const string_view message) {
+void send_response_error(const ClientID &client_id, const string_view message) {
   spdlog::error("{}", message);
   send_response_final(
       client_id, "", fmt::format("ccelerate: {}\n", message), 1);

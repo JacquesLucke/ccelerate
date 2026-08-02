@@ -33,6 +33,7 @@ void send_response_final(const ClientID &client_id,
                          string stdout,
                          string stderr,
                          int exit_code);
+void send_response_error(const ClientID &client_id, string_view message);
 
 void pass_through_external_call(const ClientID &client_id,
                                 const ProcessArgs &args,
