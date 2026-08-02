@@ -20,15 +20,16 @@ void handle_request__clang(const Request &request) {
                       .args(request.args));
   if (parse_result.exit_code() != 0) {
     send_response_final(request.client_id,
-                        std::move(parse_result.stdout),
-                        std::move(parse_result.stderr),
+                        std::move(parse_result.stdout_data),
+                        std::move(parse_result.stderr_data),
                         parse_result.exit_code().value_or(1));
     return;
   }
 
   clang_io::ParsedArgs parsed_args;
   try {
-    msgpack::unpack(parse_result.stdout.data(), parse_result.stdout.size())
+    msgpack::unpack(parse_result.stdout_data.data(),
+                    parse_result.stdout_data.size())
         .get()
         .convert(parsed_args);
 
@@ -50,8 +51,8 @@ void handle_request__clang(const Request &request) {
                         .args(command.args)
                         .working_dir(request.working_dir));
     send_response_incomplete(request.client_id,
-                             std::move(cmd_result.stdout),
-                             std::move(cmd_result.stderr));
+                             std::move(cmd_result.stdout_data),
+                             std::move(cmd_result.stderr_data));
     if (cmd_result.exit_code() != 0) {
       send_response_final(
           request.client_id, "", "", cmd_result.exit_code().value_or(1));

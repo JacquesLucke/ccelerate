@@ -73,18 +73,22 @@ private:
   using ExitOrError = variant<int, error_code>;
   ExitOrError exit_or_error_;
 
-  ProcessResult(ExitOrError exit_or_error, string stdout, string stderr)
-      : exit_or_error_(std::move(exit_or_error)), stdout(std::move(stdout)),
-        stderr(std::move(stderr)) {}
+  ProcessResult(ExitOrError exit_or_error,
+                string stdout_data,
+                string stderr_data)
+      : exit_or_error_(std::move(exit_or_error)),
+        stdout_data(std::move(stdout_data)),
+        stderr_data(std::move(stderr_data)) {}
 
 public:
-  string stdout;
-  string stderr;
+  string stdout_data;
+  string stderr_data;
 
   static ProcessResult
-  from_error(error_code ec, string stdout = "", string stderr = "");
-  static ProcessResult
-  from_finished(int exit_code, string stdout = "", string stderr = "");
+  from_error(error_code ec, string stdout_data = "", string stderr_data = "");
+  static ProcessResult from_finished(int exit_code,
+                                     string stdout_data = "",
+                                     string stderr_data = "");
 
   optional<int> exit_code() const {
     if (const int *exit_code_ptr = std::get_if<int>(&exit_or_error_)) {

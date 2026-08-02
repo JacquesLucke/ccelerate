@@ -10,8 +10,8 @@ void pass_through_external_call(const ClientID &client_id,
                                 const ProcessArgs &args,
                                 const bool is_final) {
   ProcessResult result = run_process(args);
-  string final_stdout = std::move(result.stdout);
-  string final_stderr = std::move(result.stderr);
+  string final_stdout = std::move(result.stdout_data);
+  string final_stderr = std::move(result.stderr_data);
   if (const optional<error_code> ec = result.error()) {
     final_stderr += "\n";
     final_stderr += ec->message();

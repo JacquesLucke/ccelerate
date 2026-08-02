@@ -83,9 +83,9 @@ TEST(Integration, ClangNoArgs) {
       run_process(ProcessArgs()
                       .arg(args.binary_dir / "ccelerate_clang")
                       .envs(server_ctx.env));
-  EXPECT_EQ(result.exit_code(), 1) << result.stderr;
-  EXPECT_EQ(result.stdout, "");
-  EXPECT_THAT(result.stderr, testing::HasSubstr("no input files"));
+  EXPECT_EQ(result.exit_code(), 1) << result.stderr_data;
+  EXPECT_EQ(result.stdout_data, "");
+  EXPECT_THAT(result.stderr_data, testing::HasSubstr("no input files"));
 }
 
 TEST(Integration, HelloWorld) {
@@ -103,12 +103,12 @@ TEST(Integration, HelloWorld) {
                              output_file,
                              project_dir / "hello_world.cc"})
                       .envs(server_ctx.env));
-  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr;
+  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr_data;
 
   const ProcessResult run_result = run_process(ProcessArgs().arg(output_file));
   ASSERT_EQ(run_result.exit_code(), 0);
-  EXPECT_EQ(run_result.stdout, "Hello World!\n");
-  EXPECT_EQ(run_result.stderr, "");
+  EXPECT_EQ(run_result.stdout_data, "Hello World!\n");
+  EXPECT_EQ(run_result.stderr_data, "");
 }
 
 static void test_simple_cmake_project(const string_view project_name,
@@ -130,19 +130,19 @@ static void test_simple_cmake_project(const string_view project_name,
                              project_dir,
                              "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"})
                       .envs(server_ctx.env));
-  ASSERT_EQ(configure_result.exit_code(), 0) << configure_result.stderr;
+  ASSERT_EQ(configure_result.exit_code(), 0) << configure_result.stderr_data;
 
   const ProcessResult build_result = run_process(
       ProcessArgs()
           .args({args.binary_dir / "ccelerate_cmake", "--build", output_dir})
           .envs(server_ctx.env));
-  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr;
+  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr_data;
 
   const ProcessResult run_result =
       run_process(ProcessArgs().arg(output_dir / project_name));
-  ASSERT_EQ(run_result.exit_code(), 0) << run_result.stderr;
-  EXPECT_EQ(run_result.stdout, expected_stdout);
-  EXPECT_EQ(run_result.stderr, "");
+  ASSERT_EQ(run_result.exit_code(), 0) << run_result.stderr_data;
+  EXPECT_EQ(run_result.stdout_data, expected_stdout);
+  EXPECT_EQ(run_result.stderr_data, "");
 }
 
 TEST(Integration, BasicCMake) {
