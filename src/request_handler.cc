@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: MIT
 
-#include "error_code.hh"
-#include "get_current_executable_path.hh"
 #include "request_handler.hh"
+#include "error_code.hh"
 #include "run_process.hh"
 
 namespace ccelerate {
 
-static void pass_through_external_call(const ClientID &client_id,
-                                       const ProcessArgs &args,
-                                       const bool is_final) {
+void pass_through_external_call(const ClientID &client_id,
+                                const ProcessArgs &args,
+                                const bool is_final) {
   ProcessResult result = run_process(args);
   string final_stdout = std::move(result.stdout);
   string final_stderr = std::move(result.stderr);
@@ -30,7 +29,7 @@ static void pass_through_external_call(const ClientID &client_id,
   }
 }
 
-static void handle_eager_program_call(const Request &request) {
+static void handle_request__eager(const Request &request) {
   pass_through_external_call(request.client_id,
                              ProcessArgs()
                                  .arg(to_string(request.program))
@@ -39,35 +38,16 @@ static void handle_eager_program_call(const Request &request) {
                              true);
 }
 
-static void handle_cmake_call(const Request &request) {
-  const path binary_path = get_current_executable_path();
-  const path dir = binary_path.parent_path();
-
-  ProcessArgs args;
-  args.arg("cmake")
-      .args(request.args)
-      .working_dir(request.working_dir)
-      .env("CC", dir / "ccelerate_clang")
-      .env("CXX", dir / "ccelerate_clang++");
-
-  const bool has_build_arg = std::ranges::any_of(
-      request.args, [](const string &arg) { return arg == "--build"; });
-  if (!has_build_arg) {
-    args.arg(fmt::format("-DCMAKE_AR={}", (dir / "ccelerate_ar").string()));
-  }
-  pass_through_external_call(request.client_id, args, true);
-}
-
 void handle_request(const Request &request) {
   switch (request.program) {
     case wrap_io::Program::Clang:
     case wrap_io::Program::Clangxx:
     case wrap_io::Program::Ar: {
-      handle_eager_program_call(request);
+      handle_request__eager(request);
       break;
     }
     case wrap_io::Program::CMake:
-      handle_cmake_call(request);
+      handle_request__cmake(request);
       break;
   }
 }
