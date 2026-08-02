@@ -31,18 +31,27 @@ struct CallRequest {
   MSGPACK_DEFINE(program, working_dir, args);
 };
 
-inline string_view to_string(const Program wrapped_program) {
+inline const std::string &to_string(const Program wrapped_program) {
   switch (wrapped_program) {
-    case Program::Clang:
-      return "clang";
-    case Program::Clangxx:
-      return "clang++";
-    case Program::Ar:
-      return "ar";
-    case Program::CMake:
-      return "cmake";
+    case Program::Clang: {
+      static const std::string str = "clang";
+      return str;
+    }
+    case Program::Clangxx: {
+      static const std::string str = "clang++";
+      return str;
+    }
+    case Program::Ar: {
+      static const std::string str = "ar";
+      return str;
+    }
+    case Program::CMake: {
+      static const std::string str = "cmake";
+      return str;
+    }
   }
-  return "unknown";
+  static const std::string str = "unknown";
+  return str;
 }
 
 struct CallResponseFrame {

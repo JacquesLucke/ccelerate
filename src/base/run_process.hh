@@ -23,7 +23,7 @@ struct ProcessArgs {
     vector<string> args;
     EnvMode env_mode = EnvMode::Inherit;
     vector<pair<string, string>> env_vars;
-    path working_dir;
+    optional<path> working_dir;
   } data;
 
   ProcessArgs &env_mode(const EnvMode mode) {
@@ -61,6 +61,11 @@ struct ProcessArgs {
         this->data.env_vars.end(), std::begin(r), std::end(r));
     return *this;
   }
+
+  ProcessArgs &working_dir(path dir) {
+    this->data.working_dir = std::move(dir);
+    return *this;
+  }
 };
 
 struct ProcessResult {
@@ -84,6 +89,13 @@ public:
   optional<int> exit_code() const {
     if (const int *exit_code_ptr = std::get_if<int>(&exit_or_error_)) {
       return *exit_code_ptr;
+    }
+    return nullopt;
+  }
+
+  optional<error_code> error() const {
+    if (const error_code *ec_ptr = std::get_if<error_code>(&exit_or_error_)) {
+      return *ec_ptr;
     }
     return nullopt;
   }

@@ -83,7 +83,7 @@ TEST(Integration, ClangNoArgs) {
       run_process(ProcessArgs()
                       .arg(args.binary_dir / "ccelerate_clang")
                       .envs(server_ctx.env));
-  EXPECT_EQ(result.exit_code(), 1);
+  EXPECT_EQ(result.exit_code(), 1) << result.stderr;
   EXPECT_EQ(result.stdout, "");
   EXPECT_THAT(result.stderr, testing::HasSubstr("no input files"));
 }
@@ -103,7 +103,7 @@ TEST(Integration, HelloWorld) {
                              output_file,
                              project_dir / "hello_world.cc"})
                       .envs(server_ctx.env));
-  ASSERT_EQ(build_result.exit_code(), 0);
+  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr;
 
   const ProcessResult run_result = run_process(ProcessArgs().arg(output_file));
   ASSERT_EQ(run_result.exit_code(), 0);
@@ -127,17 +127,17 @@ TEST(Integration, BasicCMake) {
                              "-S",
                              project_dir})
                       .envs(server_ctx.env));
-  ASSERT_EQ(configure_result.exit_code(), 0);
+  ASSERT_EQ(configure_result.exit_code(), 0) << configure_result.stderr;
 
   const ProcessResult build_result = run_process(
       ProcessArgs()
           .args({args.binary_dir / "ccelerate_cmake", "--build", output_dir})
           .envs(server_ctx.env));
-  ASSERT_EQ(build_result.exit_code(), 0);
+  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr;
 
   const ProcessResult run_result =
       run_process(ProcessArgs().arg(output_dir / "basic_cmake"));
-  ASSERT_EQ(run_result.exit_code(), 0);
+  ASSERT_EQ(run_result.exit_code(), 0) << run_result.stderr;
   EXPECT_EQ(run_result.stdout, "It worked!\n");
   EXPECT_EQ(run_result.stderr, "");
 }

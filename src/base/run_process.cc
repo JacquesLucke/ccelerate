@@ -2,6 +2,7 @@
 
 #include "run_process.hh"
 
+#include <fmt/format.h>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 
@@ -19,6 +20,9 @@ ProcessResult::from_finished(int exit_code, string stdout, string stderr) {
 
 ProcessResult run_process(const ProcessArgs &args) {
   reproc::options options;
+  if (args.data.working_dir) {
+    options.working_directory = args.data.working_dir->c_str();
+  }
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   options.env.behavior = args.data.env_mode == ProcessArgs::EnvMode::Replace
