@@ -10,7 +10,8 @@
 #include "base/string.hh"
 #include "base/vector.hh"
 
-namespace ccelerate {
+namespace ccelerate::wrap_io {
+
 enum class WrappedProgram {
   Clang = 0,
   Clangxx = 1,
@@ -18,9 +19,9 @@ enum class WrappedProgram {
   CMake = 3,
 };
 }
-MSGPACK_ADD_ENUM(ccelerate::WrappedProgram);
+MSGPACK_ADD_ENUM(ccelerate::wrap_io::WrappedProgram);
 
-namespace ccelerate {
+namespace ccelerate::wrap_io {
 
 struct WrappedProgramCall {
   WrappedProgram program;
@@ -59,4 +60,4 @@ inline string format_as(const WrappedProgramCall &call) {
       "{} {}", to_string(call.program), fmt::join(call.args, " "));
 }
 
-} // namespace ccelerate
+} // namespace ccelerate::wrap_io

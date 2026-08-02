@@ -47,7 +47,7 @@ target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 
 function(add_ccelerate_wrapper wrapper_name type)
   add_executable(${wrapper_name}
-    ./src/program_wrapper.cc
+    ./src/wrap_main.cc
   )
   target_link_libraries(${wrapper_name} PRIVATE
     fmt::fmt

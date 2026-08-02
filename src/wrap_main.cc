@@ -5,7 +5,7 @@
 #include <zmq_addon.hpp>
 
 #include "default_endpoint.hh"
-#include "program_wrapper.hh"
+#include "wrap_io.hh"
 
 #ifndef CCELERATE_WRAP_TYPE
 #error "CCELERATE_WRAP_TYPE must be defined"
@@ -15,9 +15,9 @@ namespace ccelerate {
 
 int call(const int argc, char **argv) {
   // Prepare the call struct that is passed to the server.
-  WrappedProgramCall call;
+  wrap_io::WrappedProgramCall call;
   call.cwd = std::filesystem::current_path().string();
-  call.program = WrappedProgram::CCELERATE_WRAP_TYPE;
+  call.program = wrap_io::WrappedProgram::CCELERATE_WRAP_TYPE;
   for (int i = 1; i < argc; ++i) {
     call.args.push_back(argv[i]);
   }
@@ -51,7 +51,7 @@ int call(const int argc, char **argv) {
       const zmq::message_t &response = recv_parts.end()[-1];
 
       // Parse the response struct.
-      WrappedProgramResult program_result;
+      wrap_io::WrappedProgramResult program_result;
       msgpack::unpack(response.data<char>(), response.size())
           .get()
           .convert(program_result);
