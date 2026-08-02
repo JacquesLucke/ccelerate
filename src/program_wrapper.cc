@@ -28,7 +28,7 @@ int call(const int argc, char **argv) {
     // Connect to the ccelerate server which will actually do the work.
     zmq::context_t ctx;
     zmq::socket_t socket(ctx, zmq::socket_type::dealer);
-    const std::string endpoint = get_default_ccelerate_endpoint();
+    const string endpoint = get_default_ccelerate_endpoint();
     socket.connect(endpoint);
 
     // Encode the request into a byte buffer.
@@ -37,12 +37,11 @@ int call(const int argc, char **argv) {
 
     // Send call to the server. Return value can be ignored in blocking mode.
     socket.send(identity_msg, zmq::send_flags::sndmore);
-    (void)socket.send(
-        zmq::buffer(std::string_view(request.data(), request.size())),
-        zmq::send_flags::none);
+    (void)socket.send(zmq::buffer(string_view(request.data(), request.size())),
+                      zmq::send_flags::none);
 
     while (true) {
-      std::vector<zmq::message_t> recv_parts;
+      vector<zmq::message_t> recv_parts;
       // Receive response from the server. Return value can be ignored in
       // blocking mode.
       (void)zmq::recv_multipart(socket, std::back_inserter(recv_parts));

@@ -2,12 +2,13 @@
 
 #pragma once
 
-#include <string>
-#include <vector>
-
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <msgpack.hpp>
+
+#include "base/optional.hh"
+#include "base/string.hh"
+#include "base/vector.hh"
 
 namespace ccelerate {
 enum class WrappedProgram {
@@ -23,13 +24,13 @@ namespace ccelerate {
 
 struct WrappedProgramCall {
   WrappedProgram program;
-  std::string cwd;
-  std::vector<std::string> args;
+  string cwd;
+  vector<string> args;
 
   MSGPACK_DEFINE(program, cwd, args);
 };
 
-inline std::string_view to_string(const WrappedProgram wrapped_program) {
+inline string_view to_string(const WrappedProgram wrapped_program) {
   switch (wrapped_program) {
   case WrappedProgram::Clang:
     return "clang";
@@ -44,16 +45,16 @@ inline std::string_view to_string(const WrappedProgram wrapped_program) {
 }
 
 struct WrappedProgramResult {
-  std::string stdout;
-  std::string stderr;
+  string stdout;
+  string stderr;
 
   // Exit code is only set when the process finished.
-  std::optional<int> exit_code;
+  optional<int> exit_code;
 
   MSGPACK_DEFINE(stdout, stderr, exit_code);
 };
 
-inline std::string format_as(const WrappedProgramCall &call) {
+inline string format_as(const WrappedProgramCall &call) {
   return fmt::format("{} {}", to_string(call.program),
                      fmt::join(call.args, " "));
 }

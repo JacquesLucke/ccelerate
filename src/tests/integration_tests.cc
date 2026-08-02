@@ -8,6 +8,12 @@
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 
+#include "../base/error_code.hh"
+#include "../base/filesystem.hh"
+#include "../base/optional.hh"
+#include "../base/pair.hh"
+#include "../base/string.hh"
+#include "../base/vector.hh"
 #include "../default_endpoint.hh"
 #include "../get_current_executable_path.hh"
 
@@ -15,10 +21,10 @@ namespace ccelerate::tests {
 
 struct Args {
   bool use_external_server = false;
-  std::filesystem::path repo_dir;
-  std::filesystem::path test_projects_dir;
-  std::filesystem::path test_out_dir;
-  std::filesystem::path test_build_dir;
+  path repo_dir;
+  path test_projects_dir;
+  path test_out_dir;
+  path test_build_dir;
 
   static Args &get() {
     static Args args;
@@ -26,7 +32,7 @@ struct Args {
   }
 };
 
-static std::string get_random_endpoint() {
+static string get_random_endpoint() {
   static std::random_device rd;
   static std::mt19937 gen(rd());
   static std::uniform_int_distribution<int> dist(
@@ -38,7 +44,7 @@ class CcelerateServerContext {
 private:
   bool uses_external_server_;
   reproc::process server_process_;
-  std::string endpoint_;
+  string endpoint_;
 
 public:
   CcelerateServerContext() {
@@ -49,45 +55,44 @@ public:
     } else {
       endpoint_ = get_random_endpoint();
       reproc::options options;
-      const std::vector<std::pair<std::string, std::string>> extra_env = {
+      const vector<pair<string, string>> extra_env = {
           std::make_pair("CCELERATE_ENDPOINT", endpoint_)};
       options.env.extra = extra_env;
 
-      std::vector<std::string> cmd_args;
+      vector<string> cmd_args;
       cmd_args.push_back(args.test_build_dir / "ccelerate");
-      const std::error_code ec = server_process_.start(cmd_args, options);
+      const error_code ec = server_process_.start(cmd_args, options);
       EXPECT_FALSE(ec) << "Failed to start server: " << ec.message();
     }
   }
 
   ~CcelerateServerContext() {
     if (!uses_external_server_) {
-      const std::error_code ec = server_process_.terminate();
+      const error_code ec = server_process_.terminate();
       EXPECT_FALSE(ec) << "Failed to terminate server: " << ec.message();
     }
   }
 
-  const std::string &endpoint() const { return endpoint_; }
+  const string &endpoint() const { return endpoint_; }
 };
 
 struct ProcessResult {
-  std::string stdout;
-  std::string stderr;
+  string stdout;
+  string stderr;
   int exit_code;
 };
 
-static std::optional<ProcessResult>
-run_and_get_result(const std::vector<std::string> &args,
-                   reproc::options options = {},
+static optional<ProcessResult>
+run_and_get_result(const vector<string> &args, reproc::options options = {},
                    const bool expect_exit_0 = false) {
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
-  std::error_code ec = proc.start(args, options);
+  error_code ec = proc.start(args, options);
   EXPECT_FALSE(ec) << "Failed to start process: " << ec.message() << " --- "
                    << fmt::format("{}", fmt::join(args, " "));
-  std::string stdout;
-  std::string stderr;
+  string stdout;
+  string stderr;
   ec = reproc::drain(proc, reproc::sink::string(stdout),
                      reproc::sink::string(stderr));
   EXPECT_FALSE(ec) << "Failed to drain process: " << ec.message();
@@ -102,12 +107,12 @@ run_and_get_result(const std::vector<std::string> &args,
   return ProcessResult{std::move(stdout), std::move(stderr), exit_code};
 }
 
-static std::optional<ProcessResult>
+static optional<ProcessResult>
 run_wrapper_process(const CcelerateServerContext &server_ctx,
-                    const std::vector<std::string> &args,
+                    const vector<string> &args,
                     const bool expect_exit_0 = false) {
   reproc::options options;
-  const std::vector<std::pair<std::string, std::string>> extra_env = {
+  const vector<pair<string, string>> extra_env = {
       std::make_pair("CCELERATE_ENDPOINT", server_ctx.endpoint())};
   options.env.extra = extra_env;
   return run_and_get_result(args, std::move(options), expect_exit_0);
@@ -116,25 +121,24 @@ run_wrapper_process(const CcelerateServerContext &server_ctx,
 TEST(Integration, ClangNoArgs) {
   const Args &args = Args::get();
   CcelerateServerContext server_ctx;
-  const std::optional<ProcessResult> result = run_wrapper_process(
+  const optional<ProcessResult> result = run_wrapper_process(
       server_ctx, {args.test_build_dir / "ccelerate_clang"});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "");
-  EXPECT_NE(result->stderr.find("no input files"), std::string::npos);
+  EXPECT_NE(result->stderr.find("no input files"), string::npos);
   EXPECT_EQ(result->exit_code, 1);
 }
 
 TEST(Integration, HelloWorld) {
   const Args &args = Args::get();
-  const std::filesystem::path project_dir =
-      args.test_projects_dir / "hello_world";
-  const std::filesystem::path output_file = args.test_out_dir / "hello_world";
+  const path project_dir = args.test_projects_dir / "hello_world";
+  const path output_file = args.test_out_dir / "hello_world";
   std::filesystem::create_directories(output_file.parent_path());
   CcelerateServerContext server_ctx;
   run_wrapper_process(server_ctx,
                       {args.test_build_dir / "ccelerate_clang", "-o",
                        output_file, project_dir / "hello_world.cc"});
-  const std::optional<ProcessResult> result = run_and_get_result({output_file});
+  const optional<ProcessResult> result = run_and_get_result({output_file});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "Hello World!\n");
   EXPECT_EQ(result->stderr, "");
@@ -143,9 +147,8 @@ TEST(Integration, HelloWorld) {
 
 TEST(Integration, BasicCMake) {
   const Args &args = Args::get();
-  const std::filesystem::path project_dir =
-      args.test_projects_dir / "basic_cmake";
-  const std::filesystem::path output_dir = args.test_out_dir / "basic_cmake";
+  const path project_dir = args.test_projects_dir / "basic_cmake";
+  const path output_dir = args.test_out_dir / "basic_cmake";
   std::filesystem::create_directories(output_dir);
   CcelerateServerContext server_ctx;
   run_wrapper_process(server_ctx,
@@ -155,7 +158,7 @@ TEST(Integration, BasicCMake) {
   run_wrapper_process(
       server_ctx,
       {args.test_build_dir / "ccelerate_cmake", "--build", output_dir}, true);
-  const std::optional<ProcessResult> result =
+  const optional<ProcessResult> result =
       run_and_get_result({output_dir / "basic_cmake"});
   ASSERT_TRUE(result);
   EXPECT_EQ(result->stdout, "It worked!\n");
@@ -174,7 +177,7 @@ int main(int argc, char **argv) {
 
   Args &args = Args::get();
   app.add_option("--repo-dir", args.repo_dir,
-                 "Path to the ccelerate repository")
+                 "path to the ccelerate repository")
       ->required();
   app.add_flag("--external-server", args.use_external_server,
                "Use an existing external ccelerate server for the tests");

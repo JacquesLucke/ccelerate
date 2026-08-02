@@ -8,16 +8,18 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "base/error_code.hh"
+#include "base/pair.hh"
 #include "default_endpoint.hh"
 #include "get_current_executable_path.hh"
 #include "program_wrapper.hh"
 
 namespace ccelerate {
 
-static std::string inproc_endpoint = "inproc://server";
+static string inproc_endpoint = "inproc://server";
 
 struct GlobalState {
-  std::filesystem::path binary_path;
+  path binary_path;
   zmq::context_t ctx;
   tbb::task_group task_group;
 };
@@ -42,16 +44,15 @@ static ThreadState &get_thread_state() {
   return thread_state;
 }
 
-static void
-pass_through_external_call(std::vector<zmq::message_t> &request_frames,
-                           const std::vector<std::string> &args,
-                           reproc::options options) {
+static void pass_through_external_call(vector<zmq::message_t> &request_frames,
+                                       const vector<string> &args,
+                                       reproc::options options) {
   ThreadState &thread_state = get_thread_state();
 
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
-  std::error_code ec = proc.start(args, options);
+  error_code ec = proc.start(args, options);
   WrappedProgramResult program_result;
   if (!ec) {
     ec = reproc::drain(proc, reproc::sink::string(program_result.stdout),
@@ -83,32 +84,31 @@ pass_through_external_call(std::vector<zmq::message_t> &request_frames,
       zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
 }
 
-static void
-handle_eager_program_call(std::vector<zmq::message_t> &request_frames,
-                          const WrappedProgramCall &call) {
+static void handle_eager_program_call(vector<zmq::message_t> &request_frames,
+                                      const WrappedProgramCall &call) {
   reproc::options options;
   options.working_directory = call.cwd.c_str();
-  std::vector<std::string> args;
-  args.push_back(std::string(to_string(call.program)));
+  vector<string> args;
+  args.push_back(string(to_string(call.program)));
   for (const auto &arg : call.args) {
     args.push_back(arg);
   }
   pass_through_external_call(request_frames, args, std::move(options));
 }
 
-static void handle_cmake_call(std::vector<zmq::message_t> &request_frames,
+static void handle_cmake_call(vector<zmq::message_t> &request_frames,
                               const WrappedProgramCall &call) {
   const GlobalState &global_state = get_global_state();
-  const std::filesystem::path dir = global_state.binary_path.parent_path();
+  const path dir = global_state.binary_path.parent_path();
 
   reproc::options options;
   options.working_directory = call.cwd.c_str();
-  const std::vector<std::pair<std::string, std::string>> extra_env = {
+  const vector<pair<string, string>> extra_env = {
       {"CC", dir / "ccelerate_clang"},
       {"CXX", dir / "ccelerate_clang++"},
   };
   options.env.extra = extra_env;
-  std::vector<std::string> args;
+  vector<string> args;
   args.push_back("cmake");
   bool has_build_arg = false;
   for (const auto &arg : call.args) {
@@ -124,8 +124,7 @@ static void handle_cmake_call(std::vector<zmq::message_t> &request_frames,
   pass_through_external_call(request_frames, args, std::move(options));
 }
 
-static void
-handle_incoming_message(std::vector<zmq::message_t> &request_frames) {
+static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
 
   const zmq::message_t &actual_message = request_frames.end()[-1];
   WrappedProgramCall call;
@@ -152,14 +151,14 @@ int ccelerate_main(const int argc, char **argv) {
 
   try {
     zmq::socket_t external_sock(global_state.ctx, zmq::socket_type::router);
-    const std::string endpoint = get_default_ccelerate_endpoint();
+    const string endpoint = get_default_ccelerate_endpoint();
     external_sock.bind(endpoint);
     fmt::println("Listening on {}", endpoint);
 
     zmq::socket_t proxy_sock(global_state.ctx, zmq::socket_type::dealer);
     proxy_sock.bind(inproc_endpoint);
 
-    std::vector<zmq::pollitem_t> poll_items = {
+    vector<zmq::pollitem_t> poll_items = {
         {external_sock.handle(), 0, ZMQ_POLLIN, 0},
         {proxy_sock.handle(), 0, ZMQ_POLLIN, 0},
     };
@@ -169,7 +168,7 @@ int ccelerate_main(const int argc, char **argv) {
 
       // Handle new incoming request from other process.
       if (poll_items[0].revents & ZMQ_POLLIN) {
-        auto parts = std::make_shared<std::vector<zmq::message_t>>();
+        auto parts = std::make_shared<vector<zmq::message_t>>();
         (void)zmq::recv_multipart(external_sock, std::back_inserter(*parts));
         global_state.task_group.run(
             [parts = std::move(parts)]() { handle_incoming_message(*parts); });
