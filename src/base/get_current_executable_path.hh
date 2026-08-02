@@ -4,8 +4,8 @@
 
 #include <whereami.h>
 
-#include "base/filesystem.hh"
-#include "base/vector.hh"
+#include "filesystem.hh"
+#include "vector.hh"
 
 namespace ccelerate {
 

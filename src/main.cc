@@ -9,9 +9,9 @@
 #include <zmq_addon.hpp>
 
 #include "base/error_code.hh"
+#include "base/get_current_executable_path.hh"
 #include "base/pair.hh"
 #include "default_endpoint.hh"
-#include "get_current_executable_path.hh"
 #include "program_wrapper.hh"
 
 namespace ccelerate {

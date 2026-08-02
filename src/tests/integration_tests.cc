@@ -11,12 +11,12 @@
 
 #include "../base/error_code.hh"
 #include "../base/filesystem.hh"
+#include "../base/get_current_executable_path.hh"
 #include "../base/pair.hh"
 #include "../base/run_process.hh"
 #include "../base/string.hh"
 #include "../base/vector.hh"
 #include "../default_endpoint.hh"
-#include "../get_current_executable_path.hh"
 
 namespace ccelerate::tests {
 

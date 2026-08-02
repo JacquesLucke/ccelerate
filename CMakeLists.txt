@@ -34,7 +34,6 @@ target_link_libraries(ccelerate PRIVATE
   reproc++
   TBB::tbb
   CLI11::CLI11
-  unofficial::whereami::whereami
   tl::expected
   ccelerate::base
 )
@@ -79,7 +78,6 @@ target_link_libraries(integration_tests PRIVATE
   reproc++
   CLI11::CLI11
   GTest::gtest
-  unofficial::whereami::whereami
   tl::expected
   ccelerate::base
 )
