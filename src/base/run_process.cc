@@ -26,8 +26,8 @@ ProcessResult run_process(const ProcessArgs &args) {
   options.redirect.out.type = reproc::redirect::pipe;
   options.redirect.err.type = reproc::redirect::pipe;
   options.env.behavior = args.data.env_mode == ProcessArgs::EnvMode::Replace
-                             ? reproc::env::type::extend
-                             : reproc::env::type::empty;
+                             ? reproc::env::type::empty
+                             : reproc::env::type::extend;
   options.env.extra = args.data.env_vars;
   reproc::process proc;
   {
