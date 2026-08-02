@@ -37,19 +37,51 @@
       "configurePreset": "release"
     }
   ],
-  "workflowPresets": [
+  "testPresets": [
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
     {
       "name": "release",
+      "configurePreset": "release",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "release_build",
       "steps": [
         { "type": "configure", "name": "release" },
         { "type": "build", "name": "release" }
       ]
     },
     {
-      "name": "debug",
+      "name": "debug_build",
       "steps": [
         { "type": "configure", "name": "debug" },
         { "type": "build", "name": "debug" }
+      ]
+    },
+    {
+      "name": "release",
+      "steps": [
+        { "type": "configure", "name": "release" },
+        { "type": "build", "name": "release" },
+        { "type": "test", "name": "release" }
+      ]
+    },
+    {
+      "name": "debug",
+      "steps": [
+        { "type": "configure", "name": "debug" },
+        { "type": "build", "name": "debug" },
+        { "type": "test", "name": "debug" }
       ]
     }
   ]
