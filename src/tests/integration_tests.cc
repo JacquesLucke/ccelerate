@@ -111,12 +111,13 @@ TEST(Integration, HelloWorld) {
   EXPECT_EQ(run_result.stderr, "");
 }
 
-TEST(Integration, BasicCMake) {
+static void test_simple_cmake_project(const string_view project_name,
+                                      const string_view expected_stdout) {
   const Args &args = Args::get();
   CcelerateServerContext server_ctx;
 
-  const path project_dir = args.test_projects_dir / "basic_cmake";
-  const path output_dir = args.test_out_dir / "basic_cmake";
+  const path project_dir = args.test_projects_dir / project_name;
+  const path output_dir = args.test_out_dir / project_name;
   std::filesystem::create_directories(output_dir);
 
   const ProcessResult configure_result =
@@ -136,10 +137,19 @@ TEST(Integration, BasicCMake) {
   ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr;
 
   const ProcessResult run_result =
-      run_process(ProcessArgs().arg(output_dir / "basic_cmake"));
+      run_process(ProcessArgs().arg(output_dir / project_name));
   ASSERT_EQ(run_result.exit_code(), 0) << run_result.stderr;
-  EXPECT_EQ(run_result.stdout, "It worked!\n");
+  EXPECT_EQ(run_result.stdout, expected_stdout);
   EXPECT_EQ(run_result.stderr, "");
+}
+
+TEST(Integration, BasicCMake) {
+  test_simple_cmake_project("basic_cmake", "It worked!\n");
+}
+
+TEST(Integration, MultiFileCMake) {
+  test_simple_cmake_project("multi_file_cmake",
+                            "Hello from C\nHello from C++\n");
 }
 
 } // namespace ccelerate::tests
