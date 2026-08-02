@@ -2,11 +2,11 @@
 
 #pragma once
 
-#include <optional>
+#include <tl/expected.hpp>
 
 namespace ccelerate {
 
-using std::nullopt;
-using std::optional;
+using tl::expected;
+using tl::unexpected;
 
 } // namespace ccelerate

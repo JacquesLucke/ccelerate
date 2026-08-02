@@ -2,11 +2,10 @@
 
 #pragma once
 
-#include <optional>
+#include <variant>
 
 namespace ccelerate {
 
-using std::nullopt;
-using std::optional;
+using std::variant;
 
 } // namespace ccelerate

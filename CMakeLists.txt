@@ -13,6 +13,9 @@ find_package(reproc++ CONFIG REQUIRED)
 find_package(TBB CONFIG REQUIRED)
 find_package(CLI11 CONFIG REQUIRED)
 find_package(unofficial-whereami CONFIG REQUIRED)
+find_package(tl-expected CONFIG REQUIRED)
+
+add_subdirectory(src/base)
 
 # Setup ccelerate executable.
 add_executable(ccelerate
@@ -32,6 +35,8 @@ target_link_libraries(ccelerate PRIVATE
   TBB::tbb
   CLI11::CLI11
   unofficial::whereami::whereami
+  tl::expected
+  ccelerate::base
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 
@@ -47,7 +52,10 @@ function(add_ccelerate_wrapper wrapper_name type)
   target_link_libraries(${wrapper_name} PRIVATE
     fmt::fmt
     cppzmq-static
-    msgpack-cxx)
+    msgpack-cxx
+    tl::expected
+    ccelerate::base
+  )
   target_compile_definitions(${wrapper_name} PRIVATE MSGPACK_NO_BOOST)
   target_compile_definitions(${wrapper_name} PRIVATE CCELERATE_WRAP_TYPE=${type})
 endfunction()
@@ -72,5 +80,7 @@ target_link_libraries(integration_tests PRIVATE
   CLI11::CLI11
   GTest::gtest
   unofficial::whereami::whereami
+  tl::expected
+  ccelerate::base
 )
 add_test(NAME integration_tests COMMAND integration_tests --repo-dir ${CMAKE_CURRENT_SOURCE_DIR})
