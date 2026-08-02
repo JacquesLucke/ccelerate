@@ -100,7 +100,7 @@ static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
   Request request;
   // The last frame and the empty frame before that are not part of the id.
   assert(request_frames[request_frames.size() - 2].size() == 0);
-  for (int i = 0; i < request_frames.size() - 2; i++) {
+  for (size_t i = 0; i < request_frames.size() - 2; i++) {
     request.client_id.parts.push_back(request_frames[i].to_string());
   }
   const std::string message = request_frames.end()[-1].to_string();
