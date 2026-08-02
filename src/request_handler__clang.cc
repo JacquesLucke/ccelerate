@@ -17,7 +17,8 @@ void handle_request__clang(const Request &request) {
                              "--binary",
                              to_string(request.program)})
                       .arg("--")
-                      .args(request.args));
+                      .args(request.args)
+                      .working_dir(request.working_dir));
   if (parse_result.exit_code() != 0) {
     send_response_final(request.client_id,
                         std::move(parse_result.stdout_data),
@@ -25,14 +26,21 @@ void handle_request__clang(const Request &request) {
                         parse_result.exit_code().value_or(1));
     return;
   }
+  if (!string_view(parse_result.stdout_data).starts_with(clang_io::magic)) {
+    send_response_final(request.client_id,
+                        parse_result.stdout_data,
+                        parse_result.stderr_data,
+                        0);
+    return;
+  }
 
   clang_io::ParsedArgs parsed_args;
   try {
-    msgpack::unpack(parse_result.stdout_data.data(),
-                    parse_result.stdout_data.size())
+    string_view stdout_to_parse =
+        string_view(parse_result.stdout_data).substr(clang_io::magic.size());
+    msgpack::unpack(stdout_to_parse.data(), stdout_to_parse.size())
         .get()
         .convert(parsed_args);
-
   } catch (...) {
     send_response_error(request.client_id,
                         "internal error parsing clang_for_ccelerate output");

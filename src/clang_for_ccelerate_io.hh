@@ -9,6 +9,8 @@
 
 namespace ccelerate::clang_io {
 
+static const string magic = "VALID_RETURN_STRUCT";
+
 struct Command {
   string executable;
   vector<string> args;

@@ -39,28 +39,17 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
     driver_args.push_back(arg.c_str());
   }
 
-  std::string captured_stdout;
-  std::string captured_stderr;
-  llvm::raw_string_ostream stderr_stream(captured_stderr);
-
   clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_ops =
       new clang::DiagnosticOptions();
   clang::TextDiagnosticPrinter *diag_client =
-      new clang::TextDiagnosticPrinter(stderr_stream, &*diag_ops);
+      new clang::TextDiagnosticPrinter(llvm::errs(), &*diag_ops);
   clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
       new clang::DiagnosticIDs());
   clang::DiagnosticsEngine diags(diag_id, diag_ops, diag_client);
 
-  clang::CompilerInstance clang;
-
-  llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> vfs =
-      llvm::vfs::createPhysicalFileSystem();
-  std::error_code ec = vfs->setCurrentWorkingDirectory(args.cwd.string());
-  (void)ec;
-
   std::string target_triple = llvm::sys::getProcessTriple();
   clang::driver::Driver driver(
-      clang_path, target_triple, diags, "clang LLVM Compiler", vfs);
+      clang_path, target_triple, diags, "clang LLVM Compiler");
   std::unique_ptr<clang::driver::Compilation> compilation{
       driver.BuildCompilation(driver_args)};
   if (!compilation) {
@@ -71,10 +60,16 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
     fmt::println(stderr, "Compilation contains error");
     return 1;
   }
-
+  if (driver.getDiags().hasErrorOccurred()) {
+    return 1;
+  }
+  const auto &jobs = compilation->getJobs();
+  if (jobs.empty()) {
+    return 0;
+  }
+  fwrite(clang_io::magic.data(), clang_io::magic.size(), 1, stdout);
   clang_io::ParsedArgs parsed_args;
-
-  for (auto &job : compilation->getJobs()) {
+  for (auto &job : jobs) {
     clang_io::Command command;
     command.executable = job.getExecutable();
     for (const auto &arg : job.getArguments()) {
