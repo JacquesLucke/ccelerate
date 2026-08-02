@@ -51,3 +51,16 @@ add_ccelerate_wrapper(ccelerate_clang Clang)
 add_ccelerate_wrapper(ccelerate_clang++ Clangxx)
 add_ccelerate_wrapper(ccelerate_ar Ar)
 add_ccelerate_wrapper(ccelerate_cmake CMake)
+
+add_executable(clang_ops
+  clang_ops_main.cc
+)
+target_link_libraries(clang_ops PRIVATE
+  fmt::fmt
+  tl::expected
+  ccelerate::base
+  spdlog::spdlog
+  ${llvm_libs}
+  ${clang_libs}
+)
+target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)

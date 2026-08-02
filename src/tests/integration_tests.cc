@@ -127,7 +127,8 @@ static void test_simple_cmake_project(const string_view project_name,
                              "-B",
                              output_dir,
                              "-S",
-                             project_dir})
+                             project_dir,
+                             "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"})
                       .envs(server_ctx.env));
   ASSERT_EQ(configure_result.exit_code(), 0) << configure_result.stderr;
 
