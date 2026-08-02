@@ -12,40 +12,40 @@
 
 namespace ccelerate::wrap_io {
 
-enum class WrappedProgram {
+enum class Program {
   Clang = 0,
   Clangxx = 1,
   Ar = 2,
   CMake = 3,
 };
 }
-MSGPACK_ADD_ENUM(ccelerate::wrap_io::WrappedProgram);
+MSGPACK_ADD_ENUM(ccelerate::wrap_io::Program);
 
 namespace ccelerate::wrap_io {
 
-struct WrappedProgramCall {
-  WrappedProgram program;
+struct CallRequest {
+  Program program;
   string cwd;
   vector<string> args;
 
   MSGPACK_DEFINE(program, cwd, args);
 };
 
-inline string_view to_string(const WrappedProgram wrapped_program) {
+inline string_view to_string(const Program wrapped_program) {
   switch (wrapped_program) {
-    case WrappedProgram::Clang:
+    case Program::Clang:
       return "clang";
-    case WrappedProgram::Clangxx:
+    case Program::Clangxx:
       return "clang++";
-    case WrappedProgram::Ar:
+    case Program::Ar:
       return "ar";
-    case WrappedProgram::CMake:
+    case Program::CMake:
       return "cmake";
   }
   return "unknown";
 }
 
-struct WrappedProgramResult {
+struct CallResponseFrame {
   string stdout;
   string stderr;
 
@@ -55,7 +55,7 @@ struct WrappedProgramResult {
   MSGPACK_DEFINE(stdout, stderr, exit_code);
 };
 
-inline string format_as(const WrappedProgramCall &call) {
+inline string format_as(const CallRequest &call) {
   return fmt::format(
       "{} {}", to_string(call.program), fmt::join(call.args, " "));
 }

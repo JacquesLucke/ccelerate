@@ -53,7 +53,7 @@ static void pass_through_external_call(vector<zmq::message_t> &request_frames,
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
   error_code ec = proc.start(args, options);
-  wrap_io::WrappedProgramResult program_result;
+  wrap_io::CallResponseFrame program_result;
   if (!ec) {
     ec = reproc::drain(proc,
                        reproc::sink::string(program_result.stdout),
@@ -86,7 +86,7 @@ static void pass_through_external_call(vector<zmq::message_t> &request_frames,
 }
 
 static void handle_eager_program_call(vector<zmq::message_t> &request_frames,
-                                      const wrap_io::WrappedProgramCall &call) {
+                                      const wrap_io::CallRequest &call) {
   reproc::options options;
   options.working_directory = call.cwd.c_str();
   vector<string> args;
@@ -98,7 +98,7 @@ static void handle_eager_program_call(vector<zmq::message_t> &request_frames,
 }
 
 static void handle_cmake_call(vector<zmq::message_t> &request_frames,
-                              const wrap_io::WrappedProgramCall &call) {
+                              const wrap_io::CallRequest &call) {
   const GlobalState &global_state = get_global_state();
   const path dir = global_state.binary_path.parent_path();
 
@@ -128,19 +128,19 @@ static void handle_cmake_call(vector<zmq::message_t> &request_frames,
 static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
 
   const zmq::message_t &actual_message = request_frames.end()[-1];
-  wrap_io::WrappedProgramCall call;
+  wrap_io::CallRequest call;
   msgpack::unpack(actual_message.data<char>(), actual_message.size())
       .get()
       .convert(call);
   fmt::println("call: {}", call);
   switch (call.program) {
-    case wrap_io::WrappedProgram::Clang:
-    case wrap_io::WrappedProgram::Clangxx:
-    case wrap_io::WrappedProgram::Ar: {
+    case wrap_io::Program::Clang:
+    case wrap_io::Program::Clangxx:
+    case wrap_io::Program::Ar: {
       handle_eager_program_call(request_frames, call);
       break;
     }
-    case wrap_io::WrappedProgram::CMake:
+    case wrap_io::Program::CMake:
       handle_cmake_call(request_frames, call);
       break;
   }
