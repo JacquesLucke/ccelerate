@@ -32,14 +32,14 @@ struct WrappedProgramCall {
 
 inline string_view to_string(const WrappedProgram wrapped_program) {
   switch (wrapped_program) {
-  case WrappedProgram::Clang:
-    return "clang";
-  case WrappedProgram::Clangxx:
-    return "clang++";
-  case WrappedProgram::Ar:
-    return "ar";
-  case WrappedProgram::CMake:
-    return "cmake";
+    case WrappedProgram::Clang:
+      return "clang";
+    case WrappedProgram::Clangxx:
+      return "clang++";
+    case WrappedProgram::Ar:
+      return "ar";
+    case WrappedProgram::CMake:
+      return "cmake";
   }
   return "unknown";
 }
@@ -55,8 +55,8 @@ struct WrappedProgramResult {
 };
 
 inline string format_as(const WrappedProgramCall &call) {
-  return fmt::format("{} {}", to_string(call.program),
-                     fmt::join(call.args, " "));
+  return fmt::format(
+      "{} {}", to_string(call.program), fmt::join(call.args, " "));
 }
 
 } // namespace ccelerate

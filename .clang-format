@@ -1,0 +1,9 @@
+BasedOnStyle: LLVM
+AllowShortBlocksOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+ColumnLimit: 80
+IndentCaseLabels: true
+UseTab: Never
+TabWidth: 2
+IndentWidth: 2

@@ -98,8 +98,10 @@ TEST(Integration, HelloWorld) {
 
   const ProcessResult build_result =
       run_process(ProcessArgs()
-                      .args({args.binary_dir / "ccelerate_clang", "-o",
-                             output_file, project_dir / "hello_world.cc"})
+                      .args({args.binary_dir / "ccelerate_clang",
+                             "-o",
+                             output_file,
+                             project_dir / "hello_world.cc"})
                       .envs(server_ctx.env));
   ASSERT_EQ(build_result.exit_code(), 0);
 
@@ -119,8 +121,11 @@ TEST(Integration, BasicCMake) {
 
   const ProcessResult configure_result =
       run_process(ProcessArgs()
-                      .args({args.binary_dir / "ccelerate_cmake", "-B",
-                             output_dir, "-S", project_dir})
+                      .args({args.binary_dir / "ccelerate_cmake",
+                             "-B",
+                             output_dir,
+                             "-S",
+                             project_dir})
                       .envs(server_ctx.env));
   ASSERT_EQ(configure_result.exit_code(), 0);
 
@@ -147,10 +152,11 @@ int main(int argc, char **argv) {
   argv = app.ensure_utf8(argv);
 
   Args &args = Args::get();
-  app.add_option("--repo-dir", args.repo_dir,
-                 "path to the ccelerate repository")
+  app.add_option(
+         "--repo-dir", args.repo_dir, "path to the ccelerate repository")
       ->required();
-  app.add_flag("--external-server", args.use_external_server,
+  app.add_flag("--external-server",
+               args.use_external_server,
                "Use an existing external ccelerate server for the tests");
 
   CLI11_PARSE(app, argc, argv);

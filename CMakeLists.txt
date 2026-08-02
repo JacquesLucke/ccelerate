@@ -7,6 +7,10 @@ endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 enable_testing()
 
 # Find dependencies.
@@ -28,11 +32,6 @@ add_subdirectory(src/tests)
 add_executable(ccelerate
   ./src/main.cc
 )
-set_target_properties(ccelerate PROPERTIES
-  CXX_STANDARD 20
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-)
 target_link_libraries(ccelerate PRIVATE
   fmt::fmt
   cppzmq-static
@@ -49,11 +48,6 @@ target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 function(add_ccelerate_wrapper wrapper_name type)
   add_executable(${wrapper_name}
     ./src/program_wrapper.cc
-  )
-  set_target_properties(${wrapper_name} PROPERTIES
-    CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
   )
   target_link_libraries(${wrapper_name} PRIVATE
     fmt::fmt

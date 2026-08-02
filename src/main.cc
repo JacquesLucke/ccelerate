@@ -55,7 +55,8 @@ static void pass_through_external_call(vector<zmq::message_t> &request_frames,
   error_code ec = proc.start(args, options);
   WrappedProgramResult program_result;
   if (!ec) {
-    ec = reproc::drain(proc, reproc::sink::string(program_result.stdout),
+    ec = reproc::drain(proc,
+                       reproc::sink::string(program_result.stdout),
                        reproc::sink::string(program_result.stderr));
     if (!ec) {
       std::tie(program_result.exit_code, ec) = proc.wait(reproc::infinite);
@@ -133,15 +134,15 @@ static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
       .convert(call);
   fmt::println("call: {}", call);
   switch (call.program) {
-  case WrappedProgram::Clang:
-  case WrappedProgram::Clangxx:
-  case WrappedProgram::Ar: {
-    handle_eager_program_call(request_frames, call);
-    break;
-  }
-  case WrappedProgram::CMake:
-    handle_cmake_call(request_frames, call);
-    break;
+    case WrappedProgram::Clang:
+    case WrappedProgram::Clangxx:
+    case WrappedProgram::Ar: {
+      handle_eager_program_call(request_frames, call);
+      break;
+    }
+    case WrappedProgram::CMake:
+      handle_cmake_call(request_frames, call);
+      break;
   }
 }
 

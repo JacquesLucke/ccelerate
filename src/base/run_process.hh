@@ -57,8 +57,8 @@ struct ProcessArgs {
   }
 
   ProcessArgs &envs(std::ranges::range auto &&r) {
-    this->data.env_vars.insert(this->data.env_vars.end(), std::begin(r),
-                               std::end(r));
+    this->data.env_vars.insert(
+        this->data.env_vars.end(), std::begin(r), std::end(r));
     return *this;
   }
 };
@@ -76,10 +76,10 @@ public:
   string stdout;
   string stderr;
 
-  static ProcessResult from_error(error_code ec, string stdout = "",
-                                  string stderr = "");
-  static ProcessResult from_finished(int exit_code, string stdout = "",
-                                     string stderr = "");
+  static ProcessResult
+  from_error(error_code ec, string stdout = "", string stderr = "");
+  static ProcessResult
+  from_finished(int exit_code, string stdout = "", string stderr = "");
 
   optional<int> exit_code() const {
     if (const int *exit_code_ptr = std::get_if<int>(&exit_or_error_)) {
