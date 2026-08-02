@@ -54,26 +54,28 @@ static void send_response_frame(const ClientID &client_id,
     (void)thread_state.iproc_socket.send(zmq::message_t(id_part),
                                          zmq::send_flags::sndmore);
   }
+  (void)thread_state.iproc_socket.send(zmq::message_t(),
+                                       zmq::send_flags::sndmore);
   (void)thread_state.iproc_socket.send(
       zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
 }
 
 void send_response_incomplete(const ClientID &client_id,
-                              string stdout,
-                              string stderr) {
+                              string stdout_data,
+                              string stderr_data) {
   wrap_io::CallResponseFrame frame;
-  frame.stdout = std::move(stdout);
-  frame.stderr = std::move(stderr);
+  frame.stdout_data = std::move(stdout_data);
+  frame.stderr_data = std::move(stderr_data);
   send_response_frame(client_id, frame);
 }
 
 void send_response_final(const ClientID &client_id,
-                         string stdout,
-                         string stderr,
+                         string stdout_data,
+                         string stderr_data,
                          const int exit_code) {
   wrap_io::CallResponseFrame frame;
-  frame.stdout = std::move(stdout);
-  frame.stderr = std::move(stderr);
+  frame.stdout_data = std::move(stdout_data);
+  frame.stderr_data = std::move(stderr_data);
   frame.exit_code = exit_code;
   send_response_frame(client_id, frame);
 }
@@ -94,10 +96,10 @@ static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
   }
 
   Request request;
-  for (auto &frame : request_frames) {
-    if (frame.size() > 0) {
-      request.client_id.parts.push_back(frame.to_string());
-    }
+  // The last frame and the empty frame before that are not part of the id.
+  assert(request_frames[request_frames.size() - 2].size() == 0);
+  for (int i = 0; i < request_frames.size() - 2; i++) {
+    request.client_id.parts.push_back(request_frames[i].to_string());
   }
   const std::string message = request_frames.end()[-1].to_string();
 
@@ -107,7 +109,21 @@ static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
 
     request.args = std::move(call.args);
     request.working_dir = std::move(call.working_dir);
-    request.program = call.program;
+    switch (call.program) {
+      case wrap_io::Program::Clang:
+      case wrap_io::Program::Clangxx:
+      case wrap_io::Program::Ar:
+      case wrap_io::Program::CMake: {
+        request.program = call.program;
+        break;
+      }
+      default: {
+        send_response_error(
+            request.client_id,
+            fmt::format("Unknown program id: {}", int(call.program)));
+        return;
+      }
+    }
 
     handle_request(request);
   } catch (const msgpack::parse_error &e) {

@@ -55,13 +55,13 @@ inline const std::string &to_string(const Program wrapped_program) {
 }
 
 struct CallResponseFrame {
-  string stdout;
-  string stderr;
+  string stdout_data;
+  string stderr_data;
 
   // Exit code is only set when the process finished.
   optional<int> exit_code;
 
-  MSGPACK_DEFINE(stdout, stderr, exit_code);
+  MSGPACK_DEFINE(stdout_data, stderr_data, exit_code);
 };
 
 inline string format_as(const CallRequest &call) {

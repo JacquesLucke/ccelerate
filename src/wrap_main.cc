@@ -55,8 +55,8 @@ int call(const int argc, char **argv) {
       msgpack::unpack(response.data<char>(), response.size())
           .get()
           .convert(program_result);
-      fmt::print(stdout, "{}", program_result.stdout);
-      fmt::print(stderr, "{}", program_result.stderr);
+      fmt::print(stdout, "{}", program_result.stdout_data);
+      fmt::print(stderr, "{}", program_result.stderr_data);
       if (program_result.exit_code) {
         return *program_result.exit_code;
       }
