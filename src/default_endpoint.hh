@@ -15,4 +15,6 @@ inline string get_default_ccelerate_endpoint() {
   return "ipc:///tmp/ccelerate.ipc";
 }
 
+static string inproc_endpoint = "inproc://server";
+
 } // namespace ccelerate

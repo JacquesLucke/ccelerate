@@ -31,6 +31,7 @@ add_subdirectory(src/tests)
 # Setup ccelerate executable.
 add_executable(ccelerate
   ./src/server_main.cc
+  ./src/request_handler.cc
 )
 target_link_libraries(ccelerate PRIVATE
   fmt::fmt
