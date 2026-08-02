@@ -23,6 +23,8 @@ struct Request {
 
 void handle_request(const Request &request);
 void handle_request__cmake(const Request &request);
+void handle_request__clang(const Request &request);
+void handle_request__eager(const Request &request);
 
 void send_response_incomplete(const ClientID &client_id,
                               string stdout,

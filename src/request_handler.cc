@@ -29,7 +29,7 @@ void pass_through_external_call(const ClientID &client_id,
   }
 }
 
-static void handle_request__eager(const Request &request) {
+void handle_request__eager(const Request &request) {
   pass_through_external_call(request.client_id,
                              ProcessArgs()
                                  .arg(to_string(request.program))
@@ -41,7 +41,10 @@ static void handle_request__eager(const Request &request) {
 void handle_request(const Request &request) {
   switch (request.program) {
     case wrap_io::Program::Clang:
-    case wrap_io::Program::Clangxx:
+    case wrap_io::Program::Clangxx: {
+      handle_request__clang(request);
+      break;
+    }
     case wrap_io::Program::Ar: {
       handle_request__eager(request);
       break;

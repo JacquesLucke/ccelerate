@@ -51,6 +51,7 @@ add_executable(ccelerate
   ./src/server_main.cc
   ./src/request_handler.cc
   ./src/request_handler__cmake.cc
+  ./src/request_handler__clang.cc
 )
 target_link_libraries(ccelerate PRIVATE
   fmt::fmt
