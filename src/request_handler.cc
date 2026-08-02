@@ -3,6 +3,7 @@
 #include "request_handler.hh"
 #include "error_code.hh"
 #include "run_process.hh"
+#include <spdlog/spdlog.h>
 
 namespace ccelerate {
 
@@ -39,6 +40,9 @@ void handle_request__eager(const Request &request) {
 }
 
 void handle_request(const Request &request) {
+  spdlog::info("Handling request: {} {}",
+               to_string(request.program),
+               fmt::join(request.args, " "));
   switch (request.program) {
     case wrap_io::Program::Clang:
     case wrap_io::Program::Clangxx: {
