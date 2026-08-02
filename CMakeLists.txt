@@ -26,6 +26,23 @@ find_package(unofficial-whereami CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
+# Prepare LLVM and Clang libraries.
+find_package(LLVM CONFIG REQUIRED)
+find_package(Clang CONFIG REQUIRED)
+list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_DIR}")
+include(HandleLLVMOptions)
+add_definitions(${LLVM_DEFINITIONS})
+llvm_map_components_to_libnames(llvm_libs Support native)
+set(clang_libs
+  clangAST
+  clangBasic
+  clangDriver
+  clangFrontend
+  clangLex
+  clangSerialization
+  clangTooling
+)
+
 add_subdirectory(src/base)
 add_subdirectory(src/tests)
 
@@ -45,6 +62,8 @@ target_link_libraries(ccelerate PRIVATE
   tl::expected
   ccelerate::base
   spdlog::spdlog
+  ${llvm_libs}
+  ${clang_libs}
 )
 target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
 
