@@ -25,10 +25,10 @@ namespace ccelerate::wrap_io {
 
 struct CallRequest {
   Program program;
-  string cwd;
+  string working_dir;
   vector<string> args;
 
-  MSGPACK_DEFINE(program, cwd, args);
+  MSGPACK_DEFINE(program, working_dir, args);
 };
 
 inline string_view to_string(const Program wrapped_program) {

@@ -12,6 +12,7 @@
 #include "base/get_current_executable_path.hh"
 #include "base/pair.hh"
 #include "default_endpoint.hh"
+#include "request_handler.hh"
 #include "wrap_io.hh"
 
 namespace ccelerate {
@@ -44,7 +45,43 @@ static ThreadState &get_thread_state() {
   return thread_state;
 }
 
-static void pass_through_external_call(vector<zmq::message_t> &request_frames,
+static void send_response_frame(const ClientID &client_id,
+                                const wrap_io::CallResponseFrame &frame) {
+  ThreadState &thread_state = get_thread_state();
+
+  // Serialize the response.
+  msgpack::sbuffer response;
+  msgpack::pack(response, frame);
+
+  for (const string &id_part : client_id.parts) {
+    (void)thread_state.iproc_socket.send(zmq::message_t(id_part),
+                                         zmq::send_flags::sndmore);
+  }
+  (void)thread_state.iproc_socket.send(
+      zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
+}
+
+void send_response_incomplete(const ClientID &client_id,
+                              string stdout,
+                              string stderr) {
+  wrap_io::CallResponseFrame frame;
+  frame.stdout = std::move(stdout);
+  frame.stderr = std::move(stderr);
+  send_response_frame(client_id, frame);
+}
+
+void send_response_final(const ClientID &client_id,
+                         string stdout,
+                         string stderr,
+                         const int exit_code) {
+  wrap_io::CallResponseFrame frame;
+  frame.stdout = std::move(stdout);
+  frame.stderr = std::move(stderr);
+  frame.exit_code = exit_code;
+  send_response_frame(client_id, frame);
+}
+
+static void pass_through_external_call(const ClientID &client_id,
                                        const vector<string> &args,
                                        reproc::options options) {
   ThreadState &thread_state = get_thread_state();
@@ -53,57 +90,44 @@ static void pass_through_external_call(vector<zmq::message_t> &request_frames,
   options.redirect.err.type = reproc::redirect::pipe;
   reproc::process proc;
   error_code ec = proc.start(args, options);
-  wrap_io::CallResponseFrame program_result;
+  std::string program_stdout;
+  std::string program_stderr;
+  int exit_code = 0;
   if (!ec) {
     ec = reproc::drain(proc,
-                       reproc::sink::string(program_result.stdout),
-                       reproc::sink::string(program_result.stderr));
+                       reproc::sink::string(program_stdout),
+                       reproc::sink::string(program_stderr));
     if (!ec) {
-      std::tie(program_result.exit_code, ec) = proc.wait(reproc::infinite);
+      std::tie(exit_code, ec) = proc.wait(reproc::infinite);
     } else {
-      program_result.exit_code = 1;
-      program_result.stderr = ec.message();
+      exit_code = 1;
+      program_stderr = ec.message();
     }
   } else {
-    program_result.exit_code = 1;
-    program_result.stderr = ec.message();
+    exit_code = 1;
+    program_stderr = ec.message();
   }
 
-  msgpack::sbuffer response;
-  msgpack::pack(response, program_result);
-
-  for (zmq::message_t &frame : request_frames) {
-    if (!frame.more()) {
-      /* The last frame is the actual message. */
-      break;
-    }
-    zmq::message_t msg;
-    msg.copy(frame);
-    (void)thread_state.iproc_socket.send(msg, zmq::send_flags::sndmore);
-  }
-  (void)thread_state.iproc_socket.send(
-      zmq::message_t(response.data(), response.size()), zmq::send_flags::none);
+  send_response_final(client_id, program_stdout, program_stderr, exit_code);
 }
 
-static void handle_eager_program_call(vector<zmq::message_t> &request_frames,
-                                      const wrap_io::CallRequest &call) {
+static void handle_eager_program_call(const Request &request) {
   reproc::options options;
-  options.working_directory = call.cwd.c_str();
+  options.working_directory = request.working_dir.c_str();
   vector<string> args;
-  args.push_back(string(to_string(call.program)));
-  for (const auto &arg : call.args) {
+  args.push_back(string(to_string(request.program)));
+  for (const auto &arg : request.args) {
     args.push_back(arg);
   }
-  pass_through_external_call(request_frames, args, std::move(options));
+  pass_through_external_call(request.client_id, args, std::move(options));
 }
 
-static void handle_cmake_call(vector<zmq::message_t> &request_frames,
-                              const wrap_io::CallRequest &call) {
+static void handle_cmake_call(const Request &request) {
   const GlobalState &global_state = get_global_state();
   const path dir = global_state.binary_path.parent_path();
 
   reproc::options options;
-  options.working_directory = call.cwd.c_str();
+  options.working_directory = request.working_dir.c_str();
   const vector<pair<string, string>> extra_env = {
       {"CC", dir / "ccelerate_clang"},
       {"CXX", dir / "ccelerate_clang++"},
@@ -112,7 +136,7 @@ static void handle_cmake_call(vector<zmq::message_t> &request_frames,
   vector<string> args;
   args.push_back("cmake");
   bool has_build_arg = false;
-  for (const auto &arg : call.args) {
+  for (const auto &arg : request.args) {
     args.push_back(arg);
     if (arg == "--build") {
       has_build_arg = true;
@@ -122,28 +146,42 @@ static void handle_cmake_call(vector<zmq::message_t> &request_frames,
     args.push_back(
         fmt::format("-DCMAKE_AR={}", (dir / "ccelerate_ar").string()));
   }
-  pass_through_external_call(request_frames, args, std::move(options));
+  pass_through_external_call(request.client_id, args, std::move(options));
 }
 
-static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
-
-  const zmq::message_t &actual_message = request_frames.end()[-1];
-  wrap_io::CallRequest call;
-  msgpack::unpack(actual_message.data<char>(), actual_message.size())
-      .get()
-      .convert(call);
-  fmt::println("call: {}", call);
-  switch (call.program) {
+void handle_request(const Request &request) {
+  switch (request.program) {
     case wrap_io::Program::Clang:
     case wrap_io::Program::Clangxx:
     case wrap_io::Program::Ar: {
-      handle_eager_program_call(request_frames, call);
+      handle_eager_program_call(request);
       break;
     }
     case wrap_io::Program::CMake:
-      handle_cmake_call(request_frames, call);
+      handle_cmake_call(request);
       break;
   }
+}
+
+static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
+  Request request;
+  for (auto &frame : request_frames) {
+    if (frame.size() > 0) {
+      request.client_id.parts.push_back(frame.to_string());
+    }
+  }
+  const std::string message = request_frames.end()[-1].to_string();
+
+  // TODO: Error handling.
+  wrap_io::CallRequest call;
+  msgpack::unpack(message.data(), message.size()).get().convert(call);
+  fmt::println("call: {}", call);
+
+  request.args = std::move(call.args);
+  request.working_dir = std::move(call.working_dir);
+  request.program = call.program;
+
+  handle_request(request);
 }
 
 int ccelerate_main(const int argc, char **argv) {

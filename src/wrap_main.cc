@@ -16,7 +16,7 @@ namespace ccelerate {
 int call(const int argc, char **argv) {
   // Prepare the call struct that is passed to the server.
   wrap_io::CallRequest call;
-  call.cwd = std::filesystem::current_path().string();
+  call.working_dir = std::filesystem::current_path().string();
   call.program = wrap_io::Program::CCELERATE_WRAP_TYPE;
   for (int i = 1; i < argc; ++i) {
     call.args.push_back(argv[i]);
