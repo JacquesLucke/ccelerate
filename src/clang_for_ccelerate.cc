@@ -32,9 +32,16 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
   const path self_path = get_current_executable_path();
   std::string clang_path = self_path.parent_path().parent_path() /
                            "vcpkg_installed/x64-linux/tools/llvm" / args.binary;
+  std::string libstdcxx_path =
+      self_path.parent_path().parent_path().parent_path().parent_path() /
+      "extern" / "libstdc++";
 
   vector<const char *> driver_args;
   driver_args.push_back(clang_path.c_str());
+  driver_args.push_back("-stdlib=libstdc++");
+  const string toolchain_arg =
+      fmt::format("--gcc-toolchain={}", libstdcxx_path);
+  driver_args.push_back(toolchain_arg.c_str());
   for (const string &arg : args.clang_args) {
     driver_args.push_back(arg.c_str());
   }

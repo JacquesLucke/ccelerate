@@ -8,17 +8,19 @@ namespace ccelerate {
 
 void handle_request__clang(const Request &request) {
   const path self_path = get_current_executable_path();
-  const ProcessResult parse_result =
-      run_process(ProcessArgs()
-                      .arg(self_path.parent_path() / "clang_for_ccelerate")
-                      .args({"parse_args",
-                             "--cwd",
-                             request.working_dir,
-                             "--binary",
-                             to_string(request.program)})
-                      .arg("--")
-                      .args(request.args)
-                      .working_dir(request.working_dir));
+  const ProcessResult parse_result = run_process(
+      ProcessArgs()
+          .arg(self_path.parent_path() / "clang_for_ccelerate")
+          .args({"parse_args",
+                 "--cwd",
+                 request.working_dir,
+                 "--binary",
+                 to_string(request.program)})
+          .arg("--")
+          .args(request.args)
+          .arg("--gcc-install-dir=/home/jacques/Documents/ccelerate/extern/"
+               "gcc-13-install/lib/gcc/x86_64-linux-gnu/13")
+          .working_dir(request.working_dir));
   if (parse_result.exit_code() != 0) {
     send_response_final(request.client_id,
                         std::move(parse_result.stdout_data),
