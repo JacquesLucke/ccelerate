@@ -47,6 +47,9 @@ set(clang_libs
 
 add_subdirectory(src)
 
+# Quiet lots of "up-to-date" messages.
+set(CMAKE_INSTALL_MESSAGE LAZY)
+
 install(
   DIRECTORY extern/gcc-13-install
   DESTINATION ${CCELERATE_OUTPUT_DIR}/extern
