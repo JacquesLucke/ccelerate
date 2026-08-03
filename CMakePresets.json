@@ -30,11 +30,13 @@
   "buildPresets": [
     {
       "name": "debug",
-      "configurePreset": "debug"
+      "configurePreset": "debug",
+      "targets": ["install"]
     },
     {
       "name": "release",
-      "configurePreset": "release"
+      "configurePreset": "release",
+      "targets": ["install"]
     }
   ],
   "testPresets": [
