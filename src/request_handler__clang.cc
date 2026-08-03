@@ -8,6 +8,9 @@ namespace ccelerate {
 
 void handle_request__clang(const Request &request) {
   const path self_path = get_current_executable_path();
+  const path gcc_install_dir =
+      self_path.parent_path() /
+      "extern/gcc-13-install/lib/gcc/x86_64-linux-gnu/13";
   const ProcessResult parse_result = run_process(
       ProcessArgs()
           .arg(self_path.parent_path() / "clang_for_ccelerate")
@@ -18,8 +21,7 @@ void handle_request__clang(const Request &request) {
                  to_string(request.program)})
           .arg("--")
           .args(request.args)
-          .arg("--gcc-install-dir=/home/jacques/Documents/ccelerate/extern/"
-               "gcc-13-install/lib/gcc/x86_64-linux-gnu/13")
+          .arg(fmt::format("--gcc-install-dir={}", gcc_install_dir.string()))
           .working_dir(request.working_dir));
   if (parse_result.exit_code() != 0) {
     send_response_final(request.client_id,
