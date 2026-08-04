@@ -172,7 +172,6 @@ int ccelerate_main(const int argc, char **argv) {
 
       // Handle new incoming request from other process.
       if (poll_items[0].revents & ZMQ_POLLIN) {
-        ZoneScopedNC("handle_incoming_message", tracy::Color::Red);
         auto parts = std::make_shared<vector<zmq::message_t>>();
         (void)zmq::recv_multipart(external_sock, std::back_inserter(*parts));
         global_state.task_group.run(
@@ -182,7 +181,6 @@ int ccelerate_main(const int argc, char **argv) {
       // Handle response that should be forwarded from a thread to the external
       // process.
       if (poll_items[1].revents & ZMQ_POLLIN) {
-        ZoneScopedNC("handle_response", tracy::Color::Red);
         while (true) {
           zmq::message_t frame;
           (void)proxy_sock.recv(frame);

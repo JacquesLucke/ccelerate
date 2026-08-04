@@ -180,7 +180,8 @@ int main(int argc, char **argv) {
       ->required();
   app.add_flag("--external-server",
                args.use_external_server,
-               "Use an existing external ccelerate server for the tests");
+               "Use an existing external ccelerate server for the tests")
+      ->envname("CCELERATE_TEST_EXTERNAL_SERVER");
 
   CLI11_PARSE(app, argc, argv);
 
