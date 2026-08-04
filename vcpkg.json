@@ -10,6 +10,10 @@
     "whereami",
     "tl-expected",
     "spdlog",
-    "llvm"
+    "llvm",
+    {
+      "name": "tracy",
+      "features": ["on-demand"]
+    }
   ]
 }

@@ -20,6 +20,7 @@ target_link_libraries(ccelerate PRIVATE
   spdlog::spdlog
   ${llvm_libs}
   ${clang_libs}
+  Tracy::TracyClient
 )
 target_compile_options(ccelerate PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:

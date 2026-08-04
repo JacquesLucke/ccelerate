@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-#include "request_handler.hh"
-#include "error_code.hh"
-#include "run_process.hh"
 #include <spdlog/spdlog.h>
+#include <tracy/Tracy.hpp>
+
+#include "error_code.hh"
+#include "request_handler.hh"
+#include "run_process.hh"
 
 namespace ccelerate {
 
@@ -40,6 +42,14 @@ void handle_request__eager(const Request &request) {
 }
 
 void handle_request(const Request &request) {
+  ZoneScopedN("handle_request");
+  const string zone_text =
+      fmt::format("{} {}\ncwd: {}",
+                  to_string(request.program),
+                  fmt::join(request.args, " "),
+                  request.working_dir.string());
+  ZoneText(zone_text.data(), zone_text.size());
+
   spdlog::info("Handling request: {} {}",
                to_string(request.program),
                fmt::join(request.args, " "));

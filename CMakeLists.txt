@@ -27,6 +27,7 @@ find_package(CLI11 CONFIG REQUIRED)
 find_package(unofficial-whereami CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(Tracy CONFIG REQUIRED)
 
 # Prepare LLVM and Clang libraries.
 find_package(LLVM CONFIG REQUIRED)
