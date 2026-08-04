@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-#include "run_process.hh"
-
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
+#include <tracy/Tracy.hpp>
+
+#include "run_process.hh"
 
 namespace ccelerate {
 
@@ -19,6 +21,16 @@ ProcessResult::from_finished(int exit_code, string stdout, string stderr) {
 }
 
 ProcessResult run_process(const ProcessArgs &args) {
+  ZoneScoped;
+  const string zone_name = path(args.data.args[0]).filename();
+  const string zone_text = fmt::format(
+      "{}\ncwd: {}",
+      fmt::join(args.data.args, " "),
+      args.data.working_dir ? args.data.working_dir->string() : "(default)");
+  ZoneName(zone_name.data(), zone_name.size());
+  ZoneText(zone_text.data(), zone_text.size());
+  ZoneColor(tracy::Color::Gray50);
+
   reproc::options options;
   if (args.data.working_dir) {
     options.working_directory = args.data.working_dir->c_str();

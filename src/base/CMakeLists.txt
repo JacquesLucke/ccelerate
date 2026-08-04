@@ -6,6 +6,7 @@ target_link_libraries(ccelerate_base PRIVATE
     reproc
     reproc++
     unofficial::whereami::whereami
+    Tracy::TracyClient
 )
 
 add_library(ccelerate::base ALIAS ccelerate_base)
