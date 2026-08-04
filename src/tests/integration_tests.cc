@@ -132,10 +132,13 @@ static void test_simple_cmake_project(const string_view project_name,
                       .envs(server_ctx.env));
   ASSERT_EQ(configure_result.exit_code(), 0) << configure_result.stderr_data;
 
-  const ProcessResult build_result = run_process(
-      ProcessArgs()
-          .args({args.binary_dir / "ccelerate_cmake", "--build", output_dir})
-          .envs(server_ctx.env));
+  const ProcessResult build_result =
+      run_process(ProcessArgs()
+                      .args({args.binary_dir / "ccelerate_cmake",
+                             "--build",
+                             output_dir,
+                             "--parallel"})
+                      .envs(server_ctx.env));
   ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr_data;
 
   const ProcessResult run_result =
@@ -152,6 +155,10 @@ TEST(Integration, BasicCMake) {
 TEST(Integration, MultiFileCMake) {
   test_simple_cmake_project("multi_file_cmake",
                             "Hello from C\nHello from C++\n");
+}
+
+TEST(Integration, MultiLibCMake) {
+  test_simple_cmake_project("multi_lib_cmake", "ABCDEFGHIJKLMNOPQRST\n");
 }
 
 } // namespace ccelerate::tests
