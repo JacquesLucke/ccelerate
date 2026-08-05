@@ -1,2 +1,2 @@
 # Run in /home/jacques/blender/build/ccelerate.
-/home/jacques/Documents/ccelerate/build/release/bin/ccelerate_cmake /home/jacques/blender/blender -GNinja -DWITH_GTESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_CYCLES_NATIVE_ONLY=ON -DWITH_LINKER_MOLD=ON -DCMAKE_BUILD_TYPE=Release
+/home/jacques/Documents/ccelerate/build/release/bin/ccelerate_cmake /home/jacques/blender/blender -GNinja -DWITH_COMPILER_PRECOMPILED_HEADERS=OFF -DWITH_GTESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_CYCLES_NATIVE_ONLY=ON -DWITH_LINKER_MOLD=ON -DCMAKE_BUILD_TYPE=Release
