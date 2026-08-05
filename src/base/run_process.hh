@@ -4,6 +4,7 @@
 
 #include "error_code.hh"
 #include "filesystem.hh"
+#include "function_ref.hh"
 #include "optional.hh"
 #include "pair.hh"
 #include "span.hh"
@@ -68,12 +69,12 @@ struct ProcessArgs {
   }
 };
 
+using ExitCodeOrError = variant<int, error_code>;
 struct ProcessResult {
 private:
-  using ExitOrError = variant<int, error_code>;
-  ExitOrError exit_or_error_;
+  ExitCodeOrError exit_or_error_;
 
-  ProcessResult(ExitOrError exit_or_error,
+  ProcessResult(ExitCodeOrError exit_or_error,
                 string stdout_data,
                 string stderr_data)
       : exit_or_error_(std::move(exit_or_error)),
@@ -106,5 +107,8 @@ public:
 };
 
 ProcessResult run_process(const ProcessArgs &args);
+ExitCodeOrError run_process_stream_output(
+    const ProcessArgs &args,
+    function_ref<void(string stdout_data, string stderr_data)> on_output_fn);
 
 } // namespace ccelerate

@@ -10,26 +10,19 @@
 namespace ccelerate {
 
 void pass_through_external_call(const ClientID &client_id,
-                                const ProcessArgs &args,
-                                const bool is_final) {
-  ProcessResult result = run_process(args);
-  string final_stdout = std::move(result.stdout_data);
-  string final_stderr = std::move(result.stderr_data);
-  if (const optional<error_code> ec = result.error()) {
-    final_stderr += "\n";
-    final_stderr += ec->message();
-    final_stderr += "\n";
+                                const ProcessArgs &args) {
+  const ExitCodeOrError exit_code_or_error = run_process_stream_output(
+      args, [&](string stdout_data, string stderr_data) {
+        send_response_incomplete(
+            client_id, std::move(stdout_data), std::move(stderr_data));
+      });
+  if (const error_code *ec = std::get_if<error_code>(&exit_code_or_error)) {
+    string error_msg = ec->message();
+    send_response_final(client_id, "", std::move(error_msg), 1);
+    return;
   }
-  if (is_final) {
-    const int final_exit_code = result.exit_code().value_or(1);
-    send_response_final(client_id,
-                        std::move(final_stdout),
-                        std::move(final_stderr),
-                        final_exit_code);
-  } else {
-    send_response_incomplete(
-        client_id, std::move(final_stdout), std::move(final_stderr));
-  }
+  const int exit_code = std::get<int>(exit_code_or_error);
+  send_response_final(client_id, "", "", exit_code);
 }
 
 void handle_request__eager(const Request &request) {
@@ -37,8 +30,7 @@ void handle_request__eager(const Request &request) {
                              ProcessArgs()
                                  .arg(to_string(request.program))
                                  .args(request.args)
-                                 .working_dir(request.working_dir),
-                             true);
+                                 .working_dir(request.working_dir));
 }
 
 static tracy::Color::ColorType

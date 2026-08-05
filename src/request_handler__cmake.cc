@@ -22,7 +22,7 @@ void handle_request__cmake(const Request &request) {
   if (!has_build_arg) {
     args.arg(fmt::format("-DCMAKE_AR={}", (dir / "ccelerate_ar").string()));
   }
-  pass_through_external_call(request.client_id, args, true);
+  pass_through_external_call(request.client_id, args);
 }
 
 } // namespace ccelerate

@@ -9,6 +9,7 @@
     "cli11",
     "whereami",
     "tl-expected",
+    "tl-function-ref",
     "spdlog",
     "llvm",
     {

@@ -28,6 +28,7 @@ find_package(unofficial-whereami CONFIG REQUIRED)
 find_package(tl-expected CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
+find_path(TL_FUNCTION_REF_INCLUDE_DIRS "tl/function_ref.hpp")
 
 # Prepare LLVM and Clang libraries.
 find_package(LLVM CONFIG REQUIRED)
