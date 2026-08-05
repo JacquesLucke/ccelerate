@@ -74,16 +74,16 @@ struct ProcessResult {
 private:
   ExitCodeOrError exit_or_error_;
 
+public:
+  string stdout_data;
+  string stderr_data;
+
   ProcessResult(ExitCodeOrError exit_or_error,
                 string stdout_data,
                 string stderr_data)
       : exit_or_error_(std::move(exit_or_error)),
         stdout_data(std::move(stdout_data)),
         stderr_data(std::move(stderr_data)) {}
-
-public:
-  string stdout_data;
-  string stderr_data;
 
   static ProcessResult
   from_error(error_code ec, string stdout_data = "", string stderr_data = "");
