@@ -97,6 +97,10 @@ ProcessResult run_process(const ProcessArgs &args) {
   posix_spawn_file_actions_t actions;
   posix_spawn_file_actions_init(&actions);
 
+  if (args.data.working_dir.has_value()) {
+    posix_spawn_file_actions_addchdir_np(&actions,
+                                         args.data.working_dir->c_str());
+  }
   posix_spawn_file_actions_adddup2(
       &actions, stdout_pipe[write_end], STDOUT_FILENO);
   posix_spawn_file_actions_adddup2(
@@ -129,6 +133,7 @@ ProcessResult run_process(const ProcessArgs &args) {
       if (env_vars.contains(key)) {
         continue;
       }
+      process_env_vars.push_back(fmt::format("{}={}", key, value));
       env_vars.insert({std::move(key), std::move(value)});
     }
   }
