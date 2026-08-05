@@ -6,6 +6,30 @@
 
 namespace ccelerate {
 
+static ExitCodeOrError handle_command__clang_cc1(const ClientID &client_id,
+                                                 const string &executable,
+                                                 const vector<string> &args,
+                                                 const string &working_dir) {
+  const ProcessResult cmd_result = run_process(
+      ProcessArgs().arg(executable).args(args).working_dir(working_dir));
+  send_response_incomplete(client_id,
+                           std::move(cmd_result.stdout_data),
+                           std::move(cmd_result.stderr_data));
+  return cmd_result.exit_code_or_error();
+}
+
+static bool is_clang_cc1_command(const string_view &executable,
+                                 const vector<string> &args) {
+  if (executable.ends_with("clang++") || executable.ends_with("clang")) {
+    if (args.size() >= 1) {
+      if (args[0] == "-cc1") {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void handle_request__clang(const Request &request) {
   const path self_path = get_current_executable_path();
   const path gcc_install_dir =
@@ -57,17 +81,29 @@ void handle_request__clang(const Request &request) {
   }
 
   for (const clang_io::Command &command : parsed_args.commands) {
-    const ProcessResult cmd_result =
-        run_process(ProcessArgs()
-                        .arg(command.executable)
-                        .args(command.args)
-                        .working_dir(request.working_dir));
-    send_response_incomplete(request.client_id,
-                             std::move(cmd_result.stdout_data),
-                             std::move(cmd_result.stderr_data));
-    if (cmd_result.exit_code() != 0) {
-      send_response_final(
-          request.client_id, "", "", cmd_result.exit_code().value_or(1));
+    ExitCodeOrError exit_or_error{1};
+    if (is_clang_cc1_command(command.executable, command.args)) {
+      exit_or_error = handle_command__clang_cc1(request.client_id,
+                                                command.executable,
+                                                command.args,
+                                                request.working_dir);
+    } else {
+      exit_or_error = run_process_stream_output(
+          ProcessArgs()
+              .arg(command.executable)
+              .args(command.args)
+              .working_dir(request.working_dir),
+          [&](string stdout_data, string stderr_data) {
+            send_response_incomplete(request.client_id,
+                                     std::move(stdout_data),
+                                     std::move(stderr_data));
+          });
+    }
+    if (exit_or_error.exit_code() != 0) {
+      send_response_final(request.client_id,
+                          "",
+                          exit_or_error.error_message().value_or(""),
+                          exit_or_error.exit_code().value_or(1));
       return;
     }
   }

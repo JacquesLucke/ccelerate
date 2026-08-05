@@ -69,7 +69,34 @@ struct ProcessArgs {
   }
 };
 
-using ExitCodeOrError = variant<int, error_code>;
+struct ExitCodeOrError {
+  variant<int, error_code> value;
+
+  ExitCodeOrError(int exit_code) : value(exit_code) {}
+  ExitCodeOrError(error_code ec) : value(ec) {}
+
+  std::optional<int> exit_code() const {
+    if (const int *exit_code_ptr = std::get_if<int>(&value)) {
+      return *exit_code_ptr;
+    }
+    return nullopt;
+  }
+
+  std::optional<error_code> error() const {
+    if (const error_code *ec_ptr = std::get_if<error_code>(&value)) {
+      return *ec_ptr;
+    }
+    return nullopt;
+  }
+
+  std::optional<string> error_message() const {
+    if (const error_code *ec_ptr = std::get_if<error_code>(&value)) {
+      return ec_ptr->message();
+    }
+    return nullopt;
+  }
+};
+
 struct ProcessResult {
 private:
   ExitCodeOrError exit_or_error_;
@@ -91,19 +118,11 @@ public:
                                      string stdout_data = "",
                                      string stderr_data = "");
 
-  optional<int> exit_code() const {
-    if (const int *exit_code_ptr = std::get_if<int>(&exit_or_error_)) {
-      return *exit_code_ptr;
-    }
-    return nullopt;
-  }
+  optional<int> exit_code() const { return exit_or_error_.exit_code(); }
 
-  optional<error_code> error() const {
-    if (const error_code *ec_ptr = std::get_if<error_code>(&exit_or_error_)) {
-      return *ec_ptr;
-    }
-    return nullopt;
-  }
+  optional<error_code> error() const { return exit_or_error_.error(); }
+
+  const ExitCodeOrError &exit_code_or_error() const { return exit_or_error_; }
 };
 
 ProcessResult run_process(const ProcessArgs &args);

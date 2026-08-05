@@ -22,7 +22,15 @@ void handle_request__cmake(const Request &request) {
   if (!has_build_arg) {
     args.arg(fmt::format("-DCMAKE_AR={}", (dir / "ccelerate_ar").string()));
   }
-  pass_through_external_call(request.client_id, args);
+
+  const ExitCodeOrError exit_code_or_error = run_process_stream_output(
+      args, [&](string stdout_data, string stderr_data) {
+        send_response_incomplete(
+            request.client_id, std::move(stdout_data), std::move(stderr_data));
+      });
+  string error_msg = exit_code_or_error.error_message().value_or("");
+  const int exit_code = exit_code_or_error.exit_code().value_or(1);
+  send_response_final(request.client_id, "", error_msg, exit_code);
 }
 
 } // namespace ccelerate

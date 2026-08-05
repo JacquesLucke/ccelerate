@@ -3,34 +3,24 @@
 #include <spdlog/spdlog.h>
 #include <tracy/Tracy.hpp>
 
-#include "error_code.hh"
 #include "request_handler.hh"
 #include "run_process.hh"
 
 namespace ccelerate {
 
-void pass_through_external_call(const ClientID &client_id,
-                                const ProcessArgs &args) {
-  const ExitCodeOrError exit_code_or_error = run_process_stream_output(
-      args, [&](string stdout_data, string stderr_data) {
-        send_response_incomplete(
-            client_id, std::move(stdout_data), std::move(stderr_data));
-      });
-  if (const error_code *ec = std::get_if<error_code>(&exit_code_or_error)) {
-    string error_msg = ec->message();
-    send_response_final(client_id, "", std::move(error_msg), 1);
-    return;
-  }
-  const int exit_code = std::get<int>(exit_code_or_error);
-  send_response_final(client_id, "", "", exit_code);
-}
-
 void handle_request__eager(const Request &request) {
-  pass_through_external_call(request.client_id,
-                             ProcessArgs()
-                                 .arg(to_string(request.program))
-                                 .args(request.args)
-                                 .working_dir(request.working_dir));
+  const ExitCodeOrError exit_code_or_error = run_process_stream_output(
+      ProcessArgs()
+          .arg(to_string(request.program))
+          .args(request.args)
+          .working_dir(request.working_dir),
+      [&](string stdout_data, string stderr_data) {
+        send_response_incomplete(
+            request.client_id, std::move(stdout_data), std::move(stderr_data));
+      });
+  string error_msg = exit_code_or_error.error_message().value_or("");
+  const int exit_code = exit_code_or_error.exit_code().value_or(1);
+  send_response_final(request.client_id, "", error_msg, exit_code);
 }
 
 static tracy::Color::ColorType
