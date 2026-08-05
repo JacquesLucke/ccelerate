@@ -82,6 +82,17 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
     for (const auto &arg : job.getArguments()) {
       command.args.push_back(arg);
     }
+    for (const clang::driver::InputInfo &input_info : job.getInputInfos()) {
+      clang_io::InputInfo io_input;
+      io_input.type = input_info.getType();
+      if (const char *filename = input_info.getFilename()) {
+        io_input.filename = string(filename);
+      }
+      command.input_infos.push_back(std::move(io_input));
+    }
+    for (const string &output_files : job.getOutputFilenames()) {
+      command.output_files.push_back(output_files);
+    }
     parsed_args.commands.push_back(command);
   }
 

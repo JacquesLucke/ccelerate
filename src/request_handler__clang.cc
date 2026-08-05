@@ -1,17 +1,175 @@
 // SPDX-License-Identifier: MIT
 
+#include "array.hh"
 #include "clang_for_ccelerate_io.hh"
 #include "get_current_executable_path.hh"
 #include "request_handler.hh"
 
 namespace ccelerate {
 
-static ExitCodeOrError handle_command__clang_cc1(const ClientID &client_id,
-                                                 const string &executable,
-                                                 const vector<string> &args,
-                                                 const string &working_dir) {
-  const ProcessResult cmd_result = run_process(
-      ProcessArgs().arg(executable).args(args).working_dir(working_dir));
+enum class ClangCC1ActionType {
+  EmitPreprocessed,
+  EmitObj,
+};
+
+static const string &to_arg_name(const ClangCC1ActionType action) {
+  switch (action) {
+    case ClangCC1ActionType::EmitPreprocessed: {
+      static const string name = "-E";
+      return name;
+    }
+    case ClangCC1ActionType::EmitObj: {
+      static const string name = "-emit-obj";
+      return name;
+    }
+  }
+  static const string name = "";
+  return name;
+}
+
+static span<const ClangCC1ActionType> get_clang_cc1_actions_types() {
+  static const array<ClangCC1ActionType, 2> actions = {
+      ClangCC1ActionType::EmitPreprocessed,
+      ClangCC1ActionType::EmitObj,
+  };
+  return actions;
+}
+
+static std::optional<ClangCC1ActionType>
+get_clang_cc1_action_type(const span<const string> args) {
+  for (const string &arg : args) {
+    for (const ClangCC1ActionType action : get_clang_cc1_actions_types()) {
+      if (arg == to_arg_name(action)) {
+        return action;
+      }
+    }
+  }
+  return nullopt;
+}
+
+static void arg_rewrite__replace_arg(const span<string> args,
+                                     const string_view old_arg,
+                                     const string_view new_arg) {
+  for (size_t i = 0; i < args.size(); i++) {
+    if (args[i] == old_arg) {
+      args[i] = new_arg;
+      return;
+    }
+  }
+}
+
+// static void arg_rewrite__remove_dual_arg(vector<string> &args,
+//                                          const string_view first_arg) {
+//   for (size_t i = 0; i < args.size() - 1; i++) {
+//     if (args[i] == first_arg) {
+//       args.erase(args.begin() + i, args.begin() + i + 2);
+//       return;
+//     }
+//   }
+// }
+
+static void arg_write__replace_dual_arg_value(vector<string> &args,
+                                              const string_view name,
+                                              string new_value) {
+  for (size_t i = 0; i < args.size() - 1; i++) {
+    if (args[i] == name) {
+      args[i + 1] = new_value;
+      return;
+    }
+  }
+}
+
+static optional<string>
+arg_read__get_dual_arg_value(const span<const string> args,
+                             const string_view name) {
+  for (size_t i = 0; i < args.size() - 1; i++) {
+    if (args[i] == name) {
+      return args[i + 1];
+    }
+  }
+  return nullopt;
+}
+
+static vector<string>
+rewrite_clang_cc1_args__emit_obj__to__emit_preprocessed(vector<string> args,
+                                                        string output_file) {
+  arg_rewrite__replace_arg(args, "-emit-obj", "-E");
+  arg_write__replace_dual_arg_value(args, "-o", std::move(output_file));
+  return args;
+}
+
+static vector<string> rewrite_clang_cc1_args__change_source_file(
+    vector<string> args, string new_source_file, string type_str) {
+  for (size_t i = 0; i < args.size() - 2; i++) {
+    if (args[i] == "-x") {
+      args[i + 1] = type_str;
+      args[i + 2] = new_source_file;
+      return args;
+    }
+  }
+  return args;
+}
+
+static ExitCodeOrError
+handle_command__clang_cc1(const ClientID &client_id,
+                          const clang_io::Command &command,
+                          const string &working_dir) {
+  const optional<ClangCC1ActionType> action_type_opt =
+      get_clang_cc1_action_type(command.args);
+  if (!action_type_opt.has_value() ||
+      action_type_opt == ClangCC1ActionType::EmitPreprocessed) {
+    return run_process_stream_output(
+        ProcessArgs()
+            .arg(command.executable)
+            .args(command.args)
+            .working_dir(working_dir),
+        [&](string stdout_data, string stderr_data) {
+          send_response_incomplete(
+              client_id, std::move(stdout_data), std::move(stderr_data));
+        });
+  }
+  switch (*action_type_opt) {
+    case ClangCC1ActionType::EmitPreprocessed: {
+      /* Handled above already. */
+      break;
+    }
+    case ClangCC1ActionType::EmitObj: {
+      const optional<string> obj_file =
+          arg_read__get_dual_arg_value(command.args, "-o");
+      if (!obj_file.has_value()) {
+        // TODO
+        return {1};
+      }
+      const string preprocessed_file = *obj_file + ".ii";
+      vector<string> preprocess_args =
+          rewrite_clang_cc1_args__emit_obj__to__emit_preprocessed(
+              vector<string>(command.args.begin(), command.args.end()),
+              preprocessed_file);
+      ProcessResult preprocess_result =
+          run_process(ProcessArgs()
+                          .arg(command.executable)
+                          .args(preprocess_args)
+                          .working_dir(working_dir));
+      vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
+          command.args,
+          preprocessed_file,
+          clang::driver::types::getTypeName(clang::driver::types::TY_PP_CXX));
+      return run_process_stream_output(
+          ProcessArgs()
+              .arg(command.executable)
+              .args(compile_args)
+              .working_dir(working_dir),
+          [&](string stdout_data, string stderr_data) {
+            send_response_incomplete(
+                client_id, std::move(stdout_data), std::move(stderr_data));
+          });
+    }
+  }
+  // Fallback handling.
+  const ProcessResult cmd_result = run_process(ProcessArgs()
+                                                   .arg(command.executable)
+                                                   .args(command.args)
+                                                   .working_dir(working_dir));
   send_response_incomplete(client_id,
                            std::move(cmd_result.stdout_data),
                            std::move(cmd_result.stderr_data));
@@ -19,7 +177,7 @@ static ExitCodeOrError handle_command__clang_cc1(const ClientID &client_id,
 }
 
 static bool is_clang_cc1_command(const string_view &executable,
-                                 const vector<string> &args) {
+                                 const span<const string> &args) {
   if (executable.ends_with("clang++") || executable.ends_with("clang")) {
     if (args.size() >= 1) {
       if (args[0] == "-cc1") {
@@ -83,10 +241,8 @@ void handle_request__clang(const Request &request) {
   for (const clang_io::Command &command : parsed_args.commands) {
     ExitCodeOrError exit_or_error{1};
     if (is_clang_cc1_command(command.executable, command.args)) {
-      exit_or_error = handle_command__clang_cc1(request.client_id,
-                                                command.executable,
-                                                command.args,
-                                                request.working_dir);
+      exit_or_error = handle_command__clang_cc1(
+          request.client_id, command, request.working_dir);
     } else {
       exit_or_error = run_process_stream_output(
           ProcessArgs()
