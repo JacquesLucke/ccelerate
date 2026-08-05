@@ -7,8 +7,10 @@
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 #include <spawn.h>
+#include <spdlog/spdlog.h>
 #include <sys/wait.h>
 #include <tracy/Tracy.hpp>
+#include <unordered_map>
 
 #include "array.hh"
 #include "run_process.hh"
@@ -106,14 +108,43 @@ ProcessResult run_process(const ProcessArgs &args) {
   }
   process_argv.push_back(nullptr);
 
+  vector<string> process_env_vars;
+  std::unordered_map<string, string> env_vars;
+  for (const auto &[key, value] : args.data.env_vars) {
+    if (env_vars.contains(key)) {
+      spdlog::warn("Duplicate environment variable: {}={}", key, value);
+      continue;
+    }
+    process_env_vars.push_back(fmt::format("{}={}", key, value));
+    env_vars.insert({std::move(key), std::move(value)});
+  }
+  if (args.data.env_mode == ProcessArgs::EnvMode::Inherit) {
+    for (char **env = environ; *env != nullptr; env++) {
+      const char *equals = strchr(*env, '=');
+      if (!equals) {
+        continue;
+      }
+      string key(*env, equals - *env);
+      string value(equals + 1);
+      if (env_vars.contains(key)) {
+        continue;
+      }
+      env_vars.insert({std::move(key), std::move(value)});
+    }
+  }
+  vector<char *> process_envp;
+  for (const string &env_var : process_env_vars) {
+    process_envp.push_back(const_cast<char *>(env_var.c_str()));
+  }
+  process_envp.push_back(nullptr);
+
   pid_t pid = 0;
-  // TODO: Environment variables.
-  posix_spawn(&pid,
-              args.data.args[0].c_str(),
-              &actions,
-              nullptr,
-              process_argv.data(),
-              environ);
+  posix_spawnp(&pid,
+               args.data.args[0].c_str(),
+               &actions,
+               nullptr,
+               process_argv.data(),
+               process_envp.data());
   posix_spawn_file_actions_destroy(&actions);
   if (pid == 0) {
     return ProcessResult::from_error(
