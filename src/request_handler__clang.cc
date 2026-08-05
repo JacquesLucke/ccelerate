@@ -134,13 +134,21 @@ handle_command__clang_cc1(const ClientID &client_id,
       break;
     }
     case ClangCC1ActionType::EmitObj: {
+      const clang::driver::types::ID orig_input_type =
+          command.input_infos[0].type;
+      const clang::driver::types::ID preprocessed_type =
+          clang::driver::types::getPreprocessedType(orig_input_type);
+      const string preprocess_file_suffix =
+          clang::driver::types::getTypeTempSuffix(preprocessed_type);
+
       const optional<string> obj_file =
           arg_read__get_dual_arg_value(command.args, "-o");
       if (!obj_file.has_value()) {
         // TODO
         return {1};
       }
-      const string preprocessed_file = *obj_file + ".ii";
+      const string preprocessed_file =
+          fmt::format("{}.{}", *obj_file, preprocess_file_suffix);
       vector<string> preprocess_args =
           rewrite_clang_cc1_args__emit_obj__to__emit_preprocessed(
               vector<string>(command.args.begin(), command.args.end()),
@@ -153,7 +161,7 @@ handle_command__clang_cc1(const ClientID &client_id,
       vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
           command.args,
           preprocessed_file,
-          clang::driver::types::getTypeName(clang::driver::types::TY_PP_CXX));
+          clang::driver::types::getTypeName(preprocessed_type));
       return run_process_stream_output(
           ProcessArgs()
               .arg(command.executable)
