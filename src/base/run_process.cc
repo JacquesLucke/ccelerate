@@ -91,7 +91,9 @@ ExitCodeOrError run_process_stream_output(
       fmt::join(args.data.args, " "),
       args.data.working_dir ? args.data.working_dir->string() : "(default)");
   ZoneName(zone_name.data(), zone_name.size());
-  ZoneText(zone_text.data(), zone_text.size());
+  ZoneText(zone_text.data(),
+           std::min<size_t>(zone_text.size(),
+                            std::numeric_limits<uint16_t>::max() - 1));
   ZoneColor(tracy::Color::Gray50);
 
   constexpr int read_end = 0;

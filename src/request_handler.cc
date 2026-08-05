@@ -46,7 +46,9 @@ void handle_request(const Request &request) {
                                        fmt::join(request.args, " "),
                                        request.working_dir.string());
   ZoneName(zone_name.data(), zone_name.size());
-  ZoneText(zone_text.data(), zone_text.size());
+  ZoneText(zone_text.data(),
+           std::min<size_t>(zone_text.size(),
+                            std::numeric_limits<uint16_t>::max() - 1));
   ZoneColor(get_program_color(request.program));
 
   spdlog::info("Handling request: {} {}",
