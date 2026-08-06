@@ -182,7 +182,8 @@ handle_command__clang_cc1(const ClientID &client_id,
           clang::driver::types::getTypeName(preprocessed_type));
       return run_process_stream_output_traced(
           ProcessArgs()
-              .arg(command.executable)
+              .arg(clang_for_ccelerate_exe)
+              .args({"compile_obj", "--"})
               .args(compile_args)
               .working_dir(working_dir),
           [&](string stdout_data, string stderr_data) {

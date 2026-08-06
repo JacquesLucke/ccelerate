@@ -34,6 +34,10 @@ struct Cmd_Preprocess {
   vector<string> clang_args;
 };
 
+struct Cmd_CompileObj {
+  vector<string> clang_args;
+};
+
 static int handle__parse_args(const Cmd_ParseArgs &args) {
   const path self_path = get_current_executable_path();
   std::string clang_path = self_path.parent_path().parent_path() /
@@ -108,12 +112,12 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
   return 0;
 }
 
-static int handle__preprocess(const Cmd_Preprocess &args) {
+static int execute_cc1(const vector<string> &clang_args) {
   // The driver job args start with "-cc1"; CompilerInvocation expects the
   // remaining cc1 options only (same as clang's cc1_main entry point).
   vector<const char *> cc1_args;
-  cc1_args.reserve(args.clang_args.size());
-  for (const string &arg : args.clang_args) {
+  cc1_args.reserve(clang_args.size());
+  for (const string &arg : clang_args) {
     if (cc1_args.empty() && arg == "-cc1") {
       continue;
     }
@@ -149,6 +153,14 @@ static int handle__preprocess(const Cmd_Preprocess &args) {
   return success ? 0 : 1;
 }
 
+static int handle__preprocess(const Cmd_Preprocess &args) {
+  return execute_cc1(args.clang_args);
+}
+
+static int handle__compile_obj(const Cmd_CompileObj &args) {
+  return execute_cc1(args.clang_args);
+}
+
 int clang_ops_main(const int argc, char **argv) {
   CLI::App app{"clang_for_ccelerate"};
   app.description("A utility used by ccelerate to do clang specific things "
@@ -166,12 +178,19 @@ int clang_ops_main(const int argc, char **argv) {
   preprocess_cmd.add_option(
       "passthrough", preprocess_args.clang_args, "Arguments passed to clang");
 
+  CLI::App &compile_obj_cmd = *app.add_subcommand("compile_obj");
+  Cmd_CompileObj compile_obj_args;
+  compile_obj_cmd.add_option(
+      "passthrough", compile_obj_args.clang_args, "Arguments passed to clang");
+
   CLI11_PARSE(app, argc, argv);
 
   if (parse_args_cmd) {
     return handle__parse_args(parse_args);
   } else if (preprocess_cmd) {
     return handle__preprocess(preprocess_args);
+  } else if (compile_obj_cmd) {
+    return handle__compile_obj(compile_obj_args);
   } else {
     fmt::println(stderr, "Unknown command: {}", parse_args_cmd.get_name());
   }
