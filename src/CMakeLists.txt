@@ -6,6 +6,7 @@ add_executable(ccelerate
   request_handler.cc
   request_handler__cmake.cc
   request_handler__clang.cc
+  run_process_traced.cc
 )
 target_link_libraries(ccelerate PRIVATE
   fmt::fmt

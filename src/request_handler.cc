@@ -4,12 +4,12 @@
 #include <tracy/Tracy.hpp>
 
 #include "request_handler.hh"
-#include "run_process.hh"
+#include "run_process_traced.hh"
 
 namespace ccelerate {
 
 void handle_request__eager(const Request &request) {
-  const ExitCodeOrError exit_code_or_error = run_process_stream_output(
+  const ExitCodeOrError exit_code_or_error = run_process_stream_output_traced(
       ProcessArgs()
           .arg(to_string(request.program))
           .args(request.args)

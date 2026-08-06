@@ -4,6 +4,7 @@
 #include "clang_for_ccelerate_io.hh"
 #include "get_current_executable_path.hh"
 #include "request_handler.hh"
+#include "run_process_traced.hh"
 
 namespace ccelerate {
 
@@ -126,7 +127,7 @@ handle_command__clang_cc1(const ClientID &client_id,
       get_clang_cc1_action_type(command.args);
   if (!action_type_opt.has_value() ||
       action_type_opt == ClangCC1ActionType::EmitPreprocessed) {
-    return run_process_stream_output(
+    return run_process_stream_output_traced(
         ProcessArgs()
             .arg(command.executable)
             .args(command.args)
@@ -164,7 +165,7 @@ handle_command__clang_cc1(const ClientID &client_id,
               vector<string>(command.args.begin(), command.args.end()),
               preprocessed_file);
       ProcessResult preprocess_result =
-          run_process(ProcessArgs()
+          run_process_traced(ProcessArgs()
                           .arg(clang_for_ccelerate_exe)
                           .args({"preprocess", "--"})
                           .args(preprocess_args)
@@ -179,7 +180,7 @@ handle_command__clang_cc1(const ClientID &client_id,
           command.args,
           preprocessed_file,
           clang::driver::types::getTypeName(preprocessed_type));
-      return run_process_stream_output(
+      return run_process_stream_output_traced(
           ProcessArgs()
               .arg(command.executable)
               .args(compile_args)
@@ -191,7 +192,7 @@ handle_command__clang_cc1(const ClientID &client_id,
     }
   }
   // Fallback handling.
-  const ProcessResult cmd_result = run_process(ProcessArgs()
+  const ProcessResult cmd_result = run_process_traced(ProcessArgs()
                                                    .arg(command.executable)
                                                    .args(command.args)
                                                    .working_dir(working_dir));
@@ -219,7 +220,7 @@ void handle_request__clang(const Request &request) {
   const path gcc_install_dir =
       self_path.parent_path() /
       "extern/gcc-13-install/lib/gcc/x86_64-linux-gnu/13";
-  const ProcessResult parse_result = run_process(
+  const ProcessResult parse_result = run_process_traced(
       ProcessArgs()
           .arg(clang_for_ccelerate_exe)
           .args({"parse_args",
@@ -270,7 +271,7 @@ void handle_request__clang(const Request &request) {
       exit_or_error = handle_command__clang_cc1(
           request.client_id, command, request.working_dir);
     } else {
-      exit_or_error = run_process_stream_output(
+      exit_or_error = run_process_stream_output_traced(
           ProcessArgs()
               .arg(command.executable)
               .args(command.args)
