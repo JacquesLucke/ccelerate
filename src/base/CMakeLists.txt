@@ -9,7 +9,6 @@ target_link_libraries(ccelerate_base PRIVATE
   reproc
   reproc++
   unofficial::whereami::whereami
-  Tracy::TracyClient
   spdlog::spdlog
 )
 

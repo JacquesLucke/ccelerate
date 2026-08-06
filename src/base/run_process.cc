@@ -2,14 +2,12 @@
 
 #include <fcntl.h>
 #include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <poll.h>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
 #include <spawn.h>
 #include <spdlog/spdlog.h>
 #include <sys/wait.h>
-#include <tracy/Tracy.hpp>
 #include <unordered_map>
 
 #include "array.hh"
@@ -84,18 +82,6 @@ ProcessResult run_process(const ProcessArgs &args) {
 ExitCodeOrError run_process_stream_output(
     const ProcessArgs &args,
     function_ref<void(string stdout_data, string stderr_data)> on_output_fn) {
-  ZoneScoped;
-  const string zone_name = path(args.data.args[0]).filename();
-  const string zone_text = fmt::format(
-      "{}\ncwd: {}",
-      fmt::join(args.data.args, " "),
-      args.data.working_dir ? args.data.working_dir->string() : "(default)");
-  ZoneName(zone_name.data(), zone_name.size());
-  ZoneText(zone_text.data(),
-           std::min<size_t>(zone_text.size(),
-                            std::numeric_limits<uint16_t>::max() - 1));
-  ZoneColor(tracy::Color::Gray50);
-
   constexpr int read_end = 0;
   constexpr int write_end = 1;
 
