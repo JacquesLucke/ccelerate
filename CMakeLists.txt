@@ -42,6 +42,7 @@ set(clang_libs
   clangBasic
   clangDriver
   clangFrontend
+  clangFrontendTool
   clangLex
   clangSerialization
   clangTooling

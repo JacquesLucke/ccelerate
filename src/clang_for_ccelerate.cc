@@ -6,7 +6,9 @@
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
 #include <clang/Frontend/CompilerInstance.h>
+#include <clang/Frontend/CompilerInvocation.h>
 #include <clang/Frontend/FrontendOptions.h>
+#include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/FrontendTool/Utils.h>
 #include <filesystem>
@@ -106,7 +108,46 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
   return 0;
 }
 
-static int handle__preprocess(const Cmd_Preprocess &args) { return 0; }
+static int handle__preprocess(const Cmd_Preprocess &args) {
+  // The driver job args start with "-cc1"; CompilerInvocation expects the
+  // remaining cc1 options only (same as clang's cc1_main entry point).
+  vector<const char *> cc1_args;
+  cc1_args.reserve(args.clang_args.size());
+  for (const string &arg : args.clang_args) {
+    if (cc1_args.empty() && arg == "-cc1") {
+      continue;
+    }
+    cc1_args.push_back(arg.c_str());
+  }
+
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
+  llvm::InitializeAllAsmParsers();
+
+  clang::CompilerInstance clang_instance;
+  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+      new clang::DiagnosticIDs());
+  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
+      new clang::DiagnosticOptions());
+  clang::TextDiagnosticBuffer *diags_buffer = new clang::TextDiagnosticBuffer();
+  clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
+
+  bool success = clang::CompilerInvocation::CreateFromArgs(
+      clang_instance.getInvocation(), cc1_args, diags);
+
+  clang_instance.createDiagnostics();
+  if (!clang_instance.hasDiagnostics()) {
+    return 1;
+  }
+  diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+  if (!success) {
+    return 1;
+  }
+
+  success = clang::ExecuteCompilerInvocation(&clang_instance);
+  return success ? 0 : 1;
+}
 
 int clang_ops_main(const int argc, char **argv) {
   CLI::App app{"clang_for_ccelerate"};

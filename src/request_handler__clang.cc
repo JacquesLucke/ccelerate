@@ -169,6 +169,12 @@ handle_command__clang_cc1(const ClientID &client_id,
                           .args({"preprocess", "--"})
                           .args(preprocess_args)
                           .working_dir(working_dir));
+      if (preprocess_result.exit_code() != 0) {
+        send_response_incomplete(client_id,
+                                 std::move(preprocess_result.stdout_data),
+                                 std::move(preprocess_result.stderr_data));
+        return preprocess_result.exit_code_or_error();
+      }
       vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
           command.args,
           preprocessed_file,
