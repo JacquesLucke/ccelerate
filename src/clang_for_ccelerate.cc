@@ -28,6 +28,10 @@ struct Cmd_ParseArgs {
   vector<string> clang_args;
 };
 
+struct Cmd_Preprocess {
+  vector<string> clang_args;
+};
+
 static int handle__parse_args(const Cmd_ParseArgs &args) {
   const path self_path = get_current_executable_path();
   std::string clang_path = self_path.parent_path().parent_path() /
@@ -102,10 +106,13 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
   return 0;
 }
 
+static int handle__preprocess(const Cmd_Preprocess &args) { return 0; }
+
 int clang_ops_main(const int argc, char **argv) {
   CLI::App app{"clang_for_ccelerate"};
   app.description("A utility used by ccelerate to do clang specific things "
                   "like argument parsing");
+
   CLI::App &parse_args_cmd = *app.add_subcommand("parse_args");
   Cmd_ParseArgs parse_args;
   parse_args_cmd.add_option("--cwd", parse_args.cwd)->required();
@@ -113,10 +120,17 @@ int clang_ops_main(const int argc, char **argv) {
   parse_args_cmd.add_option(
       "passthrough", parse_args.clang_args, "Arguments passed to clang");
 
+  CLI::App &preprocess_cmd = *app.add_subcommand("preprocess");
+  Cmd_Preprocess preprocess_args;
+  preprocess_cmd.add_option(
+      "passthrough", preprocess_args.clang_args, "Arguments passed to clang");
+
   CLI11_PARSE(app, argc, argv);
 
   if (parse_args_cmd) {
     return handle__parse_args(parse_args);
+  } else if (preprocess_cmd) {
+    return handle__preprocess(preprocess_args);
   } else {
     fmt::println(stderr, "Unknown command: {}", parse_args_cmd.get_name());
   }

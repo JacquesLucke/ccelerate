@@ -12,6 +12,14 @@ enum class ClangCC1ActionType {
   EmitObj,
 };
 
+static const path &get_clang_for_ccelerate_executable() {
+  static const path executable = []() {
+    const path self_path = get_current_executable_path();
+    return self_path.parent_path() / "clang_for_ccelerate";
+  }();
+  return executable;
+}
+
 static const string &to_arg_name(const ClangCC1ActionType action) {
   switch (action) {
     case ClangCC1ActionType::EmitPreprocessed: {
@@ -147,6 +155,8 @@ handle_command__clang_cc1(const ClientID &client_id,
         // TODO
         return {1};
       }
+      const path &clang_for_ccelerate_exe =
+          get_clang_for_ccelerate_executable();
       const string preprocessed_file =
           fmt::format("{}.{}", *obj_file, preprocess_file_suffix);
       vector<string> preprocess_args =
@@ -155,7 +165,8 @@ handle_command__clang_cc1(const ClientID &client_id,
               preprocessed_file);
       ProcessResult preprocess_result =
           run_process(ProcessArgs()
-                          .arg(command.executable)
+                          .arg(clang_for_ccelerate_exe)
+                          .args({"preprocess", "--"})
                           .args(preprocess_args)
                           .working_dir(working_dir));
       vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
@@ -197,13 +208,14 @@ static bool is_clang_cc1_command(const string_view &executable,
 }
 
 void handle_request__clang(const Request &request) {
+  const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
   const path self_path = get_current_executable_path();
   const path gcc_install_dir =
       self_path.parent_path() /
       "extern/gcc-13-install/lib/gcc/x86_64-linux-gnu/13";
   const ProcessResult parse_result = run_process(
       ProcessArgs()
-          .arg(self_path.parent_path() / "clang_for_ccelerate")
+          .arg(clang_for_ccelerate_exe)
           .args({"parse_args",
                  "--cwd",
                  request.working_dir,
