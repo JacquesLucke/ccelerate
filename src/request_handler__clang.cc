@@ -99,17 +99,17 @@ arg_read__get_dual_arg_value(const span<const string> args,
   return nullopt;
 }
 
-static vector<string> rewrite_clang_cc1_args__change_source_file(
-    vector<string> args, string new_source_file, string type_str) {
-  for (size_t i = 0; i < args.size() - 2; i++) {
-    if (args[i] == "-x") {
-      args[i + 1] = type_str;
-      args[i + 2] = new_source_file;
-      return args;
-    }
-  }
-  return args;
-}
+// static vector<string> rewrite_clang_cc1_args__change_source_file(
+//     vector<string> args, string new_source_file, string type_str) {
+//   for (size_t i = 0; i < args.size() - 2; i++) {
+//     if (args[i] == "-x") {
+//       args[i + 1] = type_str;
+//       args[i + 2] = new_source_file;
+//       return args;
+//     }
+//   }
+//   return args;
+// }
 
 static ExitCodeOrError
 handle_command__clang_cc1(const ClientID &client_id,
@@ -131,23 +131,17 @@ handle_command__clang_cc1(const ClientID &client_id,
     path local_code_file = command.input_infos[0].filename.value();
     local_code_file.replace_extension(fmt::format(
         "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
-    const ExitCodeOrError exit_or_error = run_process_stream_output_traced(
+    run_process_traced(
         ProcessArgs()
             .arg(clang_for_ccelerate_exe)
             .args({"local-code", "--local-code-path", local_code_file, "--"})
             .args(command.args)
-            .working_dir(working_dir),
-        [&](string stdout_data, string stderr_data) {
-          send_response_incomplete(
-              client_id, std::move(stdout_data), std::move(stderr_data));
-        });
-    if (exit_or_error.exit_code() != 0) {
-      return exit_or_error;
-    }
-    vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
-        command.args,
-        local_code_file,
-        clang::driver::types::getTypeName(orig_input_type));
+            .working_dir(working_dir));
+    vector<string> compile_args = command.args;
+    //  rewrite_clang_cc1_args__change_source_file(
+    //     command.args,
+    //     local_code_file,
+    //     clang::driver::types::getTypeName(orig_input_type));
     return run_process_stream_output_traced(
         ProcessArgs()
             .arg(clang_for_ccelerate_exe)
