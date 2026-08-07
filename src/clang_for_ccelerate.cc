@@ -1,5 +1,12 @@
 // SPDX-License-Identifier: MIT
 
+#include "clang/AST/ASTConsumer.h"
+#include "clang/AST/ASTContext.h"
+#include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendActions.h"
+#include "clang/Frontend/Utils.h"
+#include "clang/Lex/Preprocessor.h"
+#include "llvm/Support/raw_ostream.h"
 #include <CLI/CLI.hpp>
 #include <clang/Basic/Version.h>
 #include <clang/CodeGen/CodeGenAction.h>
@@ -157,12 +164,30 @@ static int execute_cc1(const vector<string> &clang_args) {
   return success ? 0 : 1;
 }
 
+class MyPPCallbacks : public clang::PPCallbacks {
+  clang::SourceManager &sm_;
+
+public:
+  explicit MyPPCallbacks(clang::SourceManager &sm) : sm_(sm) {}
+
+  void FileChanged(clang::SourceLocation loc,
+                   FileChangeReason reason,
+                   clang::SrcMgr::CharacteristicKind file_type,
+                   clang::FileID prev_fid) override {
+    if (reason == FileChangeReason::EnterFile) {
+      fmt::print("File changed: {}\n", sm_.getFilename(loc).str());
+    }
+  }
+};
+
 class LocalCodeExtractionAction : public clang::PreprocessorFrontendAction {
 protected:
   void ExecuteAction() override {
     clang::CompilerInstance &compiler = this->getCompilerInstance();
     clang::Preprocessor &preprocessor = compiler.getPreprocessor();
-    // clang::SourceManager &source_manager = compiler.getSourceManager();
+    clang::SourceManager &source_manager = compiler.getSourceManager();
+    preprocessor.addPPCallbacks(
+        std::make_unique<MyPPCallbacks>(source_manager));
 
     // preprocessor.EnterMainSourceFile();
 
