@@ -164,22 +164,33 @@ protected:
     clang::Preprocessor &preprocessor = compiler.getPreprocessor();
     // clang::SourceManager &source_manager = compiler.getSourceManager();
 
-    preprocessor.EnterMainSourceFile();
+    // preprocessor.EnterMainSourceFile();
 
-    clang::Token token;
-    std::string result;
-    while (true) {
-      preprocessor.Lex(token);
-      if (token.is(clang::tok::eof)) {
-        break;
-      }
-      result += preprocessor.getSpelling(token);
-      result += " ";
-    }
+    // clang::Token token;
+    // std::string result;
+    // while (true) {
+    //   preprocessor.Lex(token);
+    //   if (token.is(clang::tok::eof)) {
+    //     break;
+    //   }
+    //   if (token.hasLeadingSpace()) {
+    //     result += " ";
+    //   }
+    //   if (token.isAtStartOfLine()) {
+    //     result += "\n";
+    //   }
+    //   result += preprocessor.getSpelling(token);
+    // }
     const llvm::StringRef output_path = compiler.getFrontendOpts().OutputFile;
     error_code ec;
     llvm::raw_fd_ostream file(output_path, ec, llvm::sys::fs::OF_None);
-    file << result;
+    clang::PreprocessorOutputOptions output_options;
+    output_options.ShowLineMarkers = true;
+    output_options.ShowMacroComments = false;
+    output_options.ShowComments = false;
+    output_options.ShowMacros = false;
+    output_options.ShowCPP = true;
+    clang::DoPrintPreprocessedInput(preprocessor, &file, output_options);
   }
 };
 
