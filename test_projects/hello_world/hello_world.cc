@@ -2,9 +2,9 @@
 
 #include <cstdio>
 
-static const char *test() { return "Hello World!\n"; }
+static const char *hello() { return "Hello World!\n"; }
 
 int main() {
-  printf("%s", test());
+  printf("%s", hello());
   return 0;
 }

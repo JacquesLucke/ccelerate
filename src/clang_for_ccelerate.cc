@@ -1,19 +1,27 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <clang/AST/ASTConsumer.h>
+#include <clang/ASTMatchers/ASTMatchFinder.h>
+#include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Basic/Version.h>
 #include <clang/CodeGen/CodeGenAction.h>
 #include <clang/Driver/Compilation.h>
 #include <clang/Driver/Driver.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
+#include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/FrontendOptions.h>
 #include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/FrontendTool/Utils.h>
+#include <clang/Rewrite/Core/Rewriter.h>
+#include <clang/Tooling/CommonOptionsParser.h>
+#include <clang/Tooling/Tooling.h>
 #include <filesystem>
 #include <fmt/format.h>
 #include <llvm/Config/llvm-config.h>
+#include <llvm/Support/CommandLine.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/TargetParser/Host.h>
@@ -21,6 +29,7 @@
 #include "clang_for_ccelerate_io.hh"
 #include "error_code.hh"
 #include "get_current_executable_path.hh"
+#include "memory.hh"
 #include "string.hh"
 
 namespace ccelerate {
@@ -167,11 +176,119 @@ static int handle__compile_obj(const Cmd_CompileObj &args) {
   return execute_cc1(args.clang_args);
 }
 
+class FunctionRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
+private:
+  clang::Rewriter &rewriter_;
+
+public:
+  FunctionRenamer(clang::Rewriter &rewriter) : rewriter_(rewriter) {}
+
+  virtual void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    clang::SourceLocation loc;
+    std::string old_name;
+
+    if (const clang::FunctionDecl *fn_decl =
+            result.Nodes.getNodeAs<clang::FunctionDecl>("staticFunc")) {
+      loc = fn_decl->getLocation();
+      old_name = fn_decl->getNameAsString();
+    } else if (const clang::DeclRefExpr *fn_decl =
+                   result.Nodes.getNodeAs<clang::DeclRefExpr>("funcRef")) {
+      loc = fn_decl->getLocation();
+      old_name = fn_decl->getDecl()->getNameAsString();
+    }
+    if (!loc.isValid()) {
+      return;
+    }
+    if (!result.SourceManager->isInMainFile(loc)) {
+      return;
+    }
+    rewriter_.InsertTextAfter(loc.getLocWithOffset(old_name.size()), "_local");
+  }
+};
+
+class MyASTConsumer : public clang::ASTConsumer {
+private:
+  clang::ast_matchers::MatchFinder finder_;
+  FunctionRenamer renamer_;
+
+public:
+  MyASTConsumer(clang::Rewriter &rewriter) : renamer_(rewriter) {
+    using namespace clang::ast_matchers;
+    auto static_func_matcher =
+        functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
+    finder_.addMatcher(static_func_matcher.bind("staticFunc"), &renamer_);
+    finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("funcRef"),
+                       &renamer_);
+  }
+
+  void HandleTranslationUnit(clang::ASTContext &context) override {
+    finder_.matchAST(context);
+  }
+};
+
+class RefactorAction : public clang::ASTFrontendAction {
+private:
+  const Cmd_ExtractLocalCode &args_;
+  clang::Rewriter rewriter_;
+
+public:
+  RefactorAction(const Cmd_ExtractLocalCode &args) : args_(args) {}
+
+  void EndSourceFileAction() override {
+    error_code ec;
+    llvm::raw_fd_ostream fs(args_.local_code_path.string(), ec);
+    rewriter_.getEditBuffer(rewriter_.getSourceMgr().getMainFileID()).write(fs);
+  }
+
+  unique_ptr<clang::ASTConsumer>
+  CreateASTConsumer(clang::CompilerInstance &compiler,
+                    const llvm::StringRef file) override {
+    rewriter_.setSourceMgr(compiler.getSourceManager(), compiler.getLangOpts());
+    return std::make_unique<MyASTConsumer>(rewriter_);
+  }
+};
+
 static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
-  error_code ec;
-  llvm::raw_fd_ostream fs(args.local_code_path.string(), ec);
-  fs << "Hello\n";
-  return 0;
+  // The driver job args start with "-cc1"; CompilerInvocation expects the
+  // remaining cc1 options only (same as clang's cc1_main entry point).
+  vector<const char *> cc1_args;
+  cc1_args.reserve(args.clang_args.size());
+  for (const string &arg : args.clang_args) {
+    if (cc1_args.empty() && arg == "-cc1") {
+      continue;
+    }
+    cc1_args.push_back(arg.c_str());
+  }
+
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
+  llvm::InitializeAllAsmParsers();
+
+  clang::CompilerInstance clang_instance;
+  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+      new clang::DiagnosticIDs());
+  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
+      new clang::DiagnosticOptions());
+  clang::TextDiagnosticBuffer *diags_buffer = new clang::TextDiagnosticBuffer();
+  clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
+
+  bool success = clang::CompilerInvocation::CreateFromArgs(
+      clang_instance.getInvocation(), cc1_args, diags);
+
+  clang_instance.createDiagnostics();
+  if (!clang_instance.hasDiagnostics()) {
+    return 1;
+  }
+  diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+  if (!success) {
+    return 1;
+  }
+
+  RefactorAction action(args);
+  success = clang_instance.ExecuteAction(action);
+  return success ? 0 : 1;
 }
 
 int clang_ops_main(const int argc, char **argv) {

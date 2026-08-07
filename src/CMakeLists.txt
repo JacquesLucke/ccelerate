@@ -66,4 +66,9 @@ target_link_libraries(clang_for_ccelerate PRIVATE
   ${llvm_libs}
   ${clang_libs}
 )
+# LLVM is built with -fno-rtti; subclasses of Clang AST/Frontend types need the same.
+target_compile_options(clang_for_ccelerate PRIVATE
+  $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fno-rtti>
+  $<$<CXX_COMPILER_ID:MSVC>:/GR->
+)
 target_compile_definitions(clang_for_ccelerate PRIVATE MSGPACK_NO_BOOST)
