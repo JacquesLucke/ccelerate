@@ -67,3 +67,10 @@ target_link_libraries(clang_for_ccelerate PRIVATE
   ${clang_libs}
 )
 target_compile_definitions(clang_for_ccelerate PRIVATE MSGPACK_NO_BOOST)
+# Match LLVM's build: subclassing clang::FrontendAction requires no RTTI.
+if(NOT LLVM_ENABLE_RTTI)
+  target_compile_options(clang_for_ccelerate PRIVATE
+    $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:-fno-rtti>
+    $<$<CXX_COMPILER_ID:MSVC>:/GR->
+  )
+endif()

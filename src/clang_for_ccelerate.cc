@@ -7,10 +7,12 @@
 #include <clang/Driver/Driver.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
+#include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/FrontendOptions.h>
 #include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/FrontendTool/Utils.h>
+#include <clang/Lex/Preprocessor.h>
 #include <filesystem>
 #include <fmt/format.h>
 #include <llvm/Config/llvm-config.h>
@@ -19,7 +21,9 @@
 #include <llvm/TargetParser/Host.h>
 
 #include "clang_for_ccelerate_io.hh"
+#include "error_code.hh"
 #include "get_current_executable_path.hh"
+#include "memory.hh"
 #include "string.hh"
 
 namespace ccelerate {
@@ -153,8 +157,71 @@ static int execute_cc1(const vector<string> &clang_args) {
   return success ? 0 : 1;
 }
 
+class LocalCodeExtractionAction : public clang::PreprocessorFrontendAction {
+protected:
+  void ExecuteAction() override {
+    clang::CompilerInstance &compiler = this->getCompilerInstance();
+    clang::Preprocessor &preprocessor = compiler.getPreprocessor();
+    // clang::SourceManager &source_manager = compiler.getSourceManager();
+
+    preprocessor.EnterMainSourceFile();
+
+    clang::Token token;
+    std::string result;
+    while (true) {
+      preprocessor.Lex(token);
+      if (token.is(clang::tok::eof)) {
+        break;
+      }
+      result += preprocessor.getSpelling(token);
+      result += " ";
+    }
+    const llvm::StringRef output_path = compiler.getFrontendOpts().OutputFile;
+    error_code ec;
+    llvm::raw_fd_ostream file(output_path, ec, llvm::sys::fs::OF_None);
+    file << result;
+  }
+};
+
 static int handle__preprocess(const Cmd_Preprocess &args) {
-  return execute_cc1(args.clang_args);
+  vector<const char *> cc1_args;
+  for (const string &arg : args.clang_args) {
+    if (cc1_args.empty() && arg == "-cc1") {
+      continue;
+    }
+    cc1_args.push_back(arg.c_str());
+  }
+
+  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts =
+      new clang::DiagnosticOptions();
+  clang::TextDiagnosticPrinter *diag_printer =
+      new clang::TextDiagnosticPrinter(llvm::errs(), &*diag_opts);
+  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+      new clang::DiagnosticIDs());
+  clang::DiagnosticsEngine diags(diag_id, &*diag_opts, diag_printer);
+
+  shared_ptr<clang::CompilerInvocation> invocation =
+      std::make_shared<clang::CompilerInvocation>();
+  const bool success =
+      clang::CompilerInvocation::CreateFromArgs(*invocation, cc1_args, diags);
+  if (!success) {
+    llvm::errs() << "Failed to create compiler invocation\n";
+    return 1;
+  }
+
+  clang::CompilerInstance compiler;
+  compiler.setInvocation(invocation);
+  compiler.createDiagnostics(diag_printer, false);
+  if (!compiler.hasDiagnostics()) {
+    return 1;
+  }
+
+  LocalCodeExtractionAction action;
+  if (!compiler.ExecuteAction(action)) {
+    llvm::errs() << "Failed to execute action\n";
+    return 1;
+  }
+  return 0;
 }
 
 static int handle__compile_obj(const Cmd_CompileObj &args) {
