@@ -56,16 +56,16 @@ get_clang_cc1_action_type(const span<const string> args) {
   return nullopt;
 }
 
-static void arg_rewrite__replace_arg(const span<string> args,
-                                     const string_view old_arg,
-                                     const string_view new_arg) {
-  for (size_t i = 0; i < args.size(); i++) {
-    if (args[i] == old_arg) {
-      args[i] = new_arg;
-      return;
-    }
-  }
-}
+// static void arg_rewrite__replace_arg(const span<string> args,
+//                                      const string_view old_arg,
+//                                      const string_view new_arg) {
+//   for (size_t i = 0; i < args.size(); i++) {
+//     if (args[i] == old_arg) {
+//       args[i] = new_arg;
+//       return;
+//     }
+//   }
+// }
 
 // static void arg_rewrite__remove_dual_arg(vector<string> &args,
 //                                          const string_view first_arg) {
@@ -77,16 +77,16 @@ static void arg_rewrite__replace_arg(const span<string> args,
 //   }
 // }
 
-static void arg_write__replace_dual_arg_value(vector<string> &args,
-                                              const string_view name,
-                                              string new_value) {
-  for (size_t i = 0; i < args.size() - 1; i++) {
-    if (args[i] == name) {
-      args[i + 1] = new_value;
-      return;
-    }
-  }
-}
+// static void arg_write__replace_dual_arg_value(vector<string> &args,
+//                                               const string_view name,
+//                                               string new_value) {
+//   for (size_t i = 0; i < args.size() - 1; i++) {
+//     if (args[i] == name) {
+//       args[i + 1] = new_value;
+//       return;
+//     }
+//   }
+// }
 
 static optional<string>
 arg_read__get_dual_arg_value(const span<const string> args,
@@ -97,14 +97,6 @@ arg_read__get_dual_arg_value(const span<const string> args,
     }
   }
   return nullopt;
-}
-
-static vector<string>
-rewrite_clang_cc1_args__emit_obj__to__emit_preprocessed(vector<string> args,
-                                                        string output_file) {
-  arg_rewrite__replace_arg(args, "-emit-obj", "-E");
-  arg_write__replace_dual_arg_value(args, "-o", std::move(output_file));
-  return args;
 }
 
 static vector<string> rewrite_clang_cc1_args__change_source_file(
@@ -125,8 +117,48 @@ handle_command__clang_cc1(const ClientID &client_id,
                           const string &working_dir) {
   const optional<ClangCC1ActionType> action_type_opt =
       get_clang_cc1_action_type(command.args);
-  if (!action_type_opt.has_value() ||
-      action_type_opt == ClangCC1ActionType::EmitPreprocessed) {
+  if (action_type_opt == ClangCC1ActionType::EmitObj) {
+    const clang::driver::types::ID orig_input_type =
+        command.input_infos[0].type;
+
+    const optional<path> obj_file =
+        arg_read__get_dual_arg_value(command.args, "-o");
+    if (!obj_file.has_value()) {
+      // TODO
+      return {1};
+    }
+    const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
+    path local_code_file = command.input_infos[0].filename.value();
+    local_code_file.replace_extension(fmt::format(
+        "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
+    const ExitCodeOrError exit_or_error = run_process_stream_output_traced(
+        ProcessArgs()
+            .arg(clang_for_ccelerate_exe)
+            .args({"local-code", "--local-code-path", local_code_file, "--"})
+            .args(command.args)
+            .working_dir(working_dir),
+        [&](string stdout_data, string stderr_data) {
+          send_response_incomplete(
+              client_id, std::move(stdout_data), std::move(stderr_data));
+        });
+    if (exit_or_error.exit_code() != 0) {
+      return exit_or_error;
+    }
+    vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
+        command.args,
+        local_code_file,
+        clang::driver::types::getTypeName(orig_input_type));
+    return run_process_stream_output_traced(
+        ProcessArgs()
+            .arg(clang_for_ccelerate_exe)
+            .args({"compile_obj", "--"})
+            .args(compile_args)
+            .working_dir(working_dir),
+        [&](string stdout_data, string stderr_data) {
+          send_response_incomplete(
+              client_id, std::move(stdout_data), std::move(stderr_data));
+        });
+  } else {
     return run_process_stream_output_traced(
         ProcessArgs()
             .arg(command.executable)
@@ -137,81 +169,6 @@ handle_command__clang_cc1(const ClientID &client_id,
               client_id, std::move(stdout_data), std::move(stderr_data));
         });
   }
-  switch (*action_type_opt) {
-    case ClangCC1ActionType::EmitPreprocessed: {
-      /* Handled above already. */
-      break;
-    }
-    case ClangCC1ActionType::EmitObj: {
-      const clang::driver::types::ID orig_input_type =
-          command.input_infos[0].type;
-      const clang::driver::types::ID preprocessed_type =
-          clang::driver::types::getPreprocessedType(orig_input_type);
-      const string preprocess_file_suffix =
-          clang::driver::types::getTypeTempSuffix(preprocessed_type);
-
-      const optional<path> obj_file =
-          arg_read__get_dual_arg_value(command.args, "-o");
-      if (!obj_file.has_value()) {
-        // TODO
-        return {1};
-      }
-      const path &clang_for_ccelerate_exe =
-          get_clang_for_ccelerate_executable();
-      const string preprocessed_file =
-          fmt::format("{}.{}", obj_file->string(), preprocess_file_suffix);
-      const string local_code_file = fmt::format(
-          "{}.local.{}", obj_file->string(), obj_file->extension().string());
-      vector<string> preprocess_args =
-          rewrite_clang_cc1_args__emit_obj__to__emit_preprocessed(
-              vector<string>(command.args.begin(), command.args.end()),
-              preprocessed_file);
-      ProcessResult preprocess_result =
-          run_process_traced(ProcessArgs()
-                                 .arg(clang_for_ccelerate_exe)
-                                 .args({"preprocess", "--"})
-                                 .args(preprocess_args)
-                                 .working_dir(working_dir));
-      if (preprocess_result.exit_code() != 0) {
-        send_response_incomplete(client_id,
-                                 std::move(preprocess_result.stdout_data),
-                                 std::move(preprocess_result.stderr_data));
-        return preprocess_result.exit_code_or_error();
-      }
-      run_process_traced(ProcessArgs()
-                             .arg(clang_for_ccelerate_exe)
-                             .args({"extract_local_code",
-                                    "--local-code-path",
-                                    local_code_file,
-                                    "--"})
-                             .args(command.args)
-                             .working_dir(working_dir));
-      vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
-          command.args,
-          preprocessed_file,
-          clang::driver::types::getTypeName(preprocessed_type));
-      return run_process_stream_output_traced(
-          ProcessArgs()
-              .arg(clang_for_ccelerate_exe)
-              .args({"compile_obj", "--"})
-              .args(compile_args)
-              .working_dir(working_dir),
-          [&](string stdout_data, string stderr_data) {
-            send_response_incomplete(
-                client_id, std::move(stdout_data), std::move(stderr_data));
-          });
-    }
-  }
-  // Fallback handling.
-  const ProcessResult cmd_result =
-      run_process_traced(ProcessArgs()
-                             .arg(command.executable)
-                             .args(command.args)
-                             .working_dir(working_dir));
-  send_response_incomplete(client_id,
-                           std::move(cmd_result.stdout_data),
-                           std::move(cmd_result.stderr_data));
-  return cmd_result.exit_code_or_error();
 }
 
 static bool is_clang_cc1_command(const string_view &executable,

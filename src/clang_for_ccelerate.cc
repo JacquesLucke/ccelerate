@@ -313,7 +313,7 @@ int clang_ops_main(const int argc, char **argv) {
   compile_obj_cmd.add_option(
       "passthrough", compile_obj_args.clang_args, "Arguments passed to clang");
 
-  CLI::App &extract_local_code_cmd = *app.add_subcommand("extract_local_code");
+  CLI::App &extract_local_code_cmd = *app.add_subcommand("local-code");
   Cmd_ExtractLocalCode extract_local_code_args;
   extract_local_code_cmd.add_option("--local-code-path",
                                     extract_local_code_args.local_code_path,
