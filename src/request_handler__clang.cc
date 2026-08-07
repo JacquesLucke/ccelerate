@@ -150,7 +150,7 @@ handle_command__clang_cc1(const ClientID &client_id,
       const string preprocess_file_suffix =
           clang::driver::types::getTypeTempSuffix(preprocessed_type);
 
-      const optional<string> obj_file =
+      const optional<path> obj_file =
           arg_read__get_dual_arg_value(command.args, "-o");
       if (!obj_file.has_value()) {
         // TODO
@@ -159,23 +159,33 @@ handle_command__clang_cc1(const ClientID &client_id,
       const path &clang_for_ccelerate_exe =
           get_clang_for_ccelerate_executable();
       const string preprocessed_file =
-          fmt::format("{}.{}", *obj_file, preprocess_file_suffix);
+          fmt::format("{}.{}", obj_file->string(), preprocess_file_suffix);
+      const string local_code_file = fmt::format(
+          "{}.local.{}", obj_file->string(), obj_file->extension().string());
       vector<string> preprocess_args =
           rewrite_clang_cc1_args__emit_obj__to__emit_preprocessed(
               vector<string>(command.args.begin(), command.args.end()),
               preprocessed_file);
       ProcessResult preprocess_result =
           run_process_traced(ProcessArgs()
-                          .arg(clang_for_ccelerate_exe)
-                          .args({"preprocess", "--"})
-                          .args(preprocess_args)
-                          .working_dir(working_dir));
+                                 .arg(clang_for_ccelerate_exe)
+                                 .args({"preprocess", "--"})
+                                 .args(preprocess_args)
+                                 .working_dir(working_dir));
       if (preprocess_result.exit_code() != 0) {
         send_response_incomplete(client_id,
                                  std::move(preprocess_result.stdout_data),
                                  std::move(preprocess_result.stderr_data));
         return preprocess_result.exit_code_or_error();
       }
+      run_process_traced(ProcessArgs()
+                             .arg(clang_for_ccelerate_exe)
+                             .args({"extract_local_code",
+                                    "--local-code-path",
+                                    local_code_file,
+                                    "--"})
+                             .args(command.args)
+                             .working_dir(working_dir));
       vector<string> compile_args = rewrite_clang_cc1_args__change_source_file(
           command.args,
           preprocessed_file,
@@ -193,10 +203,11 @@ handle_command__clang_cc1(const ClientID &client_id,
     }
   }
   // Fallback handling.
-  const ProcessResult cmd_result = run_process_traced(ProcessArgs()
-                                                   .arg(command.executable)
-                                                   .args(command.args)
-                                                   .working_dir(working_dir));
+  const ProcessResult cmd_result =
+      run_process_traced(ProcessArgs()
+                             .arg(command.executable)
+                             .args(command.args)
+                             .working_dir(working_dir));
   send_response_incomplete(client_id,
                            std::move(cmd_result.stdout_data),
                            std::move(cmd_result.stderr_data));

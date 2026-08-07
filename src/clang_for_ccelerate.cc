@@ -19,6 +19,7 @@
 #include <llvm/TargetParser/Host.h>
 
 #include "clang_for_ccelerate_io.hh"
+#include "error_code.hh"
 #include "get_current_executable_path.hh"
 #include "string.hh"
 
@@ -36,6 +37,11 @@ struct Cmd_Preprocess {
 
 struct Cmd_CompileObj {
   vector<string> clang_args;
+};
+
+struct Cmd_ExtractLocalCode {
+  vector<string> clang_args;
+  path local_code_path;
 };
 
 static int handle__parse_args(const Cmd_ParseArgs &args) {
@@ -161,6 +167,13 @@ static int handle__compile_obj(const Cmd_CompileObj &args) {
   return execute_cc1(args.clang_args);
 }
 
+static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
+  error_code ec;
+  llvm::raw_fd_ostream fs(args.local_code_path.string(), ec);
+  fs << "Hello\n";
+  return 0;
+}
+
 int clang_ops_main(const int argc, char **argv) {
   CLI::App app{"clang_for_ccelerate"};
   app.description("A utility used by ccelerate to do clang specific things "
@@ -183,6 +196,15 @@ int clang_ops_main(const int argc, char **argv) {
   compile_obj_cmd.add_option(
       "passthrough", compile_obj_args.clang_args, "Arguments passed to clang");
 
+  CLI::App &extract_local_code_cmd = *app.add_subcommand("extract_local_code");
+  Cmd_ExtractLocalCode extract_local_code_args;
+  extract_local_code_cmd.add_option("--local-code-path",
+                                    extract_local_code_args.local_code_path,
+                                    "Path to write the local code to");
+  extract_local_code_cmd.add_option("passthrough",
+                                    extract_local_code_args.clang_args,
+                                    "Arguments passed to clang");
+
   CLI11_PARSE(app, argc, argv);
 
   if (parse_args_cmd) {
@@ -191,6 +213,8 @@ int clang_ops_main(const int argc, char **argv) {
     return handle__preprocess(preprocess_args);
   } else if (compile_obj_cmd) {
     return handle__compile_obj(compile_obj_args);
+  } else if (extract_local_code_cmd) {
+    return handle__extract_local_code(extract_local_code_args);
   } else {
     fmt::println(stderr, "Unknown command: {}", parse_args_cmd.get_name());
   }
