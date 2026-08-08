@@ -4,5 +4,4 @@
 build
 compile_commands.json
 exports
-*.local.cpp
-*.local.c
+*.local.*
