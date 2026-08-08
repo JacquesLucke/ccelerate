@@ -2,7 +2,7 @@
 enum class A { VALUE_A = 0 };
 
 namespace {
-enum class B_local { VALUE_B = 1 };
+enum class B__ { VALUE_B = 1 };
 }
 
 namespace test {
@@ -10,5 +10,5 @@ enum class C { VALUE_C = 2 };
 }
 
 int main() {
-  return int(A::VALUE_A) + int(B_local::VALUE_B) + int(test::C::VALUE_C);
+  return int(A::VALUE_A) + int(B__::VALUE_B) + int(test::C::VALUE_C);
 }

@@ -232,7 +232,7 @@ public:
         src_dir / (stem.string() + ".local-reference.ii");
 
     const ProcessResult extract_result = extract_local_code_with_clang(
-        parsed_args.commands[0].args, output_path, src_dir);
+        parsed_args.commands[0].args, output_path, src_dir, "__");
     ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
 
     ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;

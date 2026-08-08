@@ -1,22 +1,22 @@
 # 1 "const_value.cc"
-constexpr int a_local = 1;
-const int b_local = 2;
+constexpr int a__ = 1;
+const int b__ = 2;
 int c = 3;
 extern const int d = 10;
 
 namespace test {
-constexpr int e_local = 4;
-const int f_local = 5;
+constexpr int e__ = 4;
+const int f__ = 5;
 int g = 6;
 extern const int h = 11;
 }
 namespace {
-constexpr int i_local = 7;
-const int j_local = 8;
-int k_local = 9;
-extern const int l_local = 12;
+constexpr int i__ = 7;
+const int j__ = 8;
+int k__ = 9;
+extern const int l__ = 12;
 }
 
 int main() {
-  return a_local + b_local + c + d + test::e_local + test::f_local + test::g + test::h + i_local + j_local + k_local + l_local;
+  return a__ + b__ + c + d + test::e__ + test::f__ + test::g + test::h + i__ + j__ + k__ + l__;
 }

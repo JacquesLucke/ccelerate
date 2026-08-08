@@ -1,4 +1,4 @@
 # 1 "single_static_function.cc"
-static int x_local = 0;
+static int x__ = 0;
 
-int main() { return x_local; }
+int main() { return x__; }

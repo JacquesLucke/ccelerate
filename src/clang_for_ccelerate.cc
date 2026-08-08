@@ -644,6 +644,9 @@ int clang_ops_main(const int argc, char **argv) {
   extract_local_code_cmd.add_option("--local-code-path",
                                     extract_local_code_args.local_code_path,
                                     "Path to write the local code to");
+  extract_local_code_cmd.add_option("--local-id",
+                                    extract_local_code_args.local_id,
+                                    "Suffix to use to make symbols unique");
   extract_local_code_cmd.add_option("passthrough",
                                     extract_local_code_args.clang_args,
                                     "Arguments passed to clang");
