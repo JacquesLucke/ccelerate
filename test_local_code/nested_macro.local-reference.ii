@@ -1,0 +1,5 @@
+# 1 "nested_macro.cc"
+
+
+
+int main() { return (10 + 1); }
