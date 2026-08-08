@@ -437,29 +437,37 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 
   LocalCodeState state{args};
 
-  clang::CompilerInstance clang_instance;
-  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-      new clang::DiagnosticIDs());
-  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
-      new clang::DiagnosticOptions());
-  clang::TextDiagnosticBuffer *diags_buffer = new clang::TextDiagnosticBuffer();
-  clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
+  // Handle the preprocessing part.
+  {
+    clang::CompilerInstance clang_instance;
+    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+        new clang::DiagnosticIDs());
+    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
+        new clang::DiagnosticOptions());
+    clang::TextDiagnosticBuffer *diags_buffer =
+        new clang::TextDiagnosticBuffer();
+    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
 
-  bool success = clang::CompilerInvocation::CreateFromArgs(
-      clang_instance.getInvocation(), cc1_args, diags);
+    bool success = clang::CompilerInvocation::CreateFromArgs(
+        clang_instance.getInvocation(), cc1_args, diags);
+    clang_instance.createDiagnostics();
+    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    if (!success) {
+      return 1;
+    }
 
-  clang_instance.createDiagnostics();
-  if (!clang_instance.hasDiagnostics()) {
-    return 1;
+    ExtractPreprocessedLocalCodeAction action(state);
+    success = clang_instance.ExecuteAction(action);
+    if (!success) {
+      return 1;
+    }
   }
-  diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
-  if (!success) {
-    return 1;
+
+  // Do semantic changes.
+  {
   }
 
-  ExtractPreprocessedLocalCodeAction action(state);
-  success = clang_instance.ExecuteAction(action);
-
+  // Write the output.
   {
     error_code ec;
     llvm::raw_fd_ostream fs(
@@ -482,7 +490,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     }
   }
 
-  return success ? 0 : 1;
+  return 0;
 }
 
 int clang_ops_main(const int argc, char **argv) {
