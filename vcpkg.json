@@ -12,6 +12,7 @@
     "tl-function-ref",
     "spdlog",
     "llvm",
+    "ctre",
     {
       "name": "tracy",
       "features": ["on-demand"]

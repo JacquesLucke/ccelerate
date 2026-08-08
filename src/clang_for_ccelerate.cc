@@ -18,6 +18,7 @@
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
+#include <ctre.hpp>
 #include <filesystem>
 #include <fmt/format.h>
 #include <llvm/Config/llvm-config.h>
@@ -176,76 +177,235 @@ static int handle__compile_obj(const Cmd_CompileObj &args) {
   return execute_cc1(args.clang_args);
 }
 
-class FunctionRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
-private:
-  clang::Rewriter &rewriter_;
+// class FunctionRenamer : public
+// clang::ast_matchers::MatchFinder::MatchCallback { private:
+//   clang::Rewriter &rewriter_;
 
-public:
-  FunctionRenamer(clang::Rewriter &rewriter) : rewriter_(rewriter) {}
+// public:
+//   FunctionRenamer(clang::Rewriter &rewriter) : rewriter_(rewriter) {}
 
-  virtual void
-  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
-    clang::SourceLocation loc;
-    std::string old_name;
+//   virtual void
+//   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+//     clang::SourceLocation loc;
+//     std::string old_name;
 
-    if (const clang::FunctionDecl *fn_decl =
-            result.Nodes.getNodeAs<clang::FunctionDecl>("staticFunc")) {
-      loc = fn_decl->getLocation();
-      old_name = fn_decl->getNameAsString();
-    } else if (const clang::DeclRefExpr *fn_decl =
-                   result.Nodes.getNodeAs<clang::DeclRefExpr>("funcRef")) {
-      loc = fn_decl->getLocation();
-      old_name = fn_decl->getDecl()->getNameAsString();
+//     if (const clang::FunctionDecl *fn_decl =
+//             result.Nodes.getNodeAs<clang::FunctionDecl>("staticFunc")) {
+//       loc = fn_decl->getLocation();
+//       old_name = fn_decl->getNameAsString();
+//     } else if (const clang::DeclRefExpr *fn_decl =
+//                    result.Nodes.getNodeAs<clang::DeclRefExpr>("funcRef")) {
+//       loc = fn_decl->getLocation();
+//       old_name = fn_decl->getDecl()->getNameAsString();
+//     }
+//     if (!loc.isValid()) {
+//       return;
+//     }
+//     if (!result.SourceManager->isInMainFile(loc)) {
+//       return;
+//     }
+//     rewriter_.InsertTextAfter(loc.getLocWithOffset(old_name.size()),
+//     "_local");
+//   }
+// };
+
+// class MyASTConsumer : public clang::ASTConsumer {
+// private:
+//   clang::ast_matchers::MatchFinder finder_;
+//   FunctionRenamer renamer_;
+
+// public:
+//   MyASTConsumer(clang::Rewriter &rewriter) : renamer_(rewriter) {
+//     using namespace clang::ast_matchers;
+//     auto static_func_matcher =
+//         functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
+//     finder_.addMatcher(static_func_matcher.bind("staticFunc"), &renamer_);
+//     finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("funcRef"),
+//                        &renamer_);
+//   }
+
+//   void HandleTranslationUnit(clang::ASTContext &context) override {
+//     finder_.matchAST(context);
+//   }
+// };
+
+// class RefactorAction : public clang::ASTFrontendAction {
+// private:
+//   const Cmd_ExtractLocalCode &args_;
+//   clang::Rewriter rewriter_;
+
+// public:
+//   RefactorAction(const Cmd_ExtractLocalCode &args) : args_(args) {}
+
+//   void EndSourceFileAction() override {
+//     error_code ec;
+//     llvm::raw_fd_ostream fs(args_.local_code_path.string(), ec);
+//     rewriter_.getEditBuffer(rewriter_.getSourceMgr().getMainFileID()).write(fs);
+//   }
+
+//   unique_ptr<clang::ASTConsumer>
+//   CreateASTConsumer(clang::CompilerInstance &compiler,
+//                     const llvm::StringRef file) override {
+//     rewriter_.setSourceMgr(compiler.getSourceManager(),
+//     compiler.getLangOpts()); return
+//     std::make_unique<MyASTConsumer>(rewriter_);
+//   }
+// };
+
+static vector<string_view> split_into_lines(const string_view src) {
+  vector<string_view> lines;
+  size_t start = 0;
+  while (true) {
+    const size_t end = src.find('\n', start);
+    if (end == string_view::npos) {
+      lines.push_back(src.substr(start));
+      break;
     }
-    if (!loc.isValid()) {
-      return;
+    lines.push_back(src.substr(start, end - start));
+    start = end + 1;
+  }
+  return lines;
+}
+
+struct LineMarker {
+  int line_number;
+  string_view file;
+  bool is_start_of_new_file;
+  bool is_return_to_file;
+  bool is_system_header;
+  bool is_extern_c;
+
+  static optional<LineMarker> parse(const string_view line) {
+    const ctre::regex_results match =
+        ctre::match<R"!(# (\d+) "(.*)"\s*(\d?)\s*(\d?)\s*(\d?)\s*(\d?))!">(
+            line);
+    if (!match) {
+      return nullopt;
     }
-    if (!result.SourceManager->isInMainFile(loc)) {
-      return;
+    const optional<string_view> line_number = match.get<1>().to_optional_view();
+    const optional<string_view> file = match.get<2>().to_optional_view();
+    vector<int> flags;
+    if (const optional<string_view> f = match.get<3>().to_optional_view()) {
+      if (!f->empty()) {
+        flags.push_back(std::stoi(string(*f)));
+      }
     }
-    rewriter_.InsertTextAfter(loc.getLocWithOffset(old_name.size()), "_local");
+    if (const optional<string_view> f = match.get<4>().to_optional_view()) {
+      if (!f->empty()) {
+        flags.push_back(std::stoi(string(*f)));
+      }
+    }
+    if (const optional<string_view> f = match.get<5>().to_optional_view()) {
+      if (!f->empty()) {
+        flags.push_back(std::stoi(string(*f)));
+      }
+    }
+    if (const optional<string_view> f = match.get<6>().to_optional_view()) {
+      if (!f->empty()) {
+        flags.push_back(std::stoi(string(*f)));
+      }
+    }
+    auto flag_is_set = [&](const int flag) {
+      return std::ranges::any_of(flags, [&](const int f) { return f == flag; });
+    };
+    return LineMarker{
+        .line_number = std::stoi(string(*line_number)),
+        .file = *file,
+        .is_start_of_new_file = flag_is_set(1),
+        .is_return_to_file = flag_is_set(2),
+        .is_system_header = flag_is_set(3),
+        .is_extern_c = flag_is_set(4),
+    };
   }
 };
 
-class MyASTConsumer : public clang::ASTConsumer {
-private:
-  clang::ast_matchers::MatchFinder finder_;
-  FunctionRenamer renamer_;
-
-public:
-  MyASTConsumer(clang::Rewriter &rewriter) : renamer_(rewriter) {
-    using namespace clang::ast_matchers;
-    auto static_func_matcher =
-        functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
-    finder_.addMatcher(static_func_matcher.bind("staticFunc"), &renamer_);
-    finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("funcRef"),
-                       &renamer_);
+static string_view trim_whitespace(const string_view str) {
+  const size_t start = str.find_first_not_of(" \t\n\r");
+  if (start == string_view::npos) {
+    return {};
   }
+  const size_t end = str.find_last_not_of(" \t\n\r");
+  return str.substr(start, end - start + 1);
+}
 
-  void HandleTranslationUnit(clang::ASTContext &context) override {
-    finder_.matchAST(context);
-  }
-};
-
-class RefactorAction : public clang::ASTFrontendAction {
+class ExtractPreprocessedLocalCodeAction
+    : public clang::PreprocessorFrontendAction {
 private:
   const Cmd_ExtractLocalCode &args_;
-  clang::Rewriter rewriter_;
 
 public:
-  RefactorAction(const Cmd_ExtractLocalCode &args) : args_(args) {}
+  ExtractPreprocessedLocalCodeAction(const Cmd_ExtractLocalCode &args)
+      : args_(args) {}
 
-  void EndSourceFileAction() override {
+  void ExecuteAction() override {
+    clang::CompilerInstance &compiler = this->getCompilerInstance();
+    clang::Preprocessor &pp = compiler.getPreprocessor();
+
+    string preprocessed;
+    llvm::raw_string_ostream os(preprocessed);
+    clang::PreprocessorOutputOptions opts;
+    opts.ShowCPP = true;
+    opts.ShowLineMarkers = true;
+    // opts.ShowMacros = true;
+    clang::DoPrintPreprocessedInput(pp, &os, opts);
+    os.flush();
+
+    vector<string_view> header_stack;
+    int local_depth = 0;
+
+    llvm::BumpPtrAllocator alloc;
+    llvm::StringSaver saver(alloc);
+
+    vector<string_view> direct_includes;
+    std::unordered_set<string_view> all_includes;
+    int committed_kept_lines = 0;
+
+    auto config_header_is_local = [](const string_view &path) { return false; };
+
+    const vector<string_view> lines = split_into_lines(preprocessed);
+    vector<string_view> output_lines;
+    for (size_t line_i = 0; line_i < lines.size(); line_i++) {
+      const bool is_local = int(header_stack.size()) == local_depth;
+      const string_view line = lines[line_i];
+      if (line.starts_with("# ")) {
+        const optional<LineMarker> line_marker = LineMarker::parse(line);
+        if (!line_marker) {
+          continue;
+        }
+        const string_view file = line_marker->file;
+        if (line_marker->is_start_of_new_file) {
+          if (is_local) {
+            if (config_header_is_local(file)) {
+              local_depth++;
+            } else {
+              direct_includes.push_back(file);
+            }
+          }
+          all_includes.insert(file);
+          header_stack.push_back(file);
+        } else if (line_marker->is_return_to_file) {
+          header_stack.pop_back();
+          local_depth = std::min<int>(local_depth, header_stack.size());
+        }
+        if (int(header_stack.size()) == local_depth) {
+          output_lines.resize(committed_kept_lines);
+          const string_view out_line_marker =
+              saver.save(fmt::format("# {}", file));
+          output_lines.push_back(out_line_marker);
+        }
+      } else if (is_local) {
+        output_lines.push_back(line);
+        if (!trim_whitespace(line).empty()) {
+          committed_kept_lines = output_lines.size();
+        }
+      }
+    }
+
     error_code ec;
     llvm::raw_fd_ostream fs(args_.local_code_path.string(), ec);
-    rewriter_.getEditBuffer(rewriter_.getSourceMgr().getMainFileID()).write(fs);
-  }
-
-  unique_ptr<clang::ASTConsumer>
-  CreateASTConsumer(clang::CompilerInstance &compiler,
-                    const llvm::StringRef file) override {
-    rewriter_.setSourceMgr(compiler.getSourceManager(), compiler.getLangOpts());
-    return std::make_unique<MyASTConsumer>(rewriter_);
+    for (const string_view line : output_lines) {
+      fs << line << '\n';
+    }
   }
 };
 
@@ -286,7 +446,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     return 1;
   }
 
-  RefactorAction action(args);
+  ExtractPreprocessedLocalCodeAction action(args);
   success = clang_instance.ExecuteAction(action);
   return success ? 0 : 1;
 }
