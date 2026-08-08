@@ -52,6 +52,7 @@ struct Cmd_CompileObj {
 struct Cmd_ExtractLocalCode {
   vector<string> clang_args;
   path local_code_path;
+  string local_id = "_local";
 };
 
 static int handle__parse_args(const Cmd_ParseArgs &args) {
@@ -336,6 +337,8 @@ struct LocalCodeState {
   std::string code_for_parser;
   vector<string_view> local_code_lines;
   vector<int> map_parser_to_local_lines;
+
+  optional<clang::Rewriter> rewriter;
 };
 
 class ExtractPreprocessedLocalCodeAction
@@ -415,6 +418,74 @@ public:
         }
       }
     }
+    // Final newline mapping.
+    state_.map_parser_to_local_lines.push_back(-1);
+  }
+};
+
+class FunctionRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
+private:
+  LocalCodeState &state_;
+
+public:
+  FunctionRenamer(LocalCodeState &state) : state_(state) {}
+
+  virtual void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    clang::SourceLocation loc;
+    std::string old_name;
+
+    if (const clang::FunctionDecl *fn_decl =
+            result.Nodes.getNodeAs<clang::FunctionDecl>("staticFunc")) {
+      loc = fn_decl->getLocation();
+      old_name = fn_decl->getNameAsString();
+    } else if (const clang::DeclRefExpr *fn_decl =
+                   result.Nodes.getNodeAs<clang::DeclRefExpr>("funcRef")) {
+      loc = fn_decl->getLocation();
+      old_name = fn_decl->getDecl()->getNameAsString();
+    }
+    if (!loc.isValid()) {
+      return;
+    }
+    state_.rewriter->InsertTextAfter(loc.getLocWithOffset(old_name.size()),
+                                     state_.args.local_id);
+  }
+};
+
+class LocalCodeASTConsumer : public clang::ASTConsumer {
+private:
+  FunctionRenamer renamer_;
+  clang::ast_matchers::MatchFinder finder_;
+  LocalCodeState &state_;
+
+public:
+  LocalCodeASTConsumer(LocalCodeState &state) : renamer_(state), state_(state) {
+    using namespace clang::ast_matchers;
+    auto static_func_matcher =
+        functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
+    finder_.addMatcher(static_func_matcher.bind("staticFunc"), &renamer_);
+    finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("funcRef"),
+                       &renamer_);
+  }
+
+  void HandleTranslationUnit(clang::ASTContext &context) override {
+    finder_.matchAST(context);
+  }
+};
+
+class RewriteLocalCodeAction : public clang::ASTFrontendAction {
+private:
+  LocalCodeState &state_;
+
+public:
+  RewriteLocalCodeAction(LocalCodeState &state) : state_(state) {}
+
+  unique_ptr<clang::ASTConsumer>
+  CreateASTConsumer(clang::CompilerInstance &compiler,
+                    const llvm::StringRef file) override {
+    state_.rewriter.emplace(compiler.getSourceManager(),
+                            compiler.getLangOpts());
+    return std::make_unique<LocalCodeASTConsumer>(state_);
   }
 };
 
@@ -465,6 +536,51 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 
   // Do semantic changes.
   {
+    clang::CompilerInstance clang_instance;
+    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+        new clang::DiagnosticIDs());
+    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
+        new clang::DiagnosticOptions());
+    clang::TextDiagnosticBuffer *diags_buffer =
+        new clang::TextDiagnosticBuffer();
+    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
+
+    bool success = clang::CompilerInvocation::CreateFromArgs(
+        clang_instance.getInvocation(), cc1_args, diags);
+    clang_instance.createDiagnostics();
+    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    if (!success) {
+      return 1;
+    }
+    auto &inputs = clang_instance.getFrontendOpts().Inputs;
+    clang::InputKind kind = inputs.front().getKind().getPreprocessed();
+    inputs.clear();
+    inputs.emplace_back(
+        llvm::MemoryBufferRef(state.code_for_parser, "preprocessed_code"),
+        kind);
+
+    RewriteLocalCodeAction action(state);
+    success = clang_instance.ExecuteAction(action);
+    if (!success) {
+      return 1;
+    }
+
+    clang::RewriteBuffer &buffer = state.rewriter->getEditBuffer(
+        state.rewriter->getSourceMgr().getMainFileID());
+    string buffer_str;
+    llvm::raw_string_ostream os(buffer_str);
+    buffer.write(os);
+    os.flush();
+
+    vector<string_view> lines = split_into_lines(buffer_str);
+    assert(lines.size() == state.map_parser_to_local_lines.size());
+    for (size_t i = 0; i < lines.size(); i++) {
+      const int mapped_line = state.map_parser_to_local_lines[i];
+      if (mapped_line == -1) {
+        continue;
+      }
+      state.local_code_lines[mapped_line] = lines[i];
+    }
   }
 
   // Write the output.
@@ -488,6 +604,14 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     for (const int line : state.map_parser_to_local_lines) {
       fs << line << '\n';
     }
+  }
+  {
+    error_code ec;
+    llvm::raw_fd_ostream fs(
+        state.args.local_code_path.string() + ".after_parser.ii", ec);
+    state.rewriter
+        ->getEditBuffer(state.rewriter->getSourceMgr().getMainFileID())
+        .write(fs);
   }
 
   return 0;
