@@ -43,10 +43,6 @@ struct Cmd_ParseArgs {
   vector<string> clang_args;
 };
 
-struct Cmd_Preprocess {
-  vector<string> clang_args;
-};
-
 struct Cmd_CompileObj {
   vector<string> clang_args;
 };
@@ -170,10 +166,6 @@ static int execute_cc1(const vector<string> &clang_args) {
 
   success = clang::ExecuteCompilerInvocation(&clang_instance);
   return success ? 0 : 1;
-}
-
-static int handle__preprocess(const Cmd_Preprocess &args) {
-  return execute_cc1(args.clang_args);
 }
 
 static int handle__compile_obj(const Cmd_CompileObj &args) {
@@ -642,11 +634,6 @@ int clang_ops_main(const int argc, char **argv) {
   parse_args_cmd.add_option(
       "passthrough", parse_args.clang_args, "Arguments passed to clang");
 
-  CLI::App &preprocess_cmd = *app.add_subcommand("preprocess");
-  Cmd_Preprocess preprocess_args;
-  preprocess_cmd.add_option(
-      "passthrough", preprocess_args.clang_args, "Arguments passed to clang");
-
   CLI::App &compile_obj_cmd = *app.add_subcommand("compile_obj");
   Cmd_CompileObj compile_obj_args;
   compile_obj_cmd.add_option(
@@ -665,8 +652,6 @@ int clang_ops_main(const int argc, char **argv) {
 
   if (parse_args_cmd) {
     return handle__parse_args(parse_args);
-  } else if (preprocess_cmd) {
-    return handle__preprocess(preprocess_args);
   } else if (compile_obj_cmd) {
     return handle__compile_obj(compile_obj_args);
   } else if (extract_local_code_cmd) {

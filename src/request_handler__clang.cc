@@ -57,61 +57,6 @@ get_clang_cc1_action_type(const span<const string> args) {
   return nullopt;
 }
 
-// static void arg_rewrite__replace_arg(const span<string> args,
-//                                      const string_view old_arg,
-//                                      const string_view new_arg) {
-//   for (size_t i = 0; i < args.size(); i++) {
-//     if (args[i] == old_arg) {
-//       args[i] = new_arg;
-//       return;
-//     }
-//   }
-// }
-
-// static void arg_rewrite__remove_dual_arg(vector<string> &args,
-//                                          const string_view first_arg) {
-//   for (size_t i = 0; i < args.size() - 1; i++) {
-//     if (args[i] == first_arg) {
-//       args.erase(args.begin() + i, args.begin() + i + 2);
-//       return;
-//     }
-//   }
-// }
-
-// static void arg_write__replace_dual_arg_value(vector<string> &args,
-//                                               const string_view name,
-//                                               string new_value) {
-//   for (size_t i = 0; i < args.size() - 1; i++) {
-//     if (args[i] == name) {
-//       args[i + 1] = new_value;
-//       return;
-//     }
-//   }
-// }
-
-static optional<string>
-arg_read__get_dual_arg_value(const span<const string> args,
-                             const string_view name) {
-  for (size_t i = 0; i < args.size() - 1; i++) {
-    if (args[i] == name) {
-      return args[i + 1];
-    }
-  }
-  return nullopt;
-}
-
-// static vector<string> rewrite_clang_cc1_args__change_source_file(
-//     vector<string> args, string new_source_file, string type_str) {
-//   for (size_t i = 0; i < args.size() - 2; i++) {
-//     if (args[i] == "-x") {
-//       args[i + 1] = type_str;
-//       args[i + 2] = new_source_file;
-//       return args;
-//     }
-//   }
-//   return args;
-// }
-
 ProcessResult extract_local_code_with_clang(span<const string> cc1_args,
                                             const path &output_path,
                                             const path &working_dir) {
@@ -133,23 +78,14 @@ handle_command__clang_cc1(const ClientID &client_id,
   if (action_type_opt == ClangCC1ActionType::EmitObj) {
     const clang::driver::types::ID orig_input_type =
         command.input_infos[0].type;
+    const path obj_file = command.output_files[0];
 
-    const optional<path> obj_file =
-        arg_read__get_dual_arg_value(command.args, "-o");
-    if (!obj_file.has_value()) {
-      // TODO
-      return {1};
-    }
     const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
     path local_code_file = command.input_infos[0].filename.value();
     local_code_file.replace_extension(fmt::format(
         "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
     extract_local_code_with_clang(command.args, local_code_file, working_dir);
     vector<string> compile_args = command.args;
-    //  rewrite_clang_cc1_args__change_source_file(
-    //     command.args,
-    //     local_code_file,
-    //     clang::driver::types::getTypeName(orig_input_type));
     return run_process_stream_output_traced(
         ProcessArgs()
             .arg(clang_for_ccelerate_exe)
