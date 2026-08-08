@@ -16,6 +16,7 @@
 #include "base/run_process.hh"
 #include "base/string.hh"
 #include "base/vector.hh"
+#include "clang_call.hh"
 #include "default_endpoint.hh"
 
 namespace ccelerate::tests {
@@ -159,6 +160,23 @@ TEST(Integration, MultiFileCMake) {
 
 TEST(Integration, MultiLibCMake) {
   test_simple_cmake_project("multi_lib_cmake", "ABCDEFGHIJKLMNOPQRST\n");
+}
+
+static void test_local_code(const string_view project_name,
+                            const string_view binary) {
+  const Args &args = Args::get();
+  const path src_dir = args.repo_dir / "test_local_code";
+  ParseClangArgsResult parse_args_result = parse_clang_args(
+      vector<string>{"-c", string(project_name)}, src_dir, binary);
+  ASSERT_TRUE(std::holds_alternative<clang_io::ParsedArgs>(parse_args_result))
+      << std::get<ProcessResult>(parse_args_result).stderr_data;
+  const clang_io::ParsedArgs &parsed_args =
+      std::get<clang_io::ParsedArgs>(parse_args_result);
+  EXPECT_EQ(parsed_args.commands.size(), 1);
+}
+
+TEST(LocalCode, LocalVariable) {
+  test_local_code("local_variable.cc", "clang++");
 }
 
 } // namespace ccelerate::tests

@@ -1,14 +1,16 @@
 add_subdirectory(base)
-add_subdirectory(tests)
 
-add_executable(ccelerate
-  server_main.cc
+add_library(ccelerate_lib STATIC
+  ccelerate_server.cc
   request_handler.cc
   request_handler__cmake.cc
   request_handler__clang.cc
   run_process_traced.cc
 )
-target_link_libraries(ccelerate PRIVATE
+target_include_directories(ccelerate_lib PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_link_libraries(ccelerate_lib PUBLIC
   fmt::fmt
   cppzmq-static
   msgpack-cxx
@@ -23,7 +25,7 @@ target_link_libraries(ccelerate PRIVATE
   ${clang_libs}
   Tracy::TracyClient
 )
-target_compile_options(ccelerate PRIVATE
+target_compile_options(ccelerate_lib PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
   -Werror
   >
@@ -31,7 +33,15 @@ target_compile_options(ccelerate PRIVATE
   /WX
   >
 )
-target_compile_definitions(ccelerate PRIVATE MSGPACK_NO_BOOST)
+target_compile_definitions(ccelerate_lib PUBLIC MSGPACK_NO_BOOST)
+add_library(ccelerate::lib ALIAS ccelerate_lib)
+
+add_executable(ccelerate
+  ccelerate_main.cc
+)
+target_link_libraries(ccelerate PRIVATE
+  ccelerate::lib
+)
 
 function(add_ccelerate_wrapper wrapper_name type)
   add_executable(${wrapper_name}
@@ -74,3 +84,5 @@ target_compile_options(clang_for_ccelerate PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/GR->
 )
 target_compile_definitions(clang_for_ccelerate PRIVATE MSGPACK_NO_BOOST)
+
+add_subdirectory(tests)

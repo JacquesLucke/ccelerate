@@ -112,6 +112,18 @@ arg_read__get_dual_arg_value(const span<const string> args,
 //   return args;
 // }
 
+ProcessResult extract_local_code_with_clang(span<const string> cc1_args,
+                                            const path &output_path,
+                                            const path &working_dir) {
+  const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
+  return run_process_traced(
+      ProcessArgs()
+          .arg(clang_for_ccelerate_exe)
+          .args({"local-code", "--local-code-path", output_path, "--"})
+          .args(cc1_args)
+          .working_dir(working_dir));
+}
+
 static ExitCodeOrError
 handle_command__clang_cc1(const ClientID &client_id,
                           const clang_io::Command &command,
@@ -132,12 +144,7 @@ handle_command__clang_cc1(const ClientID &client_id,
     path local_code_file = command.input_infos[0].filename.value();
     local_code_file.replace_extension(fmt::format(
         "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
-    run_process_traced(
-        ProcessArgs()
-            .arg(clang_for_ccelerate_exe)
-            .args({"local-code", "--local-code-path", local_code_file, "--"})
-            .args(command.args)
-            .working_dir(working_dir));
+    extract_local_code_with_clang(command.args, local_code_file, working_dir);
     vector<string> compile_args = command.args;
     //  rewrite_clang_cc1_args__change_source_file(
     //     command.args,

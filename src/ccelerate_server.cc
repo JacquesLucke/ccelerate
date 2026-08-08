@@ -201,7 +201,3 @@ int ccelerate_main(const int argc, char **argv) {
 }
 
 } // namespace ccelerate
-
-int main(int argc, char **argv) {
-  return ccelerate::ccelerate_main(argc, argv);
-}
