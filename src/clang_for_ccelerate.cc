@@ -348,28 +348,29 @@ public:
   }
 };
 
-class FunctionRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
+class StaticSymbolRenamer
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
   LocalCodeState &state_;
 
 public:
-  FunctionRenamer(LocalCodeState &state) : state_(state) {}
+  StaticSymbolRenamer(LocalCodeState &state) : state_(state) {}
 
   virtual void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
     clang::SourceLocation loc;
     std::string old_name;
 
-    if (const clang::FunctionDecl *fn_decl =
-            result.Nodes.getNodeAs<clang::FunctionDecl>("staticFunc")) {
-      loc = fn_decl->getLocation();
-      old_name = fn_decl->getNameAsString();
-    } else if (const clang::DeclRefExpr *fn_decl =
-                   result.Nodes.getNodeAs<clang::DeclRefExpr>("funcRef")) {
-      loc = fn_decl->getLocation();
-      old_name = fn_decl->getDecl()->getNameAsString();
+    if (const clang::NamedDecl *decl =
+            result.Nodes.getNodeAs<clang::NamedDecl>("staticDecl")) {
+      loc = decl->getLocation();
+      old_name = decl->getNameAsString();
+    } else if (const clang::DeclRefExpr *ref =
+                   result.Nodes.getNodeAs<clang::DeclRefExpr>("declRef")) {
+      loc = ref->getLocation();
+      old_name = ref->getDecl()->getNameAsString();
     }
-    if (!loc.isValid()) {
+    if (!loc.isValid() || old_name.empty()) {
       return;
     }
     state_.rewriter->InsertTextAfter(loc.getLocWithOffset(old_name.size()),
@@ -379,7 +380,7 @@ public:
 
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
-  FunctionRenamer renamer_;
+  StaticSymbolRenamer renamer_;
   clang::ast_matchers::MatchFinder finder_;
   LocalCodeState &state_;
 
@@ -388,8 +389,14 @@ public:
     using namespace clang::ast_matchers;
     auto static_func_matcher =
         functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
-    finder_.addMatcher(static_func_matcher.bind("staticFunc"), &renamer_);
-    finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("funcRef"),
+    auto static_var_matcher =
+        varDecl(isStaticStorageClass(), unless(isStaticLocal()),
+                unless(hasDeclContext(recordDecl())));
+    finder_.addMatcher(static_func_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(static_var_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("declRef"),
+                       &renamer_);
+    finder_.addMatcher(declRefExpr(to(static_var_matcher)).bind("declRef"),
                        &renamer_);
   }
 
