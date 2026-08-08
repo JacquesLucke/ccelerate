@@ -219,8 +219,8 @@ public:
     std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
 
-    ParseClangArgsResult parse_args_result = parse_clang_args(
-        vector<string>{"-c", project_name_}, src_dir, binary_);
+    ParseClangArgsResult parse_args_result =
+        parse_clang_args(vector<string>{"-c", project_name_}, src_dir, binary_);
     ASSERT_TRUE(std::holds_alternative<clang_io::ParsedArgs>(parse_args_result))
         << std::get<ProcessResult>(parse_args_result).stderr_data;
     const clang_io::ParsedArgs &parsed_args =
@@ -262,16 +262,15 @@ static void register_local_code_tests() {
     const string test_name = filename.stem().string();
     const string project_name = filename.string();
     const string binary = clang_binary_for(filename);
-    testing::RegisterTest(
-        "LocalCode",
-        test_name.c_str(),
-        nullptr,
-        nullptr,
-        __FILE__,
-        __LINE__,
-        [project_name, binary]() -> LocalCodeTest * {
-          return new LocalCodeTest(project_name, binary);
-        });
+    testing::RegisterTest("LocalCode",
+                          test_name.c_str(),
+                          nullptr,
+                          nullptr,
+                          __FILE__,
+                          __LINE__,
+                          [project_name, binary]() -> LocalCodeTest * {
+                            return new LocalCodeTest(project_name, binary);
+                          });
   }
 }
 
