@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <cstdlib>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <fstream>
@@ -171,6 +172,11 @@ static string read_file(const path &file_path) {
   return contents.str();
 }
 
+static bool should_update_tests() {
+  const char *env = std::getenv("UPDATE_TESTS");
+  return env != nullptr && string_view(env) == "1";
+}
+
 static void test_local_code(const string_view project_name,
                             const string_view binary) {
   const Args &args = Args::get();
@@ -196,6 +202,14 @@ static void test_local_code(const string_view project_name,
   ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
 
   ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;
+
+  if (should_update_tests()) {
+    std::filesystem::copy_file(
+        output_path,
+        reference_path,
+        std::filesystem::copy_options::overwrite_existing);
+  }
+
   ASSERT_TRUE(std::filesystem::exists(reference_path)) << reference_path;
 
   const string reference_output = read_file(reference_path);
@@ -204,8 +218,12 @@ static void test_local_code(const string_view project_name,
   EXPECT_EQ(actual_output, reference_output);
 }
 
-TEST(LocalCode, LocalVariable) {
-  test_local_code("local_variable.cc", "clang++");
+TEST(LocalCode, SingleStaticVariable) {
+  test_local_code("single_static_variable.cc", "clang++");
+}
+
+TEST(LocalCode, SingleStaticFunction) {
+  test_local_code("single_static_function.cc", "clang++");
 }
 
 } // namespace ccelerate::tests

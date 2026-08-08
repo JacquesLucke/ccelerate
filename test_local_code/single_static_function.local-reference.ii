@@ -1,4 +1,4 @@
-# 1 "local_variable.cc"
+# 1 "single_static_function.cc"
 static int x_local = 0;
 
 int main() { return x_local; }

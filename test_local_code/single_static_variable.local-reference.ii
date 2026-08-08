@@ -1,0 +1,4 @@
+# 1 "single_static_variable.cc"
+static int my_function_local() { return 0; }
+
+int main() { return my_function_local(); }
