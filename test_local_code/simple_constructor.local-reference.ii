@@ -1,0 +1,33 @@
+# 1 "simple_constructor.cc"
+namespace hello {
+struct A {
+  int x_;
+  A(int x) : x_(x) {}
+};
+}
+
+namespace {
+struct B_local {
+  int x_;
+  B_local(int x) : x_(x) {}
+};
+}
+
+namespace {
+struct C_local {
+  C_local();
+  ~C_local();
+  C_local(const C_local &);
+
+  operator int() const;
+
+  C_local hello();
+};
+}
+
+C_local::C_local() = default;
+C_local::~C_local() {}
+C_local::C_local(const C_local &) {}
+C_local::operator int() const { return 0; }
+
+C_local C_local::hello() { return C_local(); }

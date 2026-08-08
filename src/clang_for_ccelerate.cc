@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 #include <clang/AST/ASTConsumer.h>
+#include <clang/AST/DeclCXX.h>
 #include <clang/AST/TypeLoc.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -407,6 +408,13 @@ public:
 private:
   bool name_should_be_localized(const clang::NamedDecl &decl) {
     if (decl.isExternallyVisible()) {
+      return false;
+    }
+    if (const auto *ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(&decl)) {
+      const clang::CXXRecordDecl *record = ctor->getParent();
+      if (const clang::TagDecl *def = record->getDefinition()) {
+        return this->name_should_be_localized(*def);
+      }
       return false;
     }
     if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(&decl)) {
