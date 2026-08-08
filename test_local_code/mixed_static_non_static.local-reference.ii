@@ -1,0 +1,17 @@
+# 1 "mixed_static_non_static.cc"
+int x = 3;
+static int y_local = 4;
+
+namespace hello {
+int z = 5;
+int get_value() { return 10; }
+namespace {
+int w_local = 6;
+int get_other_value_local() { return 11; }
+}
+}
+
+int main() {
+  return x + y_local + hello::z + hello::w_local + hello::get_value() +
+         hello::get_other_value_local();
+}
