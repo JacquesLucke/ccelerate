@@ -378,6 +378,15 @@ public:
       }
       loc = tag_tl.getNameLoc();
       named_decl = tag_tl.getDecl();
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
+      const clang::TypedefTypeLoc typedef_tl =
+          type_loc->getAsAdjusted<clang::TypedefTypeLoc>();
+      if (typedef_tl.isNull()) {
+        return;
+      }
+      loc = typedef_tl.getNameLoc();
+      named_decl = typedef_tl.getTypedefNameDecl();
     }
     if (!loc.isValid() || !named_decl) {
       return;
@@ -451,6 +460,21 @@ private:
         return this->location_is_in_local_code(def->getLocation());
       }
     }
+    if (const auto *td = llvm::dyn_cast<clang::TypedefNameDecl>(&decl)) {
+      if (!td->isInAnonymousNamespace()) {
+        return false;
+      }
+      for (const auto &redecl : td->redecls()) {
+        const clang::DeclContext *dc = redecl->getDeclContext();
+        if (dc->isFunctionOrMethod() || dc->isRecord()) {
+          return false;
+        }
+        if (!this->location_is_in_local_code(redecl->getLocation())) {
+          return false;
+        }
+        return true;
+      }
+    }
     return false;
   }
 
@@ -482,10 +506,12 @@ public:
     auto var_matcher = varDecl();
     auto tag_matcher = tagDecl();
     auto enum_const_matcher = enumConstantDecl();
+    auto typedef_matcher = typedefNameDecl();
     finder_.addMatcher(func_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(var_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(tag_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(enum_const_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(typedef_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(declRefExpr(to(func_matcher)).bind("declRef"),
                        &renamer_);
     finder_.addMatcher(declRefExpr(to(var_matcher)).bind("declRef"), &renamer_);
@@ -494,6 +520,9 @@ public:
     finder_.addMatcher(
         typeLoc(loc(qualType(hasDeclaration(tag_matcher)))).bind("tagTypeLoc"),
         &renamer_);
+    finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
+                           .bind("typedefTypeLoc"),
+                       &renamer_);
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {
