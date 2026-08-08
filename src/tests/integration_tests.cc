@@ -226,6 +226,10 @@ TEST(LocalCode, SingleStaticFunction) {
   test_local_code("single_static_function.cc", "clang++");
 }
 
+TEST(LocalCode, MultipleStaticSymbols) {
+  test_local_code("multiple_static_symbols.cc", "clang++");
+}
+
 } // namespace ccelerate::tests
 
 int main(int argc, char **argv) {

@@ -1,0 +1,18 @@
+# 2 "multiple_static_symbols.cc"
+
+static int get_size_local() { return 10; }
+
+namespace hello {
+static std::vector<int> v_local;
+static int result_local;
+
+static int compute_local() {
+  v_local.resize(get_size_local(), 2);
+  int sum = 0;
+  for (const int &i : v_local) {
+    sum += i;
+  }
+  result_local = sum;
+}
+
+}
