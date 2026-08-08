@@ -359,22 +359,61 @@ public:
   virtual void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
     clang::SourceLocation loc;
-    std::string old_name;
+    const clang::NamedDecl *named_decl = nullptr;
 
     if (const clang::NamedDecl *decl =
             result.Nodes.getNodeAs<clang::NamedDecl>("staticDecl")) {
       loc = decl->getLocation();
-      old_name = decl->getNameAsString();
+      named_decl = decl;
     } else if (const clang::DeclRefExpr *ref =
                    result.Nodes.getNodeAs<clang::DeclRefExpr>("declRef")) {
       loc = ref->getLocation();
-      old_name = ref->getDecl()->getNameAsString();
+      named_decl = ref->getDecl();
     }
-    if (!loc.isValid() || old_name.empty()) {
+    if (!loc.isValid() || !named_decl) {
+      return;
+    }
+    const std::string old_name = named_decl->getNameAsString();
+    if (old_name.empty()) {
+      return;
+    }
+    if (!is_defined_in_local_code(get_definition_location(named_decl),
+                                  *result.SourceManager)) {
       return;
     }
     state_.rewriter->InsertTextAfter(loc.getLocWithOffset(old_name.size()),
                                      state_.args.local_id);
+  }
+
+private:
+  static clang::SourceLocation
+  get_definition_location(const clang::NamedDecl *decl) {
+    if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
+      if (const clang::FunctionDecl *def = fd->getDefinition()) {
+        return def->getLocation();
+      }
+    } else if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(decl)) {
+      if (const clang::VarDecl *def = vd->getDefinition()) {
+        return def->getLocation();
+      }
+    }
+    return decl->getLocation();
+  }
+
+  bool is_defined_in_local_code(clang::SourceLocation def_loc,
+                                clang::SourceManager &sm) const {
+    if (!def_loc.isValid()) {
+      return false;
+    }
+    def_loc = sm.getExpansionLoc(def_loc);
+    if (sm.getFileID(def_loc) != sm.getMainFileID()) {
+      return false;
+    }
+    const unsigned line = sm.getExpansionLineNumber(def_loc);
+    if (line == 0 || line > state_.map_parser_to_local_lines.size()) {
+      return false;
+    }
+    return state_.map_parser_to_local_lines[line - 1] != -1;
   }
 };
 
@@ -389,9 +428,9 @@ public:
     using namespace clang::ast_matchers;
     auto static_func_matcher =
         functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
-    auto static_var_matcher =
-        varDecl(isStaticStorageClass(), unless(isStaticLocal()),
-                unless(hasDeclContext(recordDecl())));
+    auto static_var_matcher = varDecl(isStaticStorageClass(),
+                                      unless(isStaticLocal()),
+                                      unless(hasDeclContext(recordDecl())));
     finder_.addMatcher(static_func_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(static_var_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("declRef"),
