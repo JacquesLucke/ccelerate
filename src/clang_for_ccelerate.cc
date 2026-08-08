@@ -2,6 +2,7 @@
 
 #include <CLI/CLI.hpp>
 #include <clang/AST/ASTConsumer.h>
+#include <clang/AST/TypeLoc.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Basic/Version.h>
@@ -356,6 +357,7 @@ class SymbolRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
   LocalCodeState &state_;
   clang::SourceManager &sm_;
+  std::unordered_set<uint32_t> renamed_locs_;
 
 public:
   SymbolRenamer(LocalCodeState &state)
@@ -374,6 +376,15 @@ public:
                    result.Nodes.getNodeAs<clang::DeclRefExpr>("declRef")) {
       loc = ref->getLocation();
       named_decl = ref->getDecl();
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>("tagTypeLoc")) {
+      const clang::TagTypeLoc tag_tl =
+          type_loc->getAsAdjusted<clang::TagTypeLoc>();
+      if (tag_tl.isNull()) {
+        return;
+      }
+      loc = tag_tl.getNameLoc();
+      named_decl = tag_tl.getDecl();
     }
     if (!loc.isValid() || !named_decl) {
       return;
@@ -383,6 +394,10 @@ public:
       return;
     }
     if (!this->name_should_be_localized(*named_decl)) {
+      return;
+    }
+    const uint32_t loc_key = loc.getRawEncoding();
+    if (!renamed_locs_.insert(loc_key).second) {
       return;
     }
     state_.rewriter->InsertTextAfter(loc.getLocWithOffset(old_name.size()),
@@ -405,6 +420,15 @@ private:
     }
     if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(&decl)) {
       if (const clang::VarDecl *def = vd->getDefinition()) {
+        const clang::DeclContext *dc = def->getDeclContext();
+        if (dc->isFunctionOrMethod() || dc->isRecord()) {
+          return false;
+        }
+        return this->location_is_in_local_code(def->getLocation());
+      }
+    }
+    if (const auto *td = llvm::dyn_cast<clang::TagDecl>(&decl)) {
+      if (const clang::TagDecl *def = td->getDefinition()) {
         const clang::DeclContext *dc = def->getDeclContext();
         if (dc->isFunctionOrMethod() || dc->isRecord()) {
           return false;
@@ -441,11 +465,16 @@ public:
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
+    auto tag_matcher = tagDecl();
     finder_.addMatcher(func_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(var_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(tag_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(declRefExpr(to(func_matcher)).bind("declRef"),
                        &renamer_);
     finder_.addMatcher(declRefExpr(to(var_matcher)).bind("declRef"), &renamer_);
+    finder_.addMatcher(
+        typeLoc(loc(qualType(hasDeclaration(tag_matcher)))).bind("tagTypeLoc"),
+        &renamer_);
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {
