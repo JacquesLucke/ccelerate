@@ -9,4 +9,5 @@ target_link_libraries(integration_tests PRIVATE
 include(GoogleTest)
 gtest_discover_tests(integration_tests
   EXTRA_ARGS --repo-dir ${CMAKE_SOURCE_DIR}
+  DISCOVERY_EXTRA_ARGS --repo-dir ${CMAKE_SOURCE_DIR}
 )

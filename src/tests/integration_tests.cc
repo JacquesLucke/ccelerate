@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <algorithm>
 #include <cstdlib>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -177,57 +178,101 @@ static bool should_update_tests() {
   return env != nullptr && string_view(env) == "1";
 }
 
-static void test_local_code(const string_view project_name,
-                            const string_view binary) {
-  const Args &args = Args::get();
-  const path src_dir = args.repo_dir / "test_local_code";
-  const path stem = path(project_name).stem();
-  const path output_dir = args.test_out_dir / stem;
-  std::filesystem::remove_all(output_dir);
-  std::filesystem::create_directories(output_dir);
+static string clang_binary_for(const path &source) {
+  return source.extension() == ".c" ? "clang" : "clang++";
+}
 
-  ParseClangArgsResult parse_args_result = parse_clang_args(
-      vector<string>{"-c", string(project_name)}, src_dir, binary);
-  ASSERT_TRUE(std::holds_alternative<clang_io::ParsedArgs>(parse_args_result))
-      << std::get<ProcessResult>(parse_args_result).stderr_data;
-  const clang_io::ParsedArgs &parsed_args =
-      std::get<clang_io::ParsedArgs>(parse_args_result);
-  ASSERT_EQ(parsed_args.commands.size(), 1);
+static bool is_local_code_source(const path &file) {
+  const string ext = file.extension().string();
+  return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx";
+}
 
-  const path output_path = output_dir / (stem.string() + ".local.ii");
-  const path reference_path = src_dir / (stem.string() + ".local-reference.ii");
+static vector<path> discover_local_code_sources() {
+  const path src_dir = Args::get().repo_dir / "test_local_code";
+  vector<path> sources;
+  if (!std::filesystem::is_directory(src_dir)) {
+    return sources;
+  }
+  for (const auto &entry : std::filesystem::directory_iterator(src_dir)) {
+    if (!entry.is_regular_file()) {
+      continue;
+    }
+    const path filename = entry.path().filename();
+    if (is_local_code_source(filename)) {
+      sources.push_back(filename);
+    }
+  }
+  std::sort(sources.begin(), sources.end());
+  return sources;
+}
 
-  const ProcessResult extract_result = extract_local_code_with_clang(
-      parsed_args.commands[0].args, output_path, src_dir);
-  ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
+class LocalCodeTest : public testing::Test {
+public:
+  LocalCodeTest(string project_name, string binary)
+      : project_name_(std::move(project_name)), binary_(std::move(binary)) {}
 
-  ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;
+  void TestBody() override {
+    const Args &args = Args::get();
+    const path src_dir = args.repo_dir / "test_local_code";
+    const path stem = path(project_name_).stem();
+    const path output_dir = args.test_out_dir / stem;
+    std::filesystem::remove_all(output_dir);
+    std::filesystem::create_directories(output_dir);
 
-  if (should_update_tests()) {
-    std::filesystem::copy_file(
-        output_path,
-        reference_path,
-        std::filesystem::copy_options::overwrite_existing);
+    ParseClangArgsResult parse_args_result = parse_clang_args(
+        vector<string>{"-c", project_name_}, src_dir, binary_);
+    ASSERT_TRUE(std::holds_alternative<clang_io::ParsedArgs>(parse_args_result))
+        << std::get<ProcessResult>(parse_args_result).stderr_data;
+    const clang_io::ParsedArgs &parsed_args =
+        std::get<clang_io::ParsedArgs>(parse_args_result);
+    ASSERT_EQ(parsed_args.commands.size(), 1);
+
+    const path output_path = output_dir / (stem.string() + ".local.ii");
+    const path reference_path =
+        src_dir / (stem.string() + ".local-reference.ii");
+
+    const ProcessResult extract_result = extract_local_code_with_clang(
+        parsed_args.commands[0].args, output_path, src_dir);
+    ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
+
+    ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;
+
+    if (should_update_tests()) {
+      std::filesystem::copy_file(
+          output_path,
+          reference_path,
+          std::filesystem::copy_options::overwrite_existing);
+    }
+
+    ASSERT_TRUE(std::filesystem::exists(reference_path)) << reference_path;
+
+    const string reference_output = read_file(reference_path);
+    const string actual_output = read_file(output_path);
+
+    EXPECT_EQ(actual_output, reference_output);
   }
 
-  ASSERT_TRUE(std::filesystem::exists(reference_path)) << reference_path;
+private:
+  string project_name_;
+  string binary_;
+};
 
-  const string reference_output = read_file(reference_path);
-  const string actual_output = read_file(output_path);
-
-  EXPECT_EQ(actual_output, reference_output);
-}
-
-TEST(LocalCode, SingleStaticVariable) {
-  test_local_code("single_static_variable.cc", "clang++");
-}
-
-TEST(LocalCode, SingleStaticFunction) {
-  test_local_code("single_static_function.cc", "clang++");
-}
-
-TEST(LocalCode, MultipleStaticSymbols) {
-  test_local_code("multiple_static_symbols.cc", "clang++");
+static void register_local_code_tests() {
+  for (const path &filename : discover_local_code_sources()) {
+    const string test_name = filename.stem().string();
+    const string project_name = filename.string();
+    const string binary = clang_binary_for(filename);
+    testing::RegisterTest(
+        "LocalCode",
+        test_name.c_str(),
+        nullptr,
+        nullptr,
+        __FILE__,
+        __LINE__,
+        [project_name, binary]() -> LocalCodeTest * {
+          return new LocalCodeTest(project_name, binary);
+        });
+  }
 }
 
 } // namespace ccelerate::tests
@@ -235,10 +280,6 @@ TEST(LocalCode, MultipleStaticSymbols) {
 int main(int argc, char **argv) {
   using namespace ccelerate::tests;
   ::testing::InitGoogleTest(&argc, argv);
-
-  if (testing::GTEST_FLAG(list_tests)) {
-    return RUN_ALL_TESTS();
-  }
 
   CLI::App app{"Integration tests for ccelerate"};
   argv = app.ensure_utf8(argv);
@@ -257,6 +298,8 @@ int main(int argc, char **argv) {
   args.test_projects_dir = args.repo_dir / "test_projects";
   args.binary_dir = ccelerate::get_current_executable_path().parent_path();
   args.test_out_dir = args.binary_dir / "tests_tmp";
+
+  register_local_code_tests();
 
   return RUN_ALL_TESTS();
 }
