@@ -352,13 +352,14 @@ public:
   }
 };
 
-class StaticSymbolRenamer
-    : public clang::ast_matchers::MatchFinder::MatchCallback {
+class SymbolRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
   LocalCodeState &state_;
+  clang::SourceManager &sm_;
 
 public:
-  StaticSymbolRenamer(LocalCodeState &state) : state_(state) {}
+  SymbolRenamer(LocalCodeState &state)
+      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
 
   virtual void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
@@ -381,8 +382,7 @@ public:
     if (old_name.empty()) {
       return;
     }
-    if (!is_defined_in_local_code(get_definition_location(named_decl),
-                                  *result.SourceManager)) {
+    if (!this->name_should_be_localized(*named_decl)) {
       return;
     }
     state_.rewriter->InsertTextAfter(loc.getLocWithOffset(old_name.size()),
@@ -390,57 +390,62 @@ public:
   }
 
 private:
-  static clang::SourceLocation
-  get_definition_location(const clang::NamedDecl *decl) {
-    if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(decl)) {
+  bool name_should_be_localized(const clang::NamedDecl &decl) {
+    if (decl.isExternallyVisible()) {
+      return false;
+    }
+    if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(&decl)) {
       if (const clang::FunctionDecl *def = fd->getDefinition()) {
-        return def->getLocation();
-      }
-    } else if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(decl)) {
-      if (const clang::VarDecl *def = vd->getDefinition()) {
-        return def->getLocation();
+        const clang::DeclContext *dc = def->getDeclContext();
+        if (dc->isFunctionOrMethod() || dc->isRecord()) {
+          return false;
+        }
+        return this->location_is_in_local_code(def->getLocation());
       }
     }
-    return decl->getLocation();
+    if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(&decl)) {
+      if (const clang::VarDecl *def = vd->getDefinition()) {
+        const clang::DeclContext *dc = def->getDeclContext();
+        if (dc->isFunctionOrMethod() || dc->isRecord()) {
+          return false;
+        }
+        return this->location_is_in_local_code(def->getLocation());
+      }
+    }
+    return false;
   }
 
-  bool is_defined_in_local_code(clang::SourceLocation def_loc,
-                                clang::SourceManager &sm) const {
-    if (!def_loc.isValid()) {
+  bool location_is_in_local_code(clang::SourceLocation loc) const {
+
+    if (!loc.isValid()) {
       return false;
     }
-    def_loc = sm.getExpansionLoc(def_loc);
-    if (sm.getFileID(def_loc) != sm.getMainFileID()) {
-      return false;
-    }
-    const unsigned line = sm.getExpansionLineNumber(def_loc);
+    const size_t line = sm_.getExpansionLineNumber(loc);
     if (line == 0 || line > state_.map_parser_to_local_lines.size()) {
       return false;
     }
-    return state_.map_parser_to_local_lines[line - 1] != -1;
+    const int mapped_line = state_.map_parser_to_local_lines[line - 1];
+    const bool is_local = mapped_line != -1;
+    return is_local;
   }
 };
 
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
-  StaticSymbolRenamer renamer_;
+  SymbolRenamer renamer_;
   clang::ast_matchers::MatchFinder finder_;
-  LocalCodeState &state_;
+  [[maybe_unused]] LocalCodeState &state_;
 
 public:
   LocalCodeASTConsumer(LocalCodeState &state) : renamer_(state), state_(state) {
     using namespace clang::ast_matchers;
-    auto static_func_matcher =
-        functionDecl(isStaticStorageClass(), unless(cxxMethodDecl()));
-    auto static_var_matcher = varDecl(isStaticStorageClass(),
-                                      unless(isStaticLocal()),
-                                      unless(hasDeclContext(recordDecl())));
-    finder_.addMatcher(static_func_matcher.bind("staticDecl"), &renamer_);
-    finder_.addMatcher(static_var_matcher.bind("staticDecl"), &renamer_);
-    finder_.addMatcher(declRefExpr(to(static_func_matcher)).bind("declRef"),
+    auto func_matcher = functionDecl();
+    auto var_matcher = varDecl();
+    finder_.addMatcher(func_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(var_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(declRefExpr(to(func_matcher)).bind("declRef"),
                        &renamer_);
-    finder_.addMatcher(declRefExpr(to(static_var_matcher)).bind("declRef"),
-                       &renamer_);
+    finder_.addMatcher(declRefExpr(to(var_matcher)).bind("declRef"), &renamer_);
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {
