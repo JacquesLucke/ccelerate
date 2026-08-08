@@ -90,7 +90,7 @@ handle_command__clang_cc1(const ClientID &client_id,
     local_code_file.replace_extension(fmt::format(
         "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
     extract_local_code_with_clang(
-        command.args, local_code_file, working_dir, "_local");
+        command.args, local_code_file, working_dir, "__");
     vector<string> compile_args = command.args;
     return run_process_stream_output_traced(
         ProcessArgs()
