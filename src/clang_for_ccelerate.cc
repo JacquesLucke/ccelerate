@@ -328,21 +328,29 @@ static string_view trim_whitespace(const string_view str) {
   return str.substr(start, end - start + 1);
 }
 
+struct LocalCodeState {
+  const Cmd_ExtractLocalCode &args;
+  llvm::BumpPtrAllocator alloc;
+
+  std::string raw_preprocessed;
+  std::string code_for_parser;
+  vector<string_view> local_code_lines;
+  vector<int> map_parser_to_local_lines;
+};
+
 class ExtractPreprocessedLocalCodeAction
     : public clang::PreprocessorFrontendAction {
 private:
-  const Cmd_ExtractLocalCode &args_;
+  LocalCodeState &state_;
 
 public:
-  ExtractPreprocessedLocalCodeAction(const Cmd_ExtractLocalCode &args)
-      : args_(args) {}
+  ExtractPreprocessedLocalCodeAction(LocalCodeState &state) : state_(state) {}
 
   void ExecuteAction() override {
     clang::CompilerInstance &compiler = this->getCompilerInstance();
     clang::Preprocessor &pp = compiler.getPreprocessor();
 
-    string preprocessed;
-    llvm::raw_string_ostream os(preprocessed);
+    llvm::raw_string_ostream os(state_.raw_preprocessed);
     clang::PreprocessorOutputOptions opts;
     opts.ShowCPP = true;
     opts.ShowLineMarkers = true;
@@ -353,8 +361,7 @@ public:
     vector<string_view> header_stack;
     int local_depth = 0;
 
-    llvm::BumpPtrAllocator alloc;
-    llvm::StringSaver saver(alloc);
+    llvm::StringSaver saver(state_.alloc);
 
     vector<string_view> direct_includes;
     std::unordered_set<string_view> all_includes;
@@ -362,10 +369,10 @@ public:
 
     auto config_header_is_local = [](const string_view &path) { return false; };
 
-    const vector<string_view> lines = split_into_lines(preprocessed);
-    vector<string_view> output_lines;
+    const vector<string_view> lines = split_into_lines(state_.raw_preprocessed);
     for (size_t line_i = 0; line_i < lines.size(); line_i++) {
       const bool is_local = int(header_stack.size()) == local_depth;
+      const bool line_only_whitespace = trim_whitespace(lines[line_i]).empty();
       const string_view line = lines[line_i];
       if (line.starts_with("# ")) {
         const optional<LineMarker> line_marker = LineMarker::parse(line);
@@ -388,23 +395,25 @@ public:
           local_depth = std::min<int>(local_depth, header_stack.size());
         }
         if (int(header_stack.size()) == local_depth) {
-          output_lines.resize(committed_kept_lines);
-          const string_view out_line_marker =
-              saver.save(fmt::format("# {}", file));
-          output_lines.push_back(out_line_marker);
+          state_.local_code_lines.resize(committed_kept_lines);
+          const string_view out_line_marker = saver.save(
+              fmt::format("# {} \"{}\"", line_marker->line_number, file));
+          state_.local_code_lines.push_back(out_line_marker);
         }
-      } else if (is_local) {
-        output_lines.push_back(line);
-        if (!trim_whitespace(line).empty()) {
-          committed_kept_lines = output_lines.size();
+      } else {
+        if (is_local) {
+          state_.local_code_lines.push_back(line);
+          if (!line_only_whitespace) {
+            committed_kept_lines = state_.local_code_lines.size();
+          }
+        }
+        if (!line_only_whitespace) {
+          state_.map_parser_to_local_lines.push_back(
+              is_local ? state_.local_code_lines.size() - 1 : -1);
+          state_.code_for_parser += line;
+          state_.code_for_parser += '\n';
         }
       }
-    }
-
-    error_code ec;
-    llvm::raw_fd_ostream fs(args_.local_code_path.string(), ec);
-    for (const string_view line : output_lines) {
-      fs << line << '\n';
     }
   }
 };
@@ -426,6 +435,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   llvm::InitializeAllAsmPrinters();
   llvm::InitializeAllAsmParsers();
 
+  LocalCodeState state{args};
+
   clang::CompilerInstance clang_instance;
   clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
       new clang::DiagnosticIDs());
@@ -446,8 +457,31 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     return 1;
   }
 
-  ExtractPreprocessedLocalCodeAction action(args);
+  ExtractPreprocessedLocalCodeAction action(state);
   success = clang_instance.ExecuteAction(action);
+
+  {
+    error_code ec;
+    llvm::raw_fd_ostream fs(
+        state.args.local_code_path.string() + ".code_for_parser.ii", ec);
+    fs << state.code_for_parser;
+  }
+  {
+    error_code ec;
+    llvm::raw_fd_ostream fs(state.args.local_code_path.string() + ".ii", ec);
+    for (const string_view line : state.local_code_lines) {
+      fs << line << '\n';
+    }
+  }
+  {
+    error_code ec;
+    llvm::raw_fd_ostream fs(state.args.local_code_path.string() + ".map.txt",
+                            ec);
+    for (const int line : state.map_parser_to_local_lines) {
+      fs << line << '\n';
+    }
+  }
+
   return success ? 0 : 1;
 }
 
