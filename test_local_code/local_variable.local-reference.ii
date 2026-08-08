@@ -1,0 +1,4 @@
+# 1 "local_variable.cc"
+static int x_local = 0;
+
+int main() { return x_local; }

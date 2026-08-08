@@ -3,11 +3,13 @@
 #include <CLI/CLI.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <fstream>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <random>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
+#include <sstream>
 
 #include "base/error_code.hh"
 #include "base/filesystem.hh"
@@ -162,17 +164,44 @@ TEST(Integration, MultiLibCMake) {
   test_simple_cmake_project("multi_lib_cmake", "ABCDEFGHIJKLMNOPQRST\n");
 }
 
+static string read_file(const path &file_path) {
+  std::ifstream in(file_path);
+  std::ostringstream contents;
+  contents << in.rdbuf();
+  return contents.str();
+}
+
 static void test_local_code(const string_view project_name,
                             const string_view binary) {
   const Args &args = Args::get();
   const path src_dir = args.repo_dir / "test_local_code";
+  const path stem = path(project_name).stem();
+  const path output_dir = args.test_out_dir / stem;
+  std::filesystem::remove_all(output_dir);
+  std::filesystem::create_directories(output_dir);
+
   ParseClangArgsResult parse_args_result = parse_clang_args(
       vector<string>{"-c", string(project_name)}, src_dir, binary);
   ASSERT_TRUE(std::holds_alternative<clang_io::ParsedArgs>(parse_args_result))
       << std::get<ProcessResult>(parse_args_result).stderr_data;
   const clang_io::ParsedArgs &parsed_args =
       std::get<clang_io::ParsedArgs>(parse_args_result);
-  EXPECT_EQ(parsed_args.commands.size(), 1);
+  ASSERT_EQ(parsed_args.commands.size(), 1);
+
+  const path output_path = output_dir / (stem.string() + ".local.ii");
+  const path reference_path = src_dir / (stem.string() + ".local-reference.ii");
+
+  const ProcessResult extract_result = extract_local_code_with_clang(
+      parsed_args.commands[0].args, output_path, src_dir);
+  ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
+
+  ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;
+  ASSERT_TRUE(std::filesystem::exists(reference_path)) << reference_path;
+
+  const string reference_output = read_file(reference_path);
+  const string actual_output = read_file(output_path);
+
+  EXPECT_EQ(actual_output, reference_output);
 }
 
 TEST(LocalCode, LocalVariable) {

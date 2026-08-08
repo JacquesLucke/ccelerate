@@ -258,12 +258,13 @@ struct LocalCodeState {
   const Cmd_ExtractLocalCode &args;
   llvm::BumpPtrAllocator alloc;
 
-  std::string raw_preprocessed;
-  std::string code_for_parser;
+  string raw_preprocessed;
+  string code_for_parser;
   vector<string_view> local_code_lines;
   vector<int> map_parser_to_local_lines;
 
   optional<clang::Rewriter> rewriter;
+  string rewrite_result;
 };
 
 class ExtractPreprocessedLocalCodeAction
@@ -343,6 +344,9 @@ public:
         }
       }
     }
+    // No trailing line marker to trigger the usual trim of whitespace-only
+    // lines (including the empty entry from a final '\n' in the preprocess).
+    state_.local_code_lines.resize(committed_kept_lines);
     // Final newline mapping.
     state_.map_parser_to_local_lines.push_back(-1);
   }
@@ -538,12 +542,11 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 
     clang::RewriteBuffer &buffer = state.rewriter->getEditBuffer(
         state.rewriter->getSourceMgr().getMainFileID());
-    string buffer_str;
-    llvm::raw_string_ostream os(buffer_str);
+    llvm::raw_string_ostream os(state.rewrite_result);
     buffer.write(os);
     os.flush();
 
-    vector<string_view> lines = split_into_lines(buffer_str);
+    vector<string_view> lines = split_into_lines(state.rewrite_result);
     assert(lines.size() == state.map_parser_to_local_lines.size());
     for (size_t i = 0; i < lines.size(); i++) {
       const int mapped_line = state.map_parser_to_local_lines[i];
@@ -557,32 +560,10 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   // Write the output.
   {
     error_code ec;
-    llvm::raw_fd_ostream fs(
-        state.args.local_code_path.string() + ".code_for_parser.ii", ec);
-    fs << state.code_for_parser;
-  }
-  {
-    error_code ec;
-    llvm::raw_fd_ostream fs(state.args.local_code_path.string() + ".ii", ec);
+    llvm::raw_fd_ostream fs(state.args.local_code_path.string(), ec);
     for (const string_view line : state.local_code_lines) {
       fs << line << '\n';
     }
-  }
-  {
-    error_code ec;
-    llvm::raw_fd_ostream fs(state.args.local_code_path.string() + ".map.txt",
-                            ec);
-    for (const int line : state.map_parser_to_local_lines) {
-      fs << line << '\n';
-    }
-  }
-  {
-    error_code ec;
-    llvm::raw_fd_ostream fs(
-        state.args.local_code_path.string() + ".after_parser.ii", ec);
-    state.rewriter
-        ->getEditBuffer(state.rewriter->getSourceMgr().getMainFileID())
-        .write(fs);
   }
 
   return 0;
