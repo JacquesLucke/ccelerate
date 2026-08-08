@@ -1,0 +1,12 @@
+# 1 "simple_enum.cc"
+enum A { VALUE_A = 0 };
+
+namespace {
+enum B_local { VALUE_B_local = 1 };
+}
+
+namespace test {
+enum C { VALUE_C = 2 };
+}
+
+int main() { return int(VALUE_A) + int(VALUE_B_local) + int(test::VALUE_C); }

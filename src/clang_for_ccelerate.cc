@@ -436,6 +436,21 @@ private:
         return this->location_is_in_local_code(def->getLocation());
       }
     }
+    if (const auto *ecd = llvm::dyn_cast<clang::EnumConstantDecl>(&decl)) {
+      const auto *ed = llvm::cast<clang::EnumDecl>(ecd->getDeclContext());
+      // Scoped enumerators are not injected into the enclosing scope, so
+      // renaming the enum type is enough to avoid collisions.
+      if (ed->isScoped()) {
+        return false;
+      }
+      if (const clang::EnumDecl *def = ed->getDefinition()) {
+        const clang::DeclContext *dc = def->getDeclContext();
+        if (dc->isFunctionOrMethod() || dc->isRecord()) {
+          return false;
+        }
+        return this->location_is_in_local_code(def->getLocation());
+      }
+    }
     return false;
   }
 
@@ -466,12 +481,16 @@ public:
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
     auto tag_matcher = tagDecl();
+    auto enum_const_matcher = enumConstantDecl();
     finder_.addMatcher(func_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(var_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(tag_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(enum_const_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(declRefExpr(to(func_matcher)).bind("declRef"),
                        &renamer_);
     finder_.addMatcher(declRefExpr(to(var_matcher)).bind("declRef"), &renamer_);
+    finder_.addMatcher(declRefExpr(to(enum_const_matcher)).bind("declRef"),
+                       &renamer_);
     finder_.addMatcher(
         typeLoc(loc(qualType(hasDeclaration(tag_matcher)))).bind("tagTypeLoc"),
         &renamer_);
