@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "array.hh"
+#include "clang_call.hh"
 #include "clang_for_ccelerate_io.hh"
 #include "get_current_executable_path.hh"
 #include "request_handler.hh"
@@ -13,7 +14,7 @@ enum class ClangCC1ActionType {
   EmitObj,
 };
 
-static const path &get_clang_for_ccelerate_executable() {
+const path &get_clang_for_ccelerate_executable() {
   static const path executable = []() {
     const path self_path = get_current_executable_path();
     return self_path.parent_path() / "clang_for_ccelerate";
@@ -177,7 +178,9 @@ static bool is_clang_cc1_command(const string_view &executable,
   return false;
 }
 
-void handle_request__clang(const Request &request) {
+ParseClangArgsResult parse_clang_args(const span<const string> args,
+                                      const path &working_dir,
+                                      const string_view clang_name) {
   const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
   const path self_path = get_current_executable_path();
   const path gcc_install_dir =
@@ -186,30 +189,21 @@ void handle_request__clang(const Request &request) {
   const ProcessResult parse_result = run_process_traced(
       ProcessArgs()
           .arg(clang_for_ccelerate_exe)
-          .args({"parse_args",
+          .args({"parse-args",
                  "--cwd",
-                 request.working_dir,
+                 working_dir.c_str(),
                  "--binary",
-                 to_string(request.program)})
+                 string(clang_name)})
           .arg("--")
-          .args(request.args)
+          .args(args)
           .arg(fmt::format("--gcc-install-dir={}", gcc_install_dir.string()))
-          .working_dir(request.working_dir));
+          .working_dir(working_dir));
   if (parse_result.exit_code() != 0) {
-    send_response_final(request.client_id,
-                        std::move(parse_result.stdout_data),
-                        std::move(parse_result.stderr_data),
-                        parse_result.exit_code().value_or(1));
-    return;
+    return parse_result;
   }
   if (!string_view(parse_result.stdout_data).starts_with(clang_io::magic)) {
-    send_response_final(request.client_id,
-                        parse_result.stdout_data,
-                        parse_result.stderr_data,
-                        0);
-    return;
+    return parse_result;
   }
-
   clang_io::ParsedArgs parsed_args;
   try {
     string_view stdout_to_parse =
@@ -218,16 +212,24 @@ void handle_request__clang(const Request &request) {
         .get()
         .convert(parsed_args);
   } catch (...) {
-    send_response_error(request.client_id,
-                        "internal error parsing clang_for_ccelerate output");
+    return ProcessResult::from_finished(1);
+  }
+  return parsed_args;
+}
+
+void handle_request__clang(const Request &request) {
+  ParseClangArgsResult parse_args_result = parse_clang_args(
+      request.args, request.working_dir, to_string(request.program));
+  if (ProcessResult *parse_result =
+          std::get_if<ProcessResult>(&parse_args_result)) {
+    send_response_final(request.client_id,
+                        std::move(parse_result->stdout_data),
+                        std::move(parse_result->stderr_data),
+                        parse_result->exit_code().value_or(1));
     return;
   }
-
-  if (parsed_args.commands.empty()) {
-    send_response_final(request.client_id, "", "no input files", 1);
-    return;
-  }
-
+  const clang_io::ParsedArgs &parsed_args =
+      std::get<clang_io::ParsedArgs>(parse_args_result);
   for (const clang_io::Command &command : parsed_args.commands) {
     ExitCodeOrError exit_or_error{1};
     if (is_clang_cc1_command(command.executable, command.args)) {

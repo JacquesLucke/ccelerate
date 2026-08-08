@@ -593,7 +593,7 @@ int clang_ops_main(const int argc, char **argv) {
   app.description("A utility used by ccelerate to do clang specific things "
                   "like argument parsing");
 
-  CLI::App &parse_args_cmd = *app.add_subcommand("parse_args");
+  CLI::App &parse_args_cmd = *app.add_subcommand("parse-args");
   Cmd_ParseArgs parse_args;
   parse_args_cmd.add_option("--cwd", parse_args.cwd)->required();
   parse_args_cmd.add_option("--binary", parse_args.binary)->required();
