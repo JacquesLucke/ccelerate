@@ -1,0 +1,32 @@
++++
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+]
++++
+# 1 "static_template_specialization.cc"
+template<typename T>
+static int compute__(const T &v);
+
+template<>
+int compute__<int>(const int &v)
+{
+  return v + 1;
+}
+
+template<>
+int compute__<double>(const double &v)
+{
+  return static_cast<int>(v);
+}
+
+static int run__(int x, double y)
+{
+  return compute__(x) + compute__(y);
+}
+
+int main()
+{
+  return run__(1, 2.0);
+}
