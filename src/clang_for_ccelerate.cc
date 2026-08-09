@@ -274,11 +274,9 @@ struct LocalCodeState {
   string rewrite_result;
 };
 
-// Canonical `#define` text from MacroInfo (same approach as
-// clang::MacroPPCallbacks::writeMacroDefinition).
-static string format_include_define(const clang::IdentifierInfo &identifier,
-                                    const clang::MacroInfo &macro,
-                                    clang::Preprocessor &preprocessor) {
+static string format_define_line(const clang::IdentifierInfo &identifier,
+                                 const clang::MacroInfo &macro,
+                                 clang::Preprocessor &preprocessor) {
   string result = "#define ";
   result += identifier.getName();
   if (macro.isFunctionLike()) {
@@ -286,10 +284,10 @@ static string format_include_define(const clang::IdentifierInfo &identifier,
     const llvm::ArrayRef<const clang::IdentifierInfo *> params = macro.params();
     for (size_t param_i = 0; param_i < params.size(); param_i++) {
       const clang::IdentifierInfo &param = *params[param_i];
-      const string_view param_name = param.getName();
-      result += param_name;
-      if (param_name == "__VA_ARGS__") {
+      if (param.getName() == "__VA_ARGS__") {
         result += "...";
+      } else {
+        result += param.getName();
       }
       if (param_i + 1 != params.size()) {
         result += ',';
@@ -300,11 +298,35 @@ static string format_include_define(const clang::IdentifierInfo &identifier,
     }
     result += ')';
   }
+
+  llvm::SmallVector<clang::Token, 16> expanded_tokens;
   if (!macro.tokens_empty()) {
+    llvm::SmallVector<clang::Token, 16> stream_tokens(macro.tokens().begin(),
+                                                      macro.tokens().end());
+    clang::Token eof;
+    eof.startToken();
+    eof.setKind(clang::tok::eof);
+    eof.setLocation(macro.getDefinitionEndLoc());
+    stream_tokens.push_back(eof);
+
+    preprocessor.EnterTokenStream(stream_tokens,
+                                  /*DisableMacroExpansion=*/false,
+                                  /*IsReinject=*/false);
+    while (true) {
+      clang::Token tok;
+      preprocessor.Lex(tok);
+      if (tok.is(clang::tok::eof)) {
+        break;
+      }
+      expanded_tokens.push_back(tok);
+    }
+  }
+
+  if (!expanded_tokens.empty()) {
     result += ' ';
     llvm::SmallString<128> spelling_buffer;
     bool first = true;
-    for (const clang::Token &tok : macro.tokens()) {
+    for (const clang::Token &tok : expanded_tokens) {
       if (!first && tok.hasLeadingSpace()) {
         result += ' ';
       }
@@ -337,7 +359,7 @@ public:
       return;
     }
     state_.include_defines.push_back(
-        format_include_define(*identifier, *macro, preprocessor_));
+        format_define_line(*identifier, *macro, preprocessor_));
   }
 };
 
