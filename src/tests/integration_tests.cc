@@ -218,7 +218,7 @@ public:
     const path src_dir = args.repo_dir / "test_local_code";
     const path stem = path(project_name_).stem();
     const path output_dir = args.test_out_dir / stem;
-    const path ccelerate_config = src_dir / "ccelerate_config.toml";
+    const path ccelerate_config = src_dir / "ccelerate.toml";
     std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
 
