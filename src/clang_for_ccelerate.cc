@@ -18,6 +18,7 @@
 #include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/FrontendTool/Utils.h>
+#include <clang/Lex/Lexer.h>
 #include <clang/Lex/MacroInfo.h>
 #include <clang/Lex/PPCallbacks.h>
 #include <clang/Lex/Preprocessor.h>
@@ -520,19 +521,28 @@ public:
     if (!loc.isValid() || !named_decl) {
       return;
     }
+    if (!this->name_should_be_localized(*named_decl)) {
+      return;
+    }
     const std::string old_name = named_decl->getNameAsString();
     if (old_name.empty()) {
       return;
     }
-    if (!this->name_should_be_localized(*named_decl)) {
+    // Anonymous structs/unions (and their implicit ctors/dtors) report pretty
+    // names like "(unnamed union at file:line:col)" while the source location
+    // points at the `union`/`struct` keyword. Only rewrite when the token at
+    // `loc` actually spells the decl name.
+    const uint32_t tok_len = clang::Lexer::MeasureTokenLength(
+        loc, sm_, state_.rewriter->getLangOpts());
+    const llvm::StringRef tok_spelling(sm_.getCharacterData(loc), tok_len);
+    if (tok_spelling != old_name) {
       return;
     }
     const uint32_t loc_key = loc.getRawEncoding();
     if (!renamed_locs_.insert(loc_key).second) {
       return;
     }
-    state_.rewriter->InsertTextAfter(loc.getLocWithOffset(old_name.size()),
-                                     state_.args.local_id);
+    state_.rewriter->InsertTextAfterToken(loc, state_.args.local_id);
   }
 
 private:
