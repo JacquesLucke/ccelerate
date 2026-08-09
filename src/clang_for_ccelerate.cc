@@ -287,6 +287,8 @@ struct LocalCodeState {
   // Include order needs to be preserved.
   std::unordered_map<path, size_t> direct_include_index;
   vector<DirectInclude> direct_includes;
+
+  std::unordered_set<string> seen_local_define_names;
   std::vector<string> include_defines;
 
   optional<clang::Rewriter> rewriter;
@@ -394,6 +396,7 @@ public:
     if (!macro || macro->isBuiltinMacro()) {
       return;
     }
+    state_.seen_local_define_names.insert(string(identifier->getName()));
     state_.include_defines.push_back(
         format_define_line(*identifier, *macro, preprocessor_));
   }
@@ -407,6 +410,10 @@ public:
       return;
     }
     if (!this->location_is_in_local_code(MacroNameTok.getLocation())) {
+      return;
+    }
+    if (state_.seen_local_define_names.contains(
+            string(identifier->getName()))) {
       return;
     }
     state_.include_defines.push_back(
