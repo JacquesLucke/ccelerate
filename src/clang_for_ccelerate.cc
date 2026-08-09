@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/DeclCXX.h>
+#include <clang/AST/DeclTemplate.h>
 #include <clang/AST/TypeLoc.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -513,6 +514,25 @@ public:
       loc = tag_tl.getNameLoc();
       named_decl = tag_tl.getDecl();
     } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>(
+                       "templateSpecTypeLoc")) {
+      const clang::TemplateSpecializationTypeLoc tst =
+          type_loc->getAsAdjusted<clang::TemplateSpecializationTypeLoc>();
+      if (tst.isNull()) {
+        return;
+      }
+      loc = tst.getTemplateNameLoc();
+      const clang::TemplateName template_name =
+          tst.getTypePtr()->getTemplateName();
+      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
+        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
+          named_decl = ctd->getTemplatedDecl();
+        } else if (const auto *tatd =
+                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
+          named_decl = tatd->getTemplatedDecl();
+        }
+      }
+    } else if (const clang::TypeLoc *type_loc =
                    result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
       const clang::TypedefTypeLoc typedef_tl =
           type_loc->getAsAdjusted<clang::TypedefTypeLoc>();
@@ -666,6 +686,8 @@ public:
     finder_.addMatcher(
         typeLoc(loc(qualType(hasDeclaration(tag_matcher)))).bind("tagTypeLoc"),
         &renamer_);
+    finder_.addMatcher(
+        templateSpecializationTypeLoc().bind("templateSpecTypeLoc"), &renamer_);
     finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
                            .bind("typedefTypeLoc"),
                        &renamer_);
