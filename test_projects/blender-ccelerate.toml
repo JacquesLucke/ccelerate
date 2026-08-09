@@ -64,8 +64,9 @@ include_defines = [
 eager_obj_patterns = [
     "**/cycles_kernel_cpu.dir/kernel.cpp.o",
     "**/cycles_kernel_cpu.dir/kernel_avx2.cpp.o",
-    "**/gpu_shader_depencency.cc",
+    "**/gpu_shader_depencency.cc.o",
     "**/intern/gpu_shader_create_info.cc.o",
+    "**/intern/wayland_dynload_egl.c.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
