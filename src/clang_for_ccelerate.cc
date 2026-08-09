@@ -627,6 +627,9 @@ private:
       return false;
     }
     if (const auto *ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(&decl)) {
+      if (ctor->isInheritingConstructor()) {
+        return false;
+      }
       const clang::CXXRecordDecl *record = ctor->getParent();
       if (const clang::TagDecl *def = record->getDefinition()) {
         return this->name_should_be_localized(*def);

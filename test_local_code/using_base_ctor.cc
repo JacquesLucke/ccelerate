@@ -1,12 +1,16 @@
-namespace {
-
 struct A {
   explicit A(int x) : v(x) {}
   int v;
 };
 
+namespace {
+
 struct B : A {
   using A::A;
+};
+
+struct C : B {
+  using B::B;
 };
 
 } // namespace
