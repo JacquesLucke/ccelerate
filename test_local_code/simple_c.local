@@ -3,7 +3,7 @@ source_language = "C"
 include_defines = [
 ]
 direct_includes = [
-    "/usr/include/stdio.h",
+    {is_system_header = true, path = "/usr/include/stdio.h"},
 ]
 +++
 # 2 "simple_c.c"

@@ -29,10 +29,13 @@
 #include <fmt/format.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/TargetParser/Host.h>
 #include <toml.hpp>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "clang_for_ccelerate_io.hh"
 #include "config.hh"
@@ -263,6 +266,15 @@ static string_view trim_whitespace(const string_view str) {
   return str.substr(start, end - start + 1);
 }
 
+struct DirectInclude {
+  path include_path;
+  bool is_system_header = false;
+};
+
+struct IncludeInfo {
+  bool is_system_header = false;
+};
+
 struct LocalCodeState {
   const Cmd_ExtractLocalCode &args;
   const Config &config;
@@ -273,7 +285,8 @@ struct LocalCodeState {
   string code_for_parser;
   vector<string_view> local_code_lines;
   vector<int> map_parser_to_local_lines;
-  std::unordered_set<path> direct_includes;
+  // Path -> was included as a system header (flag 3 on the line marker).
+  std::unordered_map<path, IncludeInfo> direct_includes;
   std::vector<string> include_defines;
 
   optional<clang::Rewriter> rewriter;
@@ -415,7 +428,12 @@ public:
               local_depth++;
             } else {
               if (file != "<built-in>") {
-                state_.direct_includes.insert(file);
+                const path include_path(file);
+                auto [it, inserted] = state_.direct_includes.emplace(
+                    include_path, line_marker->is_system_header);
+                if (!inserted) {
+                  it->second.is_system_header |= line_marker->is_system_header;
+                }
               }
             }
           }
@@ -810,16 +828,31 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     // Write frontmatter.
     fs << "+++\n";
     {
-      vector<string> direct_includes;
+      vector<DirectInclude> direct_includes;
       direct_includes.reserve(state.direct_includes.size());
-      for (const path &include : state.direct_includes) {
-        direct_includes.push_back(apply_path_maps(include, args.path_maps));
+      for (const auto &[include, info] : state.direct_includes) {
+        direct_includes.push_back(DirectInclude{
+            .include_path = path(apply_path_maps(include, args.path_maps)),
+            .is_system_header = info.is_system_header,
+        });
       }
-      std::sort(direct_includes.begin(), direct_includes.end());
+      std::sort(direct_includes.begin(),
+                direct_includes.end(),
+                [](const DirectInclude &a, const DirectInclude &b) {
+                  return a.include_path < b.include_path;
+                });
+      vector<toml::value> direct_include_values;
+      direct_include_values.reserve(direct_includes.size());
+      for (const DirectInclude &include : direct_includes) {
+        toml::value entry;
+        entry["path"] = include.include_path.string();
+        entry["is_system_header"] = include.is_system_header;
+        direct_include_values.push_back(std::move(entry));
+      }
       toml::array_format_info fmt;
       fmt.fmt = toml::array_format::multiline;
       toml::value table;
-      table["direct_includes"] = toml::value(direct_includes, fmt);
+      table["direct_includes"] = toml::value(direct_include_values, fmt);
       table["include_defines"] = toml::value(state.include_defines, fmt);
       table["source_language"] =
           clang::languageToString(state.input_kind.getLanguage());
@@ -838,8 +871,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 }
 
 struct CompileLocalCodeState {
-  std::unordered_set<path> seen_direct_include_paths;
-  vector<path> ordered_direct_include_paths;
+  std::unordered_map<path, size_t> seen_direct_include_paths;
+  vector<DirectInclude> ordered_direct_include_paths;
   std::unordered_set<string> all_include_defines;
   string merged_local_code;
   string language;
@@ -847,6 +880,23 @@ struct CompileLocalCodeState {
   string preprocessed_headers;
   string combined_preprocessed_code;
 };
+
+static void add_direct_include(CompileLocalCodeState &state,
+                               path include_path,
+                               bool is_system_header) {
+  const auto [it, inserted] = state.seen_direct_include_paths.emplace(
+      include_path, state.ordered_direct_include_paths.size());
+  if (inserted) {
+    state.ordered_direct_include_paths.push_back(DirectInclude{
+        .include_path = std::move(include_path),
+        .is_system_header = is_system_header,
+    });
+    return;
+  }
+  state.ordered_direct_include_paths[it->second].is_system_header =
+      state.ordered_direct_include_paths[it->second].is_system_header ||
+      is_system_header;
+}
 
 class PreprocessHeadersAction : public clang::PreprocessorFrontendAction {
 private:
@@ -927,11 +977,11 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
       return 1;
     }
     toml::value &data = data_opt.unwrap();
-    for (const string &include :
-         toml::find_or_default<vector<string>>(data, "direct_includes")) {
-      if (state.seen_direct_include_paths.insert(path(include)).second) {
-        state.ordered_direct_include_paths.push_back(path(include));
-      }
+    for (const toml::value &entry :
+         toml::find_or_default<toml::array>(data, "direct_includes")) {
+      add_direct_include(state,
+                         path(toml::find<string>(entry, "path")),
+                         toml::find_or<bool>(entry, "is_system_header", false));
     }
     for (const string &define :
          toml::find_or_default<vector<string>>(data, "include_defines")) {
@@ -953,10 +1003,27 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
       code_to_preprocess.append(define);
       code_to_preprocess += '\n';
     }
-    for (const path &include : state.ordered_direct_include_paths) {
-      code_to_preprocess.append("#include <");
-      code_to_preprocess.append(include.string());
-      code_to_preprocess.append(">\n");
+
+    // Handle system includes in a special way because they have other rules for
+    // warnings etc.
+    vector<string> system_wrapper_bodies;
+    system_wrapper_bodies.reserve(state.ordered_direct_include_paths.size());
+    size_t system_wrapper_i = 0;
+    for (const DirectInclude &include : state.ordered_direct_include_paths) {
+      if (include.is_system_header) {
+        const string wrapper_path = fmt::format(
+            "/__ccelerate__/system_include_{}.h", system_wrapper_i++);
+        system_wrapper_bodies.push_back(
+            fmt::format("#pragma GCC system_header\n#include <{}>\n",
+                        include.include_path.string()));
+        code_to_preprocess.append("#include <");
+        code_to_preprocess.append(wrapper_path);
+        code_to_preprocess.append(">\n");
+      } else {
+        code_to_preprocess.append("#include <");
+        code_to_preprocess.append(include.include_path.string());
+        code_to_preprocess.append(">\n");
+      }
     }
 
     clang::CompilerInstance clang_instance;
@@ -975,6 +1042,24 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     if (!success) {
       return 1;
     }
+
+    // Add wrappers for system includes.
+    llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> overlay =
+        llvm::makeIntrusiveRefCnt<llvm::vfs::OverlayFileSystem>(
+            llvm::vfs::getRealFileSystem());
+    llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> memfs =
+        llvm::makeIntrusiveRefCnt<llvm::vfs::InMemoryFileSystem>();
+    for (size_t i = 0; i < system_wrapper_bodies.size(); i++) {
+      const string wrapper_path =
+          fmt::format("/__ccelerate__/system_include_{}.h", i);
+      memfs->addFile(wrapper_path,
+                     0,
+                     llvm::MemoryBuffer::getMemBufferCopy(
+                         system_wrapper_bodies[i], wrapper_path));
+    }
+    overlay->pushOverlay(memfs);
+    clang_instance.createFileManager(overlay);
+
     auto &inputs = clang_instance.getFrontendOpts().Inputs;
     clang::InputKind kind = clang::InputKind(
         state.language == "C++" ? clang::Language::CXX : clang::Language::C);
