@@ -168,6 +168,10 @@ TEST(Integration, MultiLibCMake) {
   test_simple_cmake_project("multi_lib_cmake", "ABCDEFGHIJKLMNOPQRST\n");
 }
 
+TEST(Integration, UnnormalizedIncludePrefix) {
+  test_simple_cmake_project("unnormalized_include_prefix", "ok\n");
+}
+
 static string read_file(const path &file_path) {
   std::ifstream in(file_path);
   std::ostringstream contents;
