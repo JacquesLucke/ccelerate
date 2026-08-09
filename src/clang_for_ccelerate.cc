@@ -914,10 +914,10 @@ get_header_search_paths(const clang::HeaderSearchOptions &opts) {
   vector<path> prefixes;
   prefixes.reserve(opts.UserEntries.size() + 1);
   for (const clang::HeaderSearchOptions::Entry &entry : opts.UserEntries) {
-    prefixes.emplace_back(entry.Path);
+    prefixes.push_back(path(entry.Path).lexically_normal());
   }
   if (!opts.ResourceDir.empty()) {
-    prefixes.push_back(path(opts.ResourceDir) / "include");
+    prefixes.push_back((path(opts.ResourceDir) / "include").lexically_normal());
   }
   return prefixes;
 }
