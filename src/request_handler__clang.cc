@@ -63,7 +63,8 @@ extract_local_code_with_clang(span<const string> cc1_args,
                               const path &output_path,
                               const path &working_dir,
                               const string_view local_id,
-                              const span<const path> config_paths) {
+                              const span<const path> config_paths,
+                              const optional<path> &frontmatter_base) {
   const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
   ProcessArgs args;
   args.arg(clang_for_ccelerate_exe)
@@ -72,6 +73,9 @@ extract_local_code_with_clang(span<const string> cc1_args,
              output_path,
              "--local-id",
              string(local_id)});
+  if (frontmatter_base) {
+    args.args({"--frontmatter-base", frontmatter_base->string()});
+  }
   for (const path &config_path : config_paths) {
     args.args({"--config", config_path.string()});
   }

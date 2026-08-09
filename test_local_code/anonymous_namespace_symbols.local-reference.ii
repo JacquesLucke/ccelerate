@@ -1,3 +1,7 @@
++++
+direct_includes = [
+]
++++
 # 1 "anonymous_namespace_symbols.cc"
 namespace {
 int x__ = 0;

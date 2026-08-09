@@ -1,3 +1,7 @@
++++
+direct_includes = [
+]
++++
 # 1 "mixed_static_non_static.cc"
 int x = 3;
 static int y__ = 4;

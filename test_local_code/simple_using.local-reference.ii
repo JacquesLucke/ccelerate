@@ -1,3 +1,7 @@
++++
+direct_includes = [
+]
++++
 # 1 "simple_using.cc"
 namespace {
 using A__ = int;

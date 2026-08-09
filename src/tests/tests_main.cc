@@ -239,7 +239,8 @@ public:
                                       output_path,
                                       src_dir,
                                       "__",
-                                      span(&ccelerate_config, 1));
+                                      span(&ccelerate_config, 1),
+                                      args.repo_dir);
     ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
 
     ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <CLI/CLI.hpp>
+#include <algorithm>
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/TypeLoc.h>
@@ -28,6 +29,7 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/TargetParser/Host.h>
+#include <toml.hpp>
 
 #include "clang_for_ccelerate_io.hh"
 #include "config.hh"
@@ -51,8 +53,9 @@ struct Cmd_CompileObj {
 struct Cmd_ExtractLocalCode {
   vector<string> clang_args;
   path local_code_path;
-  string local_id = "_local";
+  string local_id = "__";
   vector<path> config_paths;
+  optional<path> frontmatter_base;
 };
 
 static int handle__parse_args(const Cmd_ParseArgs &args) {
@@ -259,6 +262,7 @@ struct LocalCodeState {
   string code_for_parser;
   vector<string_view> local_code_lines;
   vector<int> map_parser_to_local_lines;
+  std::unordered_set<path> direct_includes;
 
   optional<clang::Rewriter> rewriter;
   string rewrite_result;
@@ -289,7 +293,6 @@ public:
 
     llvm::StringSaver saver(state_.alloc);
 
-    vector<string_view> direct_includes;
     std::unordered_set<string_view> all_includes;
     int committed_kept_lines = 0;
 
@@ -309,7 +312,9 @@ public:
             if (state_.config.is_local_header(file)) {
               local_depth++;
             } else {
-              direct_includes.push_back(file);
+              if (file != "<built-in>") {
+                state_.direct_includes.insert(file);
+              }
             }
           }
           all_includes.insert(file);
@@ -641,10 +646,47 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     }
   }
 
-  // Write the output.
+  // Write the local code output.
   {
     error_code ec;
     llvm::raw_fd_ostream fs(state.args.local_code_path.string(), ec);
+
+    // Write frontmatter.
+    fs << "+++\n";
+    {
+      const auto path_for_frontmatter = [&](const path &include) -> string {
+        if (!args.frontmatter_base) {
+          return include.string();
+        }
+        const path abs_include =
+            include.is_absolute()
+                ? include.lexically_normal()
+                : std::filesystem::absolute(include).lexically_normal();
+        const path abs_base = std::filesystem::absolute(*args.frontmatter_base)
+                                  .lexically_normal();
+        const path relative = abs_include.lexically_relative(abs_base);
+        if (relative.empty() || *relative.begin() == "..") {
+          return abs_include.string();
+        }
+        return relative.string();
+      };
+
+      vector<string> direct_includes;
+      direct_includes.reserve(state.direct_includes.size());
+      for (const path &include : state.direct_includes) {
+        direct_includes.push_back(path_for_frontmatter(include));
+      }
+      std::sort(direct_includes.begin(), direct_includes.end());
+      toml::array_format_info fmt;
+      fmt.fmt = toml::array_format::multiline;
+      toml::value table;
+      table["direct_includes"] = toml::value(direct_includes, fmt);
+      string toml_str = toml::format(table);
+      fs << trim_whitespace(toml_str) << '\n';
+    }
+    fs << "+++\n";
+
+    // Actual code.
     for (const string_view line : state.local_code_lines) {
       fs << line << '\n';
     }
@@ -678,6 +720,10 @@ int clang_ops_main(const int argc, char **argv) {
   extract_local_code_cmd.add_option("--local-id",
                                     extract_local_code_args.local_id,
                                     "Suffix to use to make symbols unique");
+  extract_local_code_cmd.add_option(
+      "--frontmatter-base",
+      extract_local_code_args.frontmatter_base,
+      "If set, paths in frontmatter are made relative to this directory");
   // Vector options default to allow_extra_args, which makes --config eat the
   // "--" separator and leave -cc1 as an unknown option.
   extract_local_code_cmd

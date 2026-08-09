@@ -1,3 +1,7 @@
++++
+direct_includes = [
+]
++++
 # 1 "single_static_variable.cc"
 static int my_function__() { return 0; }
 

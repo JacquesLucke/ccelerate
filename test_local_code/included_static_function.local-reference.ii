@@ -1,3 +1,8 @@
++++
+direct_includes = [
+    "test_local_code/included_static_function.hh",
+]
++++
 # 2 "included_static_function.cc"
 
 int main() { return get_size(); }

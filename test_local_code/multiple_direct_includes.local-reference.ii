@@ -1,0 +1,12 @@
++++
+direct_includes = [
+    "build/release/bin/extern/gcc-13-install/include/c++/13/cstdio",
+    "build/release/bin/extern/gcc-13-install/include/c++/13/iostream",
+    "build/release/bin/extern/gcc-13-install/include/c++/13/unordered_map",
+    "build/release/bin/extern/gcc-13-install/include/c++/13/unordered_set",
+    "build/release/bin/extern/gcc-13-install/include/c++/13/vector",
+]
++++
+# 8 "multiple_direct_includes.cc"
+
+int main() { return 0; }

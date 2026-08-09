@@ -1,3 +1,7 @@
++++
+direct_includes = [
+]
++++
 # 1 "single_static_function.cc"
 static int x__ = 0;
 
