@@ -562,12 +562,15 @@ private:
     }
     if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(&decl)) {
       if (const clang::FunctionDecl *def = fd->getDefinition()) {
-        const clang::DeclContext *dc = def->getDeclContext();
-        if (dc->isFunctionOrMethod() || dc->isRecord()) {
-          return false;
-        }
-        return this->location_is_in_local_code(def->getLocation());
+        fd = def;
+      } else {
+        fd = fd->getCanonicalDecl();
       }
+      const clang::DeclContext *dc = fd->getDeclContext();
+      if (dc->isFunctionOrMethod() || dc->isRecord()) {
+        return false;
+      }
+      return this->location_is_in_local_code(fd->getLocation());
     }
     if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(&decl)) {
       if (const clang::VarDecl *def = vd->getDefinition()) {
