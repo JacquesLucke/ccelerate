@@ -132,4 +132,49 @@ bool Config::is_include_define(string_view define) const {
   return re2::RE2::FullMatch(define, *is_include_define_);
 }
 
+ConfigDiscovery::ConfigDiscovery() {
+  all_configs_.push_back(std::make_unique<Config>());
+  latest_config_ = all_configs_[0].get();
+}
+
+void ConfigDiscovery::add_search_path(const path &search_path) {
+  if (search_path.empty()) {
+    return;
+  }
+  path current = std::filesystem::absolute(search_path).lexically_normal();
+  if (!std::filesystem::is_directory(current)) {
+    current = current.parent_path();
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  bool found_new_config = false;
+  while (true) {
+    // Already scanned this directory (and therefore all parents).
+    if (!visited_paths_.insert(current).second) {
+      break;
+    }
+    const path config_path = current / "ccelerate.toml";
+    if (std::filesystem::is_regular_file(config_path)) {
+      config_paths_.push_back(config_path);
+      found_new_config = true;
+    }
+    const path parent = current.parent_path();
+    if (parent == current) {
+      break;
+    }
+    current = parent;
+  }
+
+  if (found_new_config) {
+    all_configs_.push_back(
+        std::make_unique<Config>(Config::from_paths(config_paths_)));
+    latest_config_ = all_configs_.back().get();
+  }
+}
+
+ConfigDiscovery &ConfigDiscovery::get() {
+  static ConfigDiscovery discovery;
+  return discovery;
+}
+
 } // namespace ccelerate

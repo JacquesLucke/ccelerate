@@ -7,7 +7,9 @@
 #include <zmq.hpp>
 #include <zmq_addon.hpp>
 
+#include "config.hh"
 #include "default_endpoint.hh"
+#include "get_current_executable_path.hh"
 #include "request_handler.hh"
 #include "wrap_io.hh"
 
@@ -144,6 +146,8 @@ static void handle_incoming_message(vector<zmq::message_t> &request_frames) {
 
 int ccelerate_main(const int argc, char **argv) {
   ServerGlobalState &global_state = get_global_state();
+  ConfigDiscovery::get().add_search_path(get_current_executable_path());
+  ConfigDiscovery::get().add_search_path(std::filesystem::current_path());
 
   try {
     // Initialize socket for communicating with the wrapper processes.

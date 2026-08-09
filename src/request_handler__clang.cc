@@ -3,6 +3,7 @@
 #include "array.hh"
 #include "clang_call.hh"
 #include "clang_for_ccelerate_io.hh"
+#include "config.hh"
 #include "get_current_executable_path.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
@@ -93,9 +94,9 @@ handle_command__clang_cc1(const ClientID &client_id,
     path local_code_file = command.input_infos[0].filename.value();
     local_code_file.replace_extension(fmt::format(
         "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
-    // TODO: Config paths.
+    const vector<path> config_paths = ConfigDiscovery::get().config_paths();
     extract_local_code_with_clang(
-        command.args, local_code_file, working_dir, "__", {});
+        command.args, local_code_file, working_dir, "__", config_paths);
     vector<string> compile_args = command.args;
     return run_process_stream_output_traced(
         ProcessArgs()

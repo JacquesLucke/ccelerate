@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 #include <tracy/Tracy.hpp>
 
+#include "config.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
 
@@ -50,6 +51,19 @@ void handle_request(const Request &request) {
            std::min<size_t>(zone_text.size(),
                             std::numeric_limits<uint16_t>::max() - 1));
   ZoneColor(get_program_color(request.program));
+
+  ConfigDiscovery &discovery = ConfigDiscovery::get();
+  discovery.add_search_path(request.working_dir);
+  for (const string_view arg : request.args) {
+    if (arg.starts_with("-")) {
+      continue;
+    }
+    path arg_path(arg);
+    if (arg_path.is_relative()) {
+      arg_path = request.working_dir / arg_path;
+    }
+    discovery.add_search_path(arg_path);
+  }
 
   spdlog::info("Handling request: {} {}",
                to_string(request.program),

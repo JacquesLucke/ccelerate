@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <mutex>
 #include <re2/re2.h>
+#include <unordered_set>
 
 #include "filesystem.hh"
 #include "memory.hh"
@@ -34,6 +36,29 @@ public:
 
   bool is_local_header(const path &path) const;
   bool is_include_define(string_view define) const;
+};
+
+class ConfigDiscovery {
+private:
+  std::mutex mutex_;
+  vector<path> config_paths_;
+  vector<unique_ptr<Config>> all_configs_;
+  std::atomic<const Config *> latest_config_;
+  std::unordered_set<path> visited_paths_;
+
+public:
+  ConfigDiscovery();
+
+  void add_search_path(const path &search_path);
+
+  const Config &get_latest() const {
+    assert(latest_config_);
+    return *latest_config_;
+  }
+
+  vector<path> config_paths() const { return config_paths_; }
+
+  static ConfigDiscovery &get();
 };
 
 } // namespace ccelerate
