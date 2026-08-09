@@ -23,6 +23,7 @@ local_header_patterns = [
     "**/glsl_gpu_metadata_list.hh",
     "**/glsl_ocio_metadata_list.hh",
     "**/glsl_osd_metadata_list.hh",
+    "**/wayland_dynload_client.h",
     # Generated metadata bodies; need GPUSource from the including .cc.
     "**/*.hh.hh",
     "**/*.glsl.hh",
