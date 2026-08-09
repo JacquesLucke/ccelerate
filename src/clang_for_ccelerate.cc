@@ -622,6 +622,51 @@ public:
   }
 
 private:
+  // Individual function locality, ignoring other overloads of the same name.
+  bool function_alone_should_be_localized(const clang::FunctionDecl &decl) {
+    if (decl.isExternallyVisible()) {
+      return false;
+    }
+    const clang::FunctionDecl *anchor = decl.getDefinition();
+    if (!anchor) {
+      anchor = decl.getCanonicalDecl();
+    }
+    const clang::DeclContext *dc = anchor->getDeclContext();
+    if (dc->isFunctionOrMethod() || dc->isRecord()) {
+      return false;
+    }
+    return this->location_is_in_local_code(anchor->getLocation());
+  }
+
+  // Don't rename a static overload if a non-localizable overload (e.g. an
+  // external function template) shares the name: instantiation DeclRefExprs
+  // would rewrite the shared call site and leave the template name behind.
+  bool
+  function_overload_set_should_be_localized(const clang::FunctionDecl &decl) {
+    if (!this->function_alone_should_be_localized(decl)) {
+      return false;
+    }
+    const clang::DeclarationName name = decl.getDeclName();
+    if (!name.isIdentifier()) {
+      return true;
+    }
+    const clang::DeclContext *dc = decl.getDeclContext()->getRedeclContext();
+    for (const clang::NamedDecl *other : dc->lookup(name)) {
+      if (const auto *other_fd = llvm::dyn_cast<clang::FunctionDecl>(other)) {
+        if (!this->function_alone_should_be_localized(*other_fd)) {
+          return false;
+        }
+      } else if (const auto *ftd =
+                     llvm::dyn_cast<clang::FunctionTemplateDecl>(other)) {
+        if (!this->function_alone_should_be_localized(
+                *ftd->getTemplatedDecl())) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   bool name_should_be_localized(const clang::NamedDecl &decl) {
     if (decl.isExternallyVisible()) {
       return false;
@@ -637,16 +682,7 @@ private:
       return false;
     }
     if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(&decl)) {
-      if (const clang::FunctionDecl *def = fd->getDefinition()) {
-        fd = def;
-      } else {
-        fd = fd->getCanonicalDecl();
-      }
-      const clang::DeclContext *dc = fd->getDeclContext();
-      if (dc->isFunctionOrMethod() || dc->isRecord()) {
-        return false;
-      }
-      return this->location_is_in_local_code(fd->getLocation());
+      return this->function_overload_set_should_be_localized(*fd);
     }
     if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(&decl)) {
       if (const clang::VarDecl *def = vd->getDefinition()) {

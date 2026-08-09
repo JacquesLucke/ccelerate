@@ -8,7 +8,7 @@ direct_includes = [
 # 1 "macro_function_name.cc"
 
 
-static int get_value__() { return 10; }
+static int get_value() { return 10; }
 
 
 
@@ -16,4 +16,4 @@ static int get_value2__() { return 20; }
 
 float get_value(float a) { return a + 30.0f; }
 
-int main() { return get_value__() + get_value2__() + get_value(10.0f); }
+int main() { return get_value() + get_value2__() + get_value(10.0f); }
