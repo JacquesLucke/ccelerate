@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-#include <reproc++/drain.hpp>
-#include <reproc++/reproc.hpp>
 #include <spdlog/spdlog.h>
 #include <tbb/task_arena.h>
 #include <tbb/task_group.h>

@@ -4,8 +4,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <poll.h>
-#include <reproc++/drain.hpp>
-#include <reproc++/reproc.hpp>
 #include <spawn.h>
 #include <spdlog/spdlog.h>
 #include <sys/wait.h>

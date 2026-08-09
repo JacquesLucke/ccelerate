@@ -65,6 +65,8 @@ public:
       env.push_back(std::make_pair("CCELERATE_ENDPOINT", endpoint_));
       reproc::options options;
       options.env.extra = env;
+      options.redirect.out.type = reproc::redirect::discard;
+      options.redirect.err.type = reproc::redirect::discard;
 
       vector<string> cmd_args;
       cmd_args.push_back(args.binary_dir / "ccelerate");

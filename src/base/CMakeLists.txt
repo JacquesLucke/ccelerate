@@ -6,8 +6,6 @@ target_include_directories(ccelerate_base PUBLIC
   ${TL_FUNCTION_REF_INCLUDE_DIRS}
 )
 target_link_libraries(ccelerate_base PRIVATE
-  reproc
-  reproc++
   unofficial::whereami::whereami
   spdlog::spdlog
 )
