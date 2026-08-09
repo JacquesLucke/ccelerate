@@ -1,11 +1,9 @@
 +++
 source_language = "C++"
 include_defines = [
+    "#define DEFINE_A(a) 10 + a",
+    "#define DEFINE_B DEFINE_A(test)",
 ]
 direct_includes = [
 ]
 +++
-# 1 "simple_macro.cc"
-
-
-int main() { return 10; }

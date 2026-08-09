@@ -18,6 +18,9 @@
 #include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/FrontendTool/Utils.h>
+#include <clang/Lex/MacroInfo.h>
+#include <clang/Lex/PPCallbacks.h>
+#include <clang/Lex/Preprocessor.h>
 #include <clang/Rewrite/Core/Rewriter.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
@@ -265,9 +268,77 @@ struct LocalCodeState {
   vector<string_view> local_code_lines;
   vector<int> map_parser_to_local_lines;
   std::unordered_set<path> direct_includes;
+  std::vector<string> include_defines;
 
   optional<clang::Rewriter> rewriter;
   string rewrite_result;
+};
+
+// Canonical `#define` text from MacroInfo (same approach as
+// clang::MacroPPCallbacks::writeMacroDefinition).
+static string format_include_define(const clang::IdentifierInfo &identifier,
+                                    const clang::MacroInfo &macro,
+                                    clang::Preprocessor &preprocessor) {
+  string result = "#define ";
+  result += identifier.getName();
+  if (macro.isFunctionLike()) {
+    result += '(';
+    const llvm::ArrayRef<const clang::IdentifierInfo *> params = macro.params();
+    for (size_t param_i = 0; param_i < params.size(); param_i++) {
+      const clang::IdentifierInfo &param = *params[param_i];
+      const string_view param_name = param.getName();
+      result += param_name;
+      if (param_name == "__VA_ARGS__") {
+        result += "...";
+      }
+      if (param_i + 1 != params.size()) {
+        result += ',';
+      }
+    }
+    if (macro.isGNUVarargs()) {
+      result += "...";
+    }
+    result += ')';
+  }
+  if (!macro.tokens_empty()) {
+    result += ' ';
+    llvm::SmallString<128> spelling_buffer;
+    bool first = true;
+    for (const clang::Token &tok : macro.tokens()) {
+      if (!first && tok.hasLeadingSpace()) {
+        result += ' ';
+      }
+      result += preprocessor.getSpelling(tok, spelling_buffer);
+      first = false;
+    }
+  }
+  return result;
+}
+
+class IncludeDefineCallbacks : public clang::PPCallbacks {
+private:
+  LocalCodeState &state_;
+  clang::Preprocessor &preprocessor_;
+
+public:
+  IncludeDefineCallbacks(LocalCodeState &state,
+                         clang::Preprocessor &preprocessor)
+      : state_(state), preprocessor_(preprocessor) {}
+
+  void MacroDefined(const clang::Token &MacroNameTok,
+                    const clang::MacroDirective *MD) override {
+    const clang::IdentifierInfo *identifier = MacroNameTok.getIdentifierInfo();
+    if (!identifier ||
+        !state_.config.is_include_define(identifier->getName())) {
+      return;
+    }
+    const clang::MacroInfo *macro = MD->getMacroInfo();
+    if (!macro || macro->isBuiltinMacro()) {
+      return;
+    }
+    state_.include_defines.push_back(
+        format_include_define(*identifier, *macro, preprocessor_));
+  }
 };
 
 class ExtractPreprocessedLocalCodeAction
@@ -281,6 +352,7 @@ public:
   void ExecuteAction() override {
     clang::CompilerInstance &compiler = this->getCompilerInstance();
     clang::Preprocessor &pp = compiler.getPreprocessor();
+    pp.addPPCallbacks(std::make_unique<IncludeDefineCallbacks>(state_, pp));
 
     llvm::raw_string_ostream os(state_.raw_preprocessed);
     clang::PreprocessorOutputOptions opts;
@@ -559,8 +631,8 @@ public:
 
 // Prefer the longest matching prefix (e.g. BUILD_DIR over REPO_DIR).
 // Returns the normalized absolute FROM path and its replacement token.
-static optional<PathMap>
-find_best_path_map(const path &abs_path, span<const PathMap> path_maps) {
+static optional<PathMap> find_best_path_map(const path &abs_path,
+                                            span<const PathMap> path_maps) {
   const string abs_str = abs_path.string();
   optional<PathMap> best;
   size_t best_len = 0;
@@ -720,6 +792,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       fmt.fmt = toml::array_format::multiline;
       toml::value table;
       table["direct_includes"] = toml::value(direct_includes, fmt);
+      table["include_defines"] = toml::value(state.include_defines, fmt);
       table["source_language"] =
           clang::languageToString(state.input_kind.getLanguage());
       string toml_str = toml::format(table);
