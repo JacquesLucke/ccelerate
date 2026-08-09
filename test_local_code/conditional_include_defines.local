@@ -1,0 +1,9 @@
++++
+source_language = "C++"
+include_defines = [
+    "#define DEFINE_A 10",
+    "#define DEFINE_B 20",
+]
+direct_includes = [
+]
++++
