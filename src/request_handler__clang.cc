@@ -95,8 +95,13 @@ handle_command__clang_cc1(const ClientID &client_id,
     local_code_file.replace_extension("local");
 
     const vector<path> config_paths = ConfigDiscovery::get().config_paths();
-    extract_local_code_with_clang(
+    const ProcessResult extract_result = extract_local_code_with_clang(
         command.args, local_code_file, working_dir, "__", config_paths);
+    if (extract_result.exit_code() != 0) {
+      send_response_incomplete(
+          client_id, extract_result.stdout_data, extract_result.stderr_data);
+      return extract_result.exit_code_or_error();
+    }
     vector<string> compile_args = command.args;
     const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
     return run_process_stream_output_traced(
