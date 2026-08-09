@@ -93,6 +93,20 @@ handle_command__clang_cc1(const ClientID &client_id,
       get_clang_cc1_action_type(command.args);
   if (action_type_opt == ClangCC1ActionType::EmitObj) {
     const path obj_file = command.output_files[0];
+    if (ConfigDiscovery::get().get_latest().is_eager_obj(obj_file)) {
+      const path &clang_for_ccelerate_exe =
+          get_clang_for_ccelerate_executable();
+      return run_process_stream_output_traced(
+          ProcessArgs()
+              .arg(clang_for_ccelerate_exe)
+              .args({"compile_obj", "--"})
+              .args(command.args)
+              .working_dir(working_dir),
+          [&](string stdout_data, string stderr_data) {
+            send_response_incomplete(
+                client_id, std::move(stdout_data), std::move(stderr_data));
+          });
+    }
     path local_code_file = obj_file;
     local_code_file.replace_extension("local");
 
