@@ -216,6 +216,7 @@ public:
     const path src_dir = args.repo_dir / "test_local_code";
     const path stem = path(project_name_).stem();
     const path output_dir = args.test_out_dir / stem;
+    const path ccelerate_config = src_dir / "ccelerate_config.toml";
     std::filesystem::remove_all(output_dir);
     std::filesystem::create_directories(output_dir);
 
@@ -231,8 +232,12 @@ public:
     const path reference_path =
         src_dir / (stem.string() + ".local-reference.ii");
 
-    const ProcessResult extract_result = extract_local_code_with_clang(
-        parsed_args.commands[0].args, output_path, src_dir, "__");
+    const ProcessResult extract_result =
+        extract_local_code_with_clang(parsed_args.commands[0].args,
+                                      output_path,
+                                      src_dir,
+                                      "__",
+                                      span(&ccelerate_config, 1));
     ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
 
     ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;

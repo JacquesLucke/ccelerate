@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <poll.h>
 #include <reproc++/drain.hpp>
 #include <reproc++/reproc.hpp>
@@ -82,6 +83,9 @@ ProcessResult run_process(const ProcessArgs &args) {
 ExitCodeOrError run_process_stream_output(
     const ProcessArgs &args,
     function_ref<void(string stdout_data, string stderr_data)> on_output_fn) {
+
+  spdlog::info("Run Process: {}", fmt::join(args.data.args, " "));
+
   constexpr int read_end = 0;
   constexpr int write_end = 1;
 

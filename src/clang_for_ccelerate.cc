@@ -30,6 +30,7 @@
 #include <llvm/TargetParser/Host.h>
 
 #include "clang_for_ccelerate_io.hh"
+#include "config.hh"
 #include "error_code.hh"
 #include "get_current_executable_path.hh"
 #include "memory.hh"
@@ -51,6 +52,7 @@ struct Cmd_ExtractLocalCode {
   vector<string> clang_args;
   path local_code_path;
   string local_id = "_local";
+  vector<path> config_paths;
 };
 
 static int handle__parse_args(const Cmd_ParseArgs &args) {
@@ -250,6 +252,7 @@ static string_view trim_whitespace(const string_view str) {
 
 struct LocalCodeState {
   const Cmd_ExtractLocalCode &args;
+  const Config &config;
   llvm::BumpPtrAllocator alloc;
 
   string raw_preprocessed;
@@ -290,8 +293,6 @@ public:
     std::unordered_set<string_view> all_includes;
     int committed_kept_lines = 0;
 
-    auto config_header_is_local = [](const string_view &path) { return false; };
-
     const vector<string_view> lines = split_into_lines(state_.raw_preprocessed);
     for (size_t line_i = 0; line_i < lines.size(); line_i++) {
       const bool is_local = int(header_stack.size()) == local_depth;
@@ -305,7 +306,7 @@ public:
         const string_view file = line_marker->file;
         if (line_marker->is_start_of_new_file) {
           if (is_local) {
-            if (config_header_is_local(file)) {
+            if (state_.config.is_local_header(file)) {
               local_depth++;
             } else {
               direct_includes.push_back(file);
@@ -563,7 +564,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   llvm::InitializeAllAsmPrinters();
   llvm::InitializeAllAsmParsers();
 
-  LocalCodeState state{args};
+  Config config = Config::from_paths(args.config_paths);
+  LocalCodeState state{args, config};
 
   // Handle the preprocessing part.
   {
@@ -676,6 +678,13 @@ int clang_ops_main(const int argc, char **argv) {
   extract_local_code_cmd.add_option("--local-id",
                                     extract_local_code_args.local_id,
                                     "Suffix to use to make symbols unique");
+  // Vector options default to allow_extra_args, which makes --config eat the
+  // "--" separator and leave -cc1 as an unknown option.
+  extract_local_code_cmd
+      .add_option("--config",
+                  extract_local_code_args.config_paths,
+                  "Path to a ccelerate config .toml (repeatable)")
+      ->allow_extra_args(false);
   extract_local_code_cmd.add_option("passthrough",
                                     extract_local_code_args.clang_args,
                                     "Arguments passed to clang");

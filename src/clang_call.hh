@@ -19,6 +19,7 @@ ParseClangArgsResult parse_clang_args(span<const string> args,
 ProcessResult extract_local_code_with_clang(span<const string> cc1_args,
                                             const path &output_path,
                                             const path &working_dir,
-                                            string_view local_id);
+                                            string_view local_id,
+                                            span<const path> config_paths);
 
 } // namespace ccelerate

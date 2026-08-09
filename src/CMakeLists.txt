@@ -6,6 +6,7 @@ add_library(ccelerate_lib STATIC
   request_handler__cmake.cc
   request_handler__clang.cc
   run_process_traced.cc
+  config.cc
 )
 target_include_directories(ccelerate_lib PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -24,6 +25,8 @@ target_link_libraries(ccelerate_lib PUBLIC
   ${llvm_libs}
   ${clang_libs}
   Tracy::TracyClient
+  toml11::toml11
+  re2::re2
 )
 target_compile_options(ccelerate_lib PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:
@@ -66,6 +69,7 @@ add_ccelerate_wrapper(ccelerate_cmake CMake)
 
 add_executable(clang_for_ccelerate
   clang_for_ccelerate.cc
+  config.cc
 )
 target_link_libraries(clang_for_ccelerate PRIVATE
   fmt::fmt
@@ -76,6 +80,8 @@ target_link_libraries(clang_for_ccelerate PRIVATE
   ${llvm_libs}
   ${clang_libs}
   ctre::ctre
+  re2::re2
+  toml11::toml11
 )
 
 # LLVM is built with -fno-rtti; subclasses of Clang AST/Frontend types need the same.

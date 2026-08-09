@@ -1,0 +1,1 @@
+local_header_patterns = ["**simple_inline_header.hh"]

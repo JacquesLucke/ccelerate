@@ -13,6 +13,8 @@
     "spdlog",
     "llvm",
     "ctre",
+    "toml11",
+    "re2",
     {
       "name": "tracy",
       "features": ["on-demand"]
