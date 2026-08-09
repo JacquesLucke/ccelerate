@@ -258,6 +258,7 @@ struct LocalCodeState {
   const Config &config;
   llvm::BumpPtrAllocator alloc;
 
+  clang::InputKind input_kind;
   string raw_preprocessed;
   string code_for_parser;
   vector<string_view> local_code_lines;
@@ -591,6 +592,11 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       return 1;
     }
 
+    const auto &inputs = clang_instance.getFrontendOpts().Inputs;
+    if (!inputs.empty()) {
+      state.input_kind = inputs.front().getKind();
+    }
+
     ExtractPreprocessedLocalCodeAction action(state);
     success = clang_instance.ExecuteAction(action);
     if (!success) {
@@ -681,6 +687,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       fmt.fmt = toml::array_format::multiline;
       toml::value table;
       table["direct_includes"] = toml::value(direct_includes, fmt);
+      table["source_language"] =
+          clang::languageToString(state.input_kind.getLanguage());
       string toml_str = toml::format(table);
       fs << trim_whitespace(toml_str) << '\n';
     }

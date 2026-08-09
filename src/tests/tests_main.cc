@@ -230,9 +230,8 @@ public:
         std::get<clang_io::ParsedArgs>(parse_args_result);
     ASSERT_EQ(parsed_args.commands.size(), 1);
 
-    const path output_path = output_dir / (stem.string() + ".local.ii");
-    const path reference_path =
-        src_dir / (stem.string() + ".local-reference.ii");
+    const path output_path = output_dir / (stem.string() + ".local");
+    const path reference_path = src_dir / (stem.string() + ".local");
 
     const ProcessResult extract_result =
         extract_local_code_with_clang(parsed_args.commands[0].args,

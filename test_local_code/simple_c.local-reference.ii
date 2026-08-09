@@ -1,0 +1,11 @@
++++
+source_type = "C"
+direct_includes = [
+]
++++
+# 1 "simple_c.c"
+static int test__() {
+    return 10;
+}
+
+int main() { return test__(); }

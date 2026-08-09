@@ -1,4 +1,5 @@
 +++
+source_language = "C++"
 direct_includes = [
     "build/release/bin/extern/gcc-13-install/include/c++/13/vector",
 ]
