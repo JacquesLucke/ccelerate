@@ -1,0 +1,14 @@
++++
+source_language = "C++"
+include_defines = [
+    "#define DEFINE_A 1",
+    "#undef DEFINE_A",
+    "#define DEFINE_A 10",
+]
+direct_includes = [
+    {is_system_header = false, path = "<REPO_DIR>/test_local_code/after_redefine.hh"},
+]
++++
+# 6 "undef_include_define.cc"
+
+int main() { return value(); }

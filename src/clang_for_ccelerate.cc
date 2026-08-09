@@ -361,6 +361,20 @@ private:
   LocalCodeState &state_;
   clang::Preprocessor &preprocessor_;
 
+  bool location_is_in_local_code(clang::SourceLocation loc) const {
+    clang::SourceManager &sm = preprocessor_.getSourceManager();
+    const clang::SourceLocation spelling = sm.getSpellingLoc(loc);
+    if (sm.isWrittenInMainFile(spelling)) {
+      return true;
+    }
+    const clang::OptionalFileEntryRef file =
+        sm.getFileEntryRefForID(sm.getFileID(spelling));
+    if (!file) {
+      return false;
+    }
+    return state_.config.is_local_header(path(file->getName().str()));
+  }
+
 public:
   IncludeDefineCallbacks(LocalCodeState &state,
                          clang::Preprocessor &preprocessor)
@@ -373,12 +387,30 @@ public:
         !state_.config.is_include_define(identifier->getName())) {
       return;
     }
+    if (!this->location_is_in_local_code(MacroNameTok.getLocation())) {
+      return;
+    }
     const clang::MacroInfo *macro = MD->getMacroInfo();
     if (!macro || macro->isBuiltinMacro()) {
       return;
     }
     state_.include_defines.push_back(
         format_define_line(*identifier, *macro, preprocessor_));
+  }
+
+  void MacroUndefined(const clang::Token &MacroNameTok,
+                      const clang::MacroDefinition & /*MD*/,
+                      const clang::MacroDirective * /*Undef*/) override {
+    const clang::IdentifierInfo *identifier = MacroNameTok.getIdentifierInfo();
+    if (!identifier ||
+        !state_.config.is_include_define(identifier->getName())) {
+      return;
+    }
+    if (!this->location_is_in_local_code(MacroNameTok.getLocation())) {
+      return;
+    }
+    state_.include_defines.push_back(
+        fmt::format("#undef {}", identifier->getName().str()));
   }
 };
 
@@ -901,7 +933,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 struct CompileLocalCodeState {
   std::unordered_map<path, size_t> seen_direct_include_paths;
   vector<DirectInclude> ordered_direct_include_paths;
-  std::unordered_set<string> all_include_defines;
+  vector<string> all_include_defines;
   string merged_local_code;
   string language;
 
@@ -1052,7 +1084,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     }
     for (const string &define :
          toml::find_or_default<vector<string>>(data, "include_defines")) {
-      state.all_include_defines.insert(define);
+      state.all_include_defines.push_back(define);
     }
     state.language = toml::find_or_default<string>(data, "source_language");
 
