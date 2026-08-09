@@ -90,18 +90,15 @@ handle_command__clang_cc1(const ClientID &client_id,
   const optional<ClangCC1ActionType> action_type_opt =
       get_clang_cc1_action_type(command.args);
   if (action_type_opt == ClangCC1ActionType::EmitObj) {
-    const clang::driver::types::ID orig_input_type =
-        command.input_infos[0].type;
     const path obj_file = command.output_files[0];
+    path local_code_file = obj_file;
+    local_code_file.replace_extension("local");
 
-    const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
-    path local_code_file = command.input_infos[0].filename.value();
-    local_code_file.replace_extension(fmt::format(
-        "local.{}", clang::driver::types::getTypeTempSuffix(orig_input_type)));
     const vector<path> config_paths = ConfigDiscovery::get().config_paths();
     extract_local_code_with_clang(
         command.args, local_code_file, working_dir, "__", config_paths);
     vector<string> compile_args = command.args;
+    const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
     return run_process_stream_output_traced(
         ProcessArgs()
             .arg(clang_for_ccelerate_exe)

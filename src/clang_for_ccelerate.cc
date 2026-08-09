@@ -656,7 +656,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     {
       const auto path_for_frontmatter = [&](const path &include) -> string {
         if (!args.frontmatter_base) {
-          return include.string();
+          return include.lexically_normal().string();
         }
         const path abs_include =
             include.is_absolute()
