@@ -838,7 +838,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 }
 
 struct CompileLocalCodeState {
-  std::unordered_set<path> all_direct_include_paths;
+  std::unordered_set<path> seen_direct_include_paths;
+  vector<path> ordered_direct_include_paths;
   std::unordered_set<string> all_include_defines;
   string merged_local_code;
   string language;
@@ -928,7 +929,9 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     toml::value &data = data_opt.unwrap();
     for (const string &include :
          toml::find_or_default<vector<string>>(data, "direct_includes")) {
-      state.all_direct_include_paths.insert(path(include));
+      if (state.seen_direct_include_paths.insert(path(include)).second) {
+        state.ordered_direct_include_paths.push_back(path(include));
+      }
     }
     for (const string &define :
          toml::find_or_default<vector<string>>(data, "include_defines")) {
@@ -947,11 +950,10 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
   {
     string code_to_preprocess;
     for (const string_view define : state.all_include_defines) {
-      code_to_preprocess.append("#define ");
       code_to_preprocess.append(define);
       code_to_preprocess += '\n';
     }
-    for (const path &include : state.all_direct_include_paths) {
+    for (const path &include : state.ordered_direct_include_paths) {
       code_to_preprocess.append("#include <");
       code_to_preprocess.append(include.string());
       code_to_preprocess.append(">\n");
@@ -1017,8 +1019,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
                                               "combined_preprocessed_code"),
                         kind);
 
-    clang_instance.getFrontendOpts().OutputFile =
-        args.obj_output_path.string();
+    clang_instance.getFrontendOpts().OutputFile = args.obj_output_path.string();
 
     clang::EmitObjAction action;
     success = clang_instance.ExecuteAction(action);
