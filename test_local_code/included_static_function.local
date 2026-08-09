@@ -1,7 +1,7 @@
 +++
 source_language = "C++"
 direct_includes = [
-    "test_local_code/included_static_function.hh",
+    "<REPO_DIR>/test_local_code/included_static_function.hh",
 ]
 +++
 # 2 "included_static_function.cc"

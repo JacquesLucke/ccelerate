@@ -36,6 +36,7 @@
 #include "error_code.hh"
 #include "get_current_executable_path.hh"
 #include "memory.hh"
+#include "span.hh"
 #include "string.hh"
 
 namespace ccelerate {
@@ -55,7 +56,7 @@ struct Cmd_ExtractLocalCode {
   path local_code_path;
   string local_id = "__";
   vector<path> config_paths;
-  optional<path> frontmatter_base;
+  vector<PathMap> path_maps;
 };
 
 static int handle__parse_args(const Cmd_ParseArgs &args) {
@@ -556,6 +557,52 @@ public:
   }
 };
 
+// Prefer the longest matching prefix (e.g. BUILD_DIR over REPO_DIR).
+// Returns the normalized absolute FROM path and its replacement token.
+static optional<PathMap>
+find_best_path_map(const path &abs_path, span<const PathMap> path_maps) {
+  const string abs_str = abs_path.string();
+  optional<PathMap> best;
+  size_t best_len = 0;
+  for (const PathMap &mapping : path_maps) {
+    const path abs_from =
+        std::filesystem::absolute(mapping.path).lexically_normal();
+    const string from_str = abs_from.string();
+    if (!abs_str.starts_with(from_str)) {
+      continue;
+    }
+    if (abs_str.size() > from_str.size() && abs_str[from_str.size()] != '/') {
+      continue;
+    }
+    if (!best || from_str.size() > best_len) {
+      best = PathMap{abs_from, mapping.replacement};
+      best_len = from_str.size();
+    }
+  }
+  return best;
+}
+
+static string apply_path_maps(const path &include,
+                              span<const PathMap> path_maps) {
+  if (path_maps.empty()) {
+    return include.lexically_normal().string();
+  }
+  const path abs_include =
+      include.is_absolute()
+          ? include.lexically_normal()
+          : std::filesystem::absolute(include).lexically_normal();
+  const optional<PathMap> best = find_best_path_map(abs_include, path_maps);
+  if (!best) {
+    return abs_include.string();
+  }
+  const string abs_str = abs_include.string();
+  const string from_str = best->path.string();
+  if (abs_str.size() == from_str.size()) {
+    return best->replacement;
+  }
+  return best->replacement + abs_str.substr(from_str.size());
+}
+
 static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   // The driver job args start with "-cc1"; CompilerInvocation expects the
   // remaining cc1 options only (same as clang's cc1_main entry point).
@@ -663,27 +710,10 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     // Write frontmatter.
     fs << "+++\n";
     {
-      const auto path_for_frontmatter = [&](const path &include) -> string {
-        if (!args.frontmatter_base) {
-          return include.lexically_normal().string();
-        }
-        const path abs_include =
-            include.is_absolute()
-                ? include.lexically_normal()
-                : std::filesystem::absolute(include).lexically_normal();
-        const path abs_base = std::filesystem::absolute(*args.frontmatter_base)
-                                  .lexically_normal();
-        const path relative = abs_include.lexically_relative(abs_base);
-        if (relative.empty() || *relative.begin() == "..") {
-          return abs_include.string();
-        }
-        return relative.string();
-      };
-
       vector<string> direct_includes;
       direct_includes.reserve(state.direct_includes.size());
       for (const path &include : state.direct_includes) {
-        direct_includes.push_back(path_for_frontmatter(include));
+        direct_includes.push_back(apply_path_maps(include, args.path_maps));
       }
       std::sort(direct_includes.begin(), direct_includes.end());
       toml::array_format_info fmt;
@@ -731,12 +761,14 @@ int clang_ops_main(const int argc, char **argv) {
   extract_local_code_cmd.add_option("--local-id",
                                     extract_local_code_args.local_id,
                                     "Suffix to use to make symbols unique");
-  extract_local_code_cmd.add_option(
-      "--frontmatter-base",
-      extract_local_code_args.frontmatter_base,
-      "If set, paths in frontmatter are made relative to this directory");
   // Vector options default to allow_extra_args, which makes --config eat the
   // "--" separator and leave -cc1 as an unknown option.
+  vector<string> path_map_args;
+  extract_local_code_cmd
+      .add_option("--path-map",
+                  path_map_args,
+                  "Map FROM=TO for paths in frontmatter (repeatable)")
+      ->allow_extra_args(false);
   extract_local_code_cmd
       .add_option("--config",
                   extract_local_code_args.config_paths,
@@ -753,6 +785,16 @@ int clang_ops_main(const int argc, char **argv) {
   } else if (compile_obj_cmd) {
     return handle__compile_obj(compile_obj_args);
   } else if (extract_local_code_cmd) {
+    for (const string &map_arg : path_map_args) {
+      const size_t eq = map_arg.find('=');
+      if (eq == string::npos || eq == 0) {
+        fmt::println(
+            stderr, "Invalid --path-map '{}', expected FROM=TO", map_arg);
+        return 1;
+      }
+      extract_local_code_args.path_maps.push_back(
+          PathMap{path(map_arg.substr(0, eq)), map_arg.substr(eq + 1)});
+    }
     return handle__extract_local_code(extract_local_code_args);
   } else {
     fmt::println(stderr, "Unknown command: {}", parse_args_cmd.get_name());

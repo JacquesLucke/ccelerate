@@ -5,13 +5,21 @@
 #include <clang/Driver/Types.h>
 #include <msgpack.hpp>
 
+#include "filesystem.hh"
 #include "optional.hh"
 #include "string.hh"
 #include "vector.hh"
 
 MSGPACK_ADD_ENUM(clang::driver::types::ID);
 
-namespace ccelerate::clang_io {
+namespace ccelerate {
+
+struct PathMap {
+  std::filesystem::path path;
+  string replacement;
+};
+
+namespace clang_io {
 
 static const string magic = "VALID_RETURN_STRUCT";
 
@@ -37,4 +45,6 @@ struct ParsedArgs {
   MSGPACK_DEFINE(commands);
 };
 
-} // namespace ccelerate::clang_io
+} // namespace clang_io
+
+} // namespace ccelerate

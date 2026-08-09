@@ -233,13 +233,17 @@ public:
     const path output_path = output_dir / (stem.string() + ".local");
     const path reference_path = src_dir / (stem.string() + ".local");
 
+    const vector<PathMap> path_maps = {
+        {args.repo_dir, "<REPO_DIR>"},
+        {args.binary_dir, "<BUILD_DIR>"},
+    };
     const ProcessResult extract_result =
         extract_local_code_with_clang(parsed_args.commands[0].args,
                                       output_path,
                                       src_dir,
                                       "__",
                                       span(&ccelerate_config, 1),
-                                      args.repo_dir);
+                                      path_maps);
     ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
 
     ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;

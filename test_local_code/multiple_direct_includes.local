@@ -1,11 +1,11 @@
 +++
 source_language = "C++"
 direct_includes = [
-    "build/release/bin/extern/gcc-13-install/include/c++/13/cstdio",
-    "build/release/bin/extern/gcc-13-install/include/c++/13/iostream",
-    "build/release/bin/extern/gcc-13-install/include/c++/13/unordered_map",
-    "build/release/bin/extern/gcc-13-install/include/c++/13/unordered_set",
-    "build/release/bin/extern/gcc-13-install/include/c++/13/vector",
+    "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/cstdio",
+    "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/iostream",
+    "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/unordered_map",
+    "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/unordered_set",
+    "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/vector",
 ]
 +++
 # 8 "multiple_direct_includes.cc"
