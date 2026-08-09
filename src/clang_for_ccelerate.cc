@@ -272,10 +272,6 @@ struct DirectInclude {
   bool is_system_header = false;
 };
 
-struct IncludeInfo {
-  bool is_system_header = false;
-};
-
 struct LocalCodeState {
   const Cmd_ExtractLocalCode &args;
   const Config &config;
@@ -286,8 +282,9 @@ struct LocalCodeState {
   string code_for_parser;
   vector<string_view> local_code_lines;
   vector<int> map_parser_to_local_lines;
-  // Path -> was included as a system header (flag 3 on the line marker).
-  std::unordered_map<path, IncludeInfo> direct_includes;
+  // Include order needs to be preserved.
+  std::unordered_map<path, size_t> direct_include_index;
+  vector<DirectInclude> direct_includes;
   std::vector<string> include_defines;
 
   optional<clang::Rewriter> rewriter;
@@ -430,10 +427,16 @@ public:
             } else {
               if (file != "<built-in>") {
                 const path include_path(file);
-                auto [it, inserted] = state_.direct_includes.emplace(
-                    include_path, line_marker->is_system_header);
-                if (!inserted) {
-                  it->second.is_system_header |= line_marker->is_system_header;
+                const auto [it, inserted] = state_.direct_include_index.emplace(
+                    include_path, state_.direct_includes.size());
+                if (inserted) {
+                  state_.direct_includes.push_back(DirectInclude{
+                      .include_path = include_path,
+                      .is_system_header = line_marker->is_system_header,
+                  });
+                } else {
+                  state_.direct_includes[it->second].is_system_header |=
+                      line_marker->is_system_header;
                 }
               }
             }
@@ -838,24 +841,13 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     // Write frontmatter.
     fs << "+++\n";
     {
-      vector<DirectInclude> direct_includes;
-      direct_includes.reserve(state.direct_includes.size());
-      for (const auto &[include, info] : state.direct_includes) {
-        direct_includes.push_back(DirectInclude{
-            .include_path = path(apply_path_maps(include, args.path_maps)),
-            .is_system_header = info.is_system_header,
-        });
-      }
-      std::sort(direct_includes.begin(),
-                direct_includes.end(),
-                [](const DirectInclude &a, const DirectInclude &b) {
-                  return a.include_path < b.include_path;
-                });
       vector<toml::value> direct_include_values;
-      direct_include_values.reserve(direct_includes.size());
-      for (const DirectInclude &include : direct_includes) {
+      direct_include_values.reserve(state.direct_includes.size());
+      for (const DirectInclude &include : state.direct_includes) {
         toml::value entry;
-        entry["path"] = include.include_path.string();
+        entry["path"] =
+            path(apply_path_maps(include.include_path, args.path_maps))
+                .string();
         entry["is_system_header"] = include.is_system_header;
         direct_include_values.push_back(std::move(entry));
       }
