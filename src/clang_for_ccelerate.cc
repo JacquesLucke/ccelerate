@@ -330,6 +330,9 @@ public:
               fmt::format("# {} \"{}\"", line_marker->line_number, file));
           state_.local_code_lines.push_back(out_line_marker);
         }
+        state_.map_parser_to_local_lines.push_back(-1);
+        state_.code_for_parser += line;
+        state_.code_for_parser += '\n';
       } else {
         if (is_local) {
           state_.local_code_lines.push_back(line);
