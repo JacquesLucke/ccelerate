@@ -1,0 +1,28 @@
++++
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+]
++++
+# 1 "anonymous_union_rename.cc"
+namespace demo {
+static const int a__ = 0;
+int b = a__;
+int c = a__;
+
+static union {
+  void *p;
+  char s[8];
+} d__[2];
+char *const e__ = d__[0].s;
+char *f = e__;
+
+static union {
+  void *p;
+  char s[8];
+} g__[2];
+char *const h__ = g__[0].s;
+char *i = h__;
+}
+int main() { return 0; }
