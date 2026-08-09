@@ -1,0 +1,22 @@
++++
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+]
++++
+# 1 "using_base_ctor.cc"
+namespace {
+
+struct A__ {
+  explicit A__(int x) : v(x) {}
+  int v;
+};
+
+struct B__ : A__ {
+  using A__::A__;
+};
+
+}
+
+int main() { return B__(1).v; }
