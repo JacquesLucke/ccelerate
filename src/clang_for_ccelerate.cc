@@ -62,6 +62,12 @@ struct Cmd_ExtractLocalCode {
   vector<PathMap> path_maps;
 };
 
+struct Cmd_CompileLocalCode {
+  vector<string> clang_args;
+  vector<path> local_code_paths;
+  path obj_output_path;
+};
+
 static int handle__parse_args(const Cmd_ParseArgs &args) {
   const path self_path = get_current_executable_path();
   std::string clang_path = self_path.parent_path().parent_path() /
@@ -831,6 +837,199 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   return 0;
 }
 
+struct CompileLocalCodeState {
+  std::unordered_set<path> all_direct_include_paths;
+  std::unordered_set<string> all_include_defines;
+  string merged_local_code;
+  string language;
+
+  string preprocessed_headers;
+  string combined_preprocessed_code;
+};
+
+class PreprocessHeadersAction : public clang::PreprocessorFrontendAction {
+private:
+  CompileLocalCodeState &state_;
+
+public:
+  PreprocessHeadersAction(CompileLocalCodeState &state) : state_(state) {}
+
+  void ExecuteAction() override {
+    clang::CompilerInstance &compiler = this->getCompilerInstance();
+    clang::Preprocessor &pp = compiler.getPreprocessor();
+    llvm::raw_string_ostream os(state_.preprocessed_headers);
+    clang::PreprocessorOutputOptions opts;
+    opts.ShowCPP = true;
+    opts.ShowLineMarkers = true;
+    clang::DoPrintPreprocessedInput(pp, &os, opts);
+    os.flush();
+  }
+};
+
+static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
+  // The driver job args start with "-cc1"; CompilerInvocation expects the
+  // remaining cc1 options only (same as clang's cc1_main entry point).
+  vector<const char *> cc1_args;
+  cc1_args.reserve(args.clang_args.size());
+  for (const string &arg : args.clang_args) {
+    if (cc1_args.empty() && arg == "-cc1") {
+      continue;
+    }
+    cc1_args.push_back(arg.c_str());
+  }
+
+  llvm::InitializeAllTargets();
+  llvm::InitializeAllTargetMCs();
+  llvm::InitializeAllAsmPrinters();
+  llvm::InitializeAllAsmParsers();
+
+  CompileLocalCodeState state;
+
+  // Gather inputs.
+  for (const path &local_code_path : args.local_code_paths) {
+    std::ifstream fs(local_code_path);
+    if (!fs.is_open()) {
+      fmt::println(stderr,
+                   "Could not open local code file: {}",
+                   local_code_path.string());
+      return 1;
+    }
+    string fs_str((std::istreambuf_iterator<char>(fs)),
+                  std::istreambuf_iterator<char>());
+
+    constexpr string_view frontmatter_delim = "+++";
+    const size_t front_open = fs_str.find(frontmatter_delim);
+    if (front_open == string::npos) {
+      fmt::println(stderr,
+                   "Missing frontmatter in local code file: {}",
+                   local_code_path.string());
+      return 1;
+    }
+    size_t toml_start = front_open + frontmatter_delim.size();
+    if (toml_start < fs_str.size() && fs_str[toml_start] == '\n') {
+      ++toml_start;
+    }
+    const size_t front_close = fs_str.find(frontmatter_delim, toml_start);
+    if (front_close == string::npos) {
+      fmt::println(stderr,
+                   "Unterminated frontmatter in local code file: {}",
+                   local_code_path.string());
+      return 1;
+    }
+
+    string toml_str = fs_str.substr(toml_start, front_close - toml_start);
+    auto data_opt = toml::try_parse_str(std::move(toml_str));
+    if (data_opt.is_err()) {
+      fmt::println(stderr,
+                   "Failed to parse frontmatter TOML in local code file: {}",
+                   local_code_path.string());
+      return 1;
+    }
+    toml::value &data = data_opt.unwrap();
+    for (const string &include :
+         toml::find_or_default<vector<string>>(data, "direct_includes")) {
+      state.all_direct_include_paths.insert(path(include));
+    }
+    for (const string &define :
+         toml::find_or_default<vector<string>>(data, "include_defines")) {
+      state.all_include_defines.insert(define);
+    }
+    state.language = toml::find_or_default<string>(data, "source_language");
+
+    size_t code_start = front_close + frontmatter_delim.size();
+    if (code_start < fs_str.size() && fs_str[code_start] == '\n') {
+      ++code_start;
+    }
+    state.merged_local_code.append(fs_str, code_start);
+  }
+
+  // Preprocess headers.
+  {
+    string code_to_preprocess;
+    for (const string_view define : state.all_include_defines) {
+      code_to_preprocess.append("#define ");
+      code_to_preprocess.append(define);
+      code_to_preprocess += '\n';
+    }
+    for (const path &include : state.all_direct_include_paths) {
+      code_to_preprocess.append("#include <");
+      code_to_preprocess.append(include.string());
+      code_to_preprocess.append(">\n");
+    }
+
+    clang::CompilerInstance clang_instance;
+    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+        new clang::DiagnosticIDs());
+    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
+        new clang::DiagnosticOptions());
+    clang::TextDiagnosticBuffer *diags_buffer =
+        new clang::TextDiagnosticBuffer();
+    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
+
+    bool success = clang::CompilerInvocation::CreateFromArgs(
+        clang_instance.getInvocation(), cc1_args, diags);
+    clang_instance.createDiagnostics();
+    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    if (!success) {
+      return 1;
+    }
+    auto &inputs = clang_instance.getFrontendOpts().Inputs;
+    clang::InputKind kind = clang::InputKind(
+        state.language == "C++" ? clang::Language::CXX : clang::Language::C);
+    inputs.clear();
+    inputs.emplace_back(
+        llvm::MemoryBufferRef(code_to_preprocess, "core_to_preprocess"), kind);
+
+    PreprocessHeadersAction action(state);
+    success = clang_instance.ExecuteAction(action);
+    if (!success) {
+      return 1;
+    }
+  }
+  {
+    state.combined_preprocessed_code = state.preprocessed_headers;
+    state.combined_preprocessed_code += "\n\n";
+    state.combined_preprocessed_code += state.merged_local_code;
+
+    clang::CompilerInstance clang_instance;
+    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
+        new clang::DiagnosticIDs());
+    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
+        new clang::DiagnosticOptions());
+    clang::TextDiagnosticBuffer *diags_buffer =
+        new clang::TextDiagnosticBuffer();
+    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
+
+    bool success = clang::CompilerInvocation::CreateFromArgs(
+        clang_instance.getInvocation(), cc1_args, diags);
+    clang_instance.createDiagnostics();
+    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    if (!success) {
+      return 1;
+    }
+    auto &inputs = clang_instance.getFrontendOpts().Inputs;
+    clang::InputKind kind =
+        clang::InputKind(state.language == "C++" ? clang::Language::CXX
+                                                 : clang::Language::C)
+            .getPreprocessed();
+    inputs.clear();
+    inputs.emplace_back(llvm::MemoryBufferRef(state.combined_preprocessed_code,
+                                              "combined_preprocessed_code"),
+                        kind);
+
+    clang_instance.getFrontendOpts().OutputFile =
+        args.obj_output_path.string();
+
+    clang::EmitObjAction action;
+    success = clang_instance.ExecuteAction(action);
+    if (!success) {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
 int clang_ops_main(const int argc, char **argv) {
   CLI::App app{"clang_for_ccelerate"};
   app.description("A utility used by ccelerate to do clang specific things "
@@ -856,8 +1055,6 @@ int clang_ops_main(const int argc, char **argv) {
   extract_local_code_cmd.add_option("--local-id",
                                     extract_local_code_args.local_id,
                                     "Suffix to use to make symbols unique");
-  // Vector options default to allow_extra_args, which makes --config eat the
-  // "--" separator and leave -cc1 as an unknown option.
   vector<string> path_map_args;
   extract_local_code_cmd
       .add_option("--path-map",
@@ -871,6 +1068,20 @@ int clang_ops_main(const int argc, char **argv) {
       ->allow_extra_args(false);
   extract_local_code_cmd.add_option("passthrough",
                                     extract_local_code_args.clang_args,
+                                    "Arguments passed to clang");
+
+  CLI::App &compile_local_code_cmd = *app.add_subcommand("compile-local-code");
+  Cmd_CompileLocalCode compile_local_code_args;
+  compile_local_code_cmd.add_option("--input",
+                                    compile_local_code_args.local_code_paths,
+                                    "Path to local code (repeatable)");
+  compile_local_code_cmd
+      .add_option("--output",
+                  compile_local_code_args.obj_output_path,
+                  "Path to write the object file to")
+      ->required();
+  compile_local_code_cmd.add_option("passthrough",
+                                    compile_local_code_args.clang_args,
                                     "Arguments passed to clang");
 
   CLI11_PARSE(app, argc, argv);
@@ -891,6 +1102,8 @@ int clang_ops_main(const int argc, char **argv) {
           PathMap{path(map_arg.substr(0, eq)), map_arg.substr(eq + 1)});
     }
     return handle__extract_local_code(extract_local_code_args);
+  } else if (compile_local_code_cmd) {
+    return handle__compile_local_code(compile_local_code_args);
   } else {
     fmt::println(stderr, "Unknown command: {}", parse_args_cmd.get_name());
   }
