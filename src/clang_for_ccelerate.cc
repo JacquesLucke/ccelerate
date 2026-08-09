@@ -565,6 +565,26 @@ public:
         }
       }
     } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>(
+                       "deducedTemplateSpecTypeLoc")) {
+      const clang::DeducedTemplateSpecializationTypeLoc dtst =
+          type_loc
+              ->getAsAdjusted<clang::DeducedTemplateSpecializationTypeLoc>();
+      if (dtst.isNull()) {
+        return;
+      }
+      loc = dtst.getTemplateNameLoc();
+      const clang::TemplateName template_name =
+          dtst.getTypePtr()->getTemplateName();
+      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
+        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
+          named_decl = ctd->getTemplatedDecl();
+        } else if (const auto *tatd =
+                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
+          named_decl = tatd->getTemplatedDecl();
+        }
+      }
+    } else if (const clang::TypeLoc *type_loc =
                    result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
       const clang::TypedefTypeLoc typedef_tl =
           type_loc->getAsAdjusted<clang::TypedefTypeLoc>();
@@ -720,6 +740,9 @@ public:
         &renamer_);
     finder_.addMatcher(
         templateSpecializationTypeLoc().bind("templateSpecTypeLoc"), &renamer_);
+    finder_.addMatcher(typeLoc(loc(deducedTemplateSpecializationType()))
+                           .bind("deducedTemplateSpecTypeLoc"),
+                       &renamer_);
     finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
                            .bind("typedefTypeLoc"),
                        &renamer_);
