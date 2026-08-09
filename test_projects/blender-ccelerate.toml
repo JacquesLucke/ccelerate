@@ -36,12 +36,25 @@ include_defines = [
     "SUPPRESS_GENERIC_MATRIX_API",
     "VOLK_NAMESPACE",
     "VOLK_NO_DEVICE_PROTOTYPES",
+    "VOLK_NO_GLOBAL_PROTOTYPES",
+    "VOLK_IMPLEMENTATION",
     "VK_NO_PROTOTYPES",
     "VK_USE_PLATFORM_XLIB_KHR",
     "VK_USE_PLATFORM_WAYLAND_KHR",
     "VK_USE_PLATFORM_WIN32_KHR",
     "VK_USE_PLATFORM_METAL_EXT",
     "VMA_EXTERNAL_MEMORY_WIN32",
+    "VMA_IMPLEMENTATION",
+    "TINYGLTF_IMPLEMENTATION",
+    "TINYGLTF_NO_STB_IMAGE",
+    "TINYGLTF_NO_STB_IMAGE_WRITE",
+    "NANOSVG_IMPLEMENTATION",
+    "NANOSVG_ALL_COLOR_KEYWORDS",
+    "NANOSVGRAST_IMPLEMENTATION",
+    "XXH_IMPLEMENTATION",
+    "XXH_STATIC_LINKING_ONLY",
+    "PIPEWIRE_LIBRARY_IMPLEMENTATION",
+    "PULSEAUDIO_LIBRARY_IMPLEMENTATION",
     "NDEBUG",
     "Py_BUILD_CORE",
 ]
@@ -52,8 +65,9 @@ eager_obj_patterns = [
     "**/intern/gpu_shader_create_info.cc.o",
 ]
 pure_c_header_patterns = [
+    # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
+    "**/ffmpeg/include/**",
     "**/ffmpeg_compat.h",
-    "**/libavcodec/avcodec.h",
-    "**/libavutil/channel_layout.h",
-    "**/libavutil/log.h",
+    # Same for curve_fit_nd.
+    "**/curve_fit_nd.h",
 ]
