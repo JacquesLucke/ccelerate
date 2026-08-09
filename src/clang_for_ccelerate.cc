@@ -272,6 +272,8 @@ static string_view trim_whitespace(const string_view str) {
 struct DirectInclude {
   path include_path;
   bool is_system_header = false;
+  // Match pure_c_header_patterns: wrap with extern "C" when replaying into C++.
+  bool is_pure_c = false;
 };
 
 struct LocalCodeState {
@@ -470,14 +472,18 @@ public:
                 const path include_path(file);
                 const auto [it, inserted] = state_.direct_include_index.emplace(
                     include_path, state_.direct_includes.size());
+                const bool is_pure_c =
+                    state_.config.is_pure_c_header(include_path);
                 if (inserted) {
                   state_.direct_includes.push_back(DirectInclude{
                       .include_path = include_path,
                       .is_system_header = line_marker->is_system_header,
+                      .is_pure_c = is_pure_c,
                   });
                 } else {
                   state_.direct_includes[it->second].is_system_header |=
                       line_marker->is_system_header;
+                  state_.direct_includes[it->second].is_pure_c |= is_pure_c;
                 }
               }
             }
@@ -976,6 +982,9 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
             path(apply_path_maps(include.include_path, args.path_maps))
                 .string();
         entry["is_system_header"] = include.is_system_header;
+        if (include.is_pure_c) {
+          entry["is_pure_c"] = true;
+        }
         direct_include_values.push_back(std::move(entry));
       }
       toml::array_format_info fmt;
@@ -1051,19 +1060,21 @@ get_best_include_path_spelling(const path &include_path,
 
 static void add_direct_include(CompileLocalCodeState &state,
                                path include_path,
-                               bool is_system_header) {
+                               bool is_system_header,
+                               bool is_pure_c) {
   const auto [it, inserted] = state.seen_direct_include_paths.emplace(
       include_path, state.ordered_direct_include_paths.size());
   if (inserted) {
     state.ordered_direct_include_paths.push_back(DirectInclude{
         .include_path = std::move(include_path),
         .is_system_header = is_system_header,
+        .is_pure_c = is_pure_c,
     });
     return;
   }
-  state.ordered_direct_include_paths[it->second].is_system_header =
-      state.ordered_direct_include_paths[it->second].is_system_header ||
+  state.ordered_direct_include_paths[it->second].is_system_header |=
       is_system_header;
+  state.ordered_direct_include_paths[it->second].is_pure_c |= is_pure_c;
 }
 
 class PreprocessHeadersAction : public clang::PreprocessorFrontendAction {
@@ -1149,7 +1160,8 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
          toml::find_or_default<toml::array>(data, "direct_includes")) {
       add_direct_include(state,
                          path(toml::find<string>(entry, "path")),
-                         toml::find_or<bool>(entry, "is_system_header", false));
+                         toml::find_or<bool>(entry, "is_system_header", false),
+                         toml::find_or<bool>(entry, "is_pure_c", false));
     }
     for (const string &define :
          toml::find_or_default<vector<string>>(data, "include_defines")) {
@@ -1198,9 +1210,14 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     vector<string> system_wrapper_bodies;
     system_wrapper_bodies.reserve(state.ordered_direct_include_paths.size());
     size_t system_wrapper_i = 0;
+    const bool wrap_pure_c = state.language == "C++";
     for (const DirectInclude &include : state.ordered_direct_include_paths) {
       const string spelling =
           get_best_include_path_spelling(include.include_path, search_prefixes);
+      const bool needs_extern_c = wrap_pure_c && include.is_pure_c;
+      if (needs_extern_c) {
+        code_to_preprocess.append("extern \"C\" {\n");
+      }
       if (include.is_system_header) {
         const string wrapper_path = fmt::format(
             "/__ccelerate__/system_include_{}.h", system_wrapper_i++);
@@ -1213,6 +1230,9 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
         code_to_preprocess.append("#include <");
         code_to_preprocess.append(spelling);
         code_to_preprocess.append(">\n");
+      }
+      if (needs_extern_c) {
+        code_to_preprocess.append("}\n");
       }
     }
 

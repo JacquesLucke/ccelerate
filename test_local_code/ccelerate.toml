@@ -1,2 +1,3 @@
 local_header_patterns = ["**simple_inline_header.hh"]
+pure_c_header_patterns = ["**pure_c_api.h"]
 include_defines = ["DEFINE_A", "DEFINE_B"]

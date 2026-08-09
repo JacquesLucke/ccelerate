@@ -1,0 +1,16 @@
++++
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+    {is_pure_c = true, is_system_header = false, path = "<REPO_DIR>/test_local_code/pure_c_api.h"},
+]
++++
+# 1 "pure_c_header.cc"
+extern "C" {
+# 3 "pure_c_header.cc"
+}
+
+extern "C" int pure_c_fn(void) { return 0; }
+
+int main() { return pure_c_fn(); }

@@ -51,3 +51,9 @@ eager_obj_patterns = [
     "**/gpu_shader_depencency.cc",
     "**/intern/gpu_shader_create_info.cc.o",
 ]
+pure_c_header_patterns = [
+    "**/ffmpeg_compat.h",
+    "**/libavcodec/avcodec.h",
+    "**/libavutil/channel_layout.h",
+    "**/libavutil/log.h",
+]

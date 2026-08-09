@@ -18,6 +18,7 @@ namespace ccelerate {
 class ConfigFile {
 public:
   vector<string> local_header_patterns;
+  vector<string> pure_c_header_patterns;
   vector<string> include_defines;
   vector<string> eager_obj_patterns;
 
@@ -29,6 +30,7 @@ class Config {
 private:
   vector<ConfigFile> config_files_;
   unique_ptr<re2::RE2> is_local_header_;
+  unique_ptr<re2::RE2> is_pure_c_header_;
   unique_ptr<re2::RE2> is_include_define_;
   unique_ptr<re2::RE2> is_eager_obj_;
 
@@ -37,6 +39,7 @@ public:
   static Config from_config_files(span<const ConfigFile> config_files);
 
   bool is_local_header(const path &path) const;
+  bool is_pure_c_header(const path &path) const;
   bool is_include_define(string_view define) const;
   bool is_eager_obj(const path &path) const;
 };
