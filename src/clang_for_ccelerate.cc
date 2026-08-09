@@ -18,6 +18,7 @@
 #include <clang/Frontend/TextDiagnosticBuffer.h>
 #include <clang/Frontend/TextDiagnosticPrinter.h>
 #include <clang/FrontendTool/Utils.h>
+#include <clang/Lex/HeaderSearchOptions.h>
 #include <clang/Lex/Lexer.h>
 #include <clang/Lex/MacroInfo.h>
 #include <clang/Lex/PPCallbacks.h>
@@ -886,6 +887,45 @@ struct CompileLocalCodeState {
   string combined_preprocessed_code;
 };
 
+static vector<path>
+get_header_search_paths(const clang::HeaderSearchOptions &opts) {
+  vector<path> prefixes;
+  prefixes.reserve(opts.UserEntries.size() + 1);
+  for (const clang::HeaderSearchOptions::Entry &entry : opts.UserEntries) {
+    prefixes.emplace_back(entry.Path);
+  }
+  if (!opts.ResourceDir.empty()) {
+    prefixes.push_back(path(opts.ResourceDir) / "include");
+  }
+  return prefixes;
+}
+
+// Try to find the best include path based on the search prefixes. This is
+// important so that #include_next works properly (which doesn't work when
+// including everything with absolute paths).
+static string
+get_best_include_path_spelling(const path &include_path,
+                               const vector<path> &search_prefixes) {
+  optional<string> best;
+  size_t best_prefix_native_size = 0;
+  for (const path &prefix : search_prefixes) {
+    const path relative = include_path.lexically_relative(prefix);
+    if (relative.empty() || relative == ".") {
+      continue;
+    }
+    const auto first = relative.begin();
+    if (first != relative.end() && *first == "..") {
+      continue;
+    }
+    const size_t prefix_native_size = prefix.native().size();
+    if (!best || prefix_native_size > best_prefix_native_size) {
+      best_prefix_native_size = prefix_native_size;
+      best = relative.generic_string();
+    }
+  }
+  return best.value_or(include_path.string());
+}
+
 static void add_direct_include(CompileLocalCodeState &state,
                                path include_path,
                                bool is_system_header) {
@@ -1003,34 +1043,6 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
 
   // Preprocess headers.
   {
-    string code_to_preprocess;
-    for (const string_view define : state.all_include_defines) {
-      code_to_preprocess.append(define);
-      code_to_preprocess += '\n';
-    }
-
-    // Handle system includes in a special way because they have other rules for
-    // warnings etc.
-    vector<string> system_wrapper_bodies;
-    system_wrapper_bodies.reserve(state.ordered_direct_include_paths.size());
-    size_t system_wrapper_i = 0;
-    for (const DirectInclude &include : state.ordered_direct_include_paths) {
-      if (include.is_system_header) {
-        const string wrapper_path = fmt::format(
-            "/__ccelerate__/system_include_{}.h", system_wrapper_i++);
-        system_wrapper_bodies.push_back(
-            fmt::format("#pragma GCC system_header\n#include <{}>\n",
-                        include.include_path.string()));
-        code_to_preprocess.append("#include <");
-        code_to_preprocess.append(wrapper_path);
-        code_to_preprocess.append(">\n");
-      } else {
-        code_to_preprocess.append("#include <");
-        code_to_preprocess.append(include.include_path.string());
-        code_to_preprocess.append(">\n");
-      }
-    }
-
     clang::CompilerInstance clang_instance;
     clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
         new clang::DiagnosticIDs());
@@ -1046,6 +1058,39 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
     if (!success) {
       return 1;
+    }
+
+    const vector<path> search_prefixes =
+        get_header_search_paths(clang_instance.getHeaderSearchOpts());
+
+    string code_to_preprocess;
+    for (const string_view define : state.all_include_defines) {
+      code_to_preprocess.append(define);
+      code_to_preprocess += '\n';
+    }
+
+    // Handle system includes in a special way because they have other rules for
+    // warnings etc. Use search-path-relative spellings so #include_next in
+    // resource headers (e.g. limits.h) still works.
+    vector<string> system_wrapper_bodies;
+    system_wrapper_bodies.reserve(state.ordered_direct_include_paths.size());
+    size_t system_wrapper_i = 0;
+    for (const DirectInclude &include : state.ordered_direct_include_paths) {
+      const string spelling =
+          get_best_include_path_spelling(include.include_path, search_prefixes);
+      if (include.is_system_header) {
+        const string wrapper_path = fmt::format(
+            "/__ccelerate__/system_include_{}.h", system_wrapper_i++);
+        system_wrapper_bodies.push_back(fmt::format(
+            "#pragma GCC system_header\n#include <{}>\n", spelling));
+        code_to_preprocess.append("#include <");
+        code_to_preprocess.append(wrapper_path);
+        code_to_preprocess.append(">\n");
+      } else {
+        code_to_preprocess.append("#include <");
+        code_to_preprocess.append(spelling);
+        code_to_preprocess.append(">\n");
+      }
     }
 
     // Add wrappers for system includes.
