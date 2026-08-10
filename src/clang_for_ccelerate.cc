@@ -634,7 +634,6 @@ public:
     state_.rewriter->InsertTextAfterToken(loc, state_.args.local_id);
   }
 
-private:
   // Individual function locality, ignoring other overloads of the same name.
   bool function_alone_should_be_localized(const clang::FunctionDecl &decl) {
     if (decl.isExternallyVisible()) {
@@ -803,6 +802,15 @@ public:
   void HandleTranslationUnit(clang::ASTContext &context) override {
     finder_.matchAST(context);
   }
+
+  bool shouldSkipFunctionBody(clang::Decl *decl) override {
+    // Having the separate true/false branches helps when checking code
+    // coverage.
+    if (renamer_.location_is_in_local_code(decl->getLocation())) {
+      return false;
+    }
+    return true;
+  }
 };
 
 class RewriteLocalCodeAction : public clang::ASTFrontendAction {
@@ -815,6 +823,7 @@ public:
   unique_ptr<clang::ASTConsumer>
   CreateASTConsumer(clang::CompilerInstance &compiler,
                     const llvm::StringRef file) override {
+    compiler.getFrontendOpts().SkipFunctionBodies = true;
     state_.rewriter.emplace(compiler.getSourceManager(),
                             compiler.getLangOpts());
     return std::make_unique<LocalCodeASTConsumer>(state_);
