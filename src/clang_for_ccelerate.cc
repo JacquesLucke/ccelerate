@@ -549,6 +549,25 @@ public:
                    result.Nodes.getNodeAs<clang::DeclRefExpr>("declRef")) {
       loc = ref->getLocation();
       named_decl = ref->getDecl();
+    } else if (const clang::UnresolvedLookupExpr *ule =
+                   result.Nodes.getNodeAs<clang::UnresolvedLookupExpr>(
+                       "unresolvedLookup")) {
+      loc = ule->getNameLoc();
+      for (clang::NamedDecl *candidate : ule->decls()) {
+        const clang::FunctionDecl *fd = nullptr;
+        if (const auto *f = llvm::dyn_cast<clang::FunctionDecl>(candidate)) {
+          fd = f;
+        } else if (const auto *ftd =
+                       llvm::dyn_cast<clang::FunctionTemplateDecl>(candidate)) {
+          fd = ftd->getTemplatedDecl();
+        } else {
+          return;
+        }
+        if (!this->function_overload_set_should_be_localized(*fd)) {
+          return;
+        }
+        named_decl = fd;
+      }
     } else if (const clang::TypeLoc *type_loc =
                    result.Nodes.getNodeAs<clang::TypeLoc>("tagTypeLoc")) {
       const clang::TagTypeLoc tag_tl =
@@ -782,6 +801,8 @@ public:
     finder_.addMatcher(enum_const_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(typedef_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(declRefExpr(to(func_matcher)).bind("declRef"),
+                       &renamer_);
+    finder_.addMatcher(unresolvedLookupExpr().bind("unresolvedLookup"),
                        &renamer_);
     finder_.addMatcher(declRefExpr(to(var_matcher)).bind("declRef"), &renamer_);
     finder_.addMatcher(declRefExpr(to(enum_const_matcher)).bind("declRef"),

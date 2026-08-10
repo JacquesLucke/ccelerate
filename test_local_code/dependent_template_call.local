@@ -1,0 +1,19 @@
++++
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+]
++++
+# 1 "dependent_template_call.cc"
+namespace {
+
+template <typename T> T f__(T x) { return x; }
+
+template <typename T> struct S__ {
+  T operator()(T x) const { return f__(x); }
+};
+
+}
+
+int main() { return 0; }
