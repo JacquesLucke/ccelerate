@@ -3,6 +3,7 @@ add_subdirectory(base)
 add_library(ccelerate_lib STATIC
   ccelerate_server.cc
   request_handler.cc
+  request_handler__ar.cc
   request_handler__cmake.cc
   request_handler__clang.cc
   run_process_traced.cc

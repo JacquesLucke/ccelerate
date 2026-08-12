@@ -75,7 +75,7 @@ void handle_request(const Request &request) {
       break;
     }
     case wrap_io::Program::Ar: {
-      handle_request__eager(request);
+      handle_request__ar(request);
       break;
     }
     case wrap_io::Program::CMake:

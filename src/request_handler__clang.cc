@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "array.hh"
+#include "ccelerate_extensions.hh"
 #include "clang_call.hh"
 #include "clang_for_ccelerate_io.hh"
 #include "config.hh"
@@ -108,7 +109,7 @@ handle_command__clang_cc1(const ClientID &client_id,
           });
     }
     path local_code_file = obj_file;
-    local_code_file.replace_extension("local");
+    local_code_file.replace_extension(extensions::object);
 
     const vector<path> config_paths = ConfigDiscovery::get().config_paths();
     const ProcessResult extract_result = extract_local_code_with_clang(

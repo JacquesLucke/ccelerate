@@ -14,3 +14,12 @@ real	8m13.056s
 user	0m19.713s
 sys	    0m23.452s
 ```
+
+## 2026-08-12
+
+```
+ninja install
+real	37m56.931s
+user	0m37.826s
+sys	    0m51.759s
+```
