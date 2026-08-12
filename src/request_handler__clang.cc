@@ -148,6 +148,20 @@ handle_command__clang_cc1(const ClientID &client_id,
   }
 }
 
+static ExitCodeOrError handle_command__link(const ClientID &client_id,
+                                            const clang_io::Command &command,
+                                            const string &working_dir) {
+  return run_process_stream_output_traced(
+      ProcessArgs()
+          .arg(command.executable)
+          .args(command.args)
+          .working_dir(working_dir),
+      [&](string stdout_data, string stderr_data) {
+        send_response_incomplete(
+            client_id, std::move(stdout_data), std::move(stderr_data));
+      });
+}
+
 static bool is_clang_cc1_command(const string_view &executable,
                                  const span<const string> &args) {
   if (executable.ends_with("clang++") || executable.ends_with("clang")) {
@@ -217,6 +231,10 @@ void handle_request__clang(const Request &request) {
     if (is_clang_cc1_command(command.executable, command.args)) {
       exit_or_error = handle_command__clang_cc1(
           request.client_id, command, request.working_dir);
+    } else if (command.kind ==
+               clang::driver::Action::ActionClass::LinkJobClass) {
+      exit_or_error =
+          handle_command__link(request.client_id, command, request.working_dir);
     } else {
       exit_or_error = run_process_stream_output_traced(
           ProcessArgs()
