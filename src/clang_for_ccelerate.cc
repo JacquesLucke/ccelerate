@@ -124,6 +124,7 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
   clang_io::ParsedArgs parsed_args;
   for (auto &job : jobs) {
     clang_io::Command command;
+    command.kind = job.getSource().getKind();
     command.executable = job.getExecutable();
     for (const auto &arg : job.getArguments()) {
       command.args.push_back(arg);

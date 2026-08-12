@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <clang/Driver/Action.h>
 #include <clang/Driver/Types.h>
 #include <msgpack.hpp>
 
@@ -11,6 +12,7 @@
 #include "vector.hh"
 
 MSGPACK_ADD_ENUM(clang::driver::types::ID);
+MSGPACK_ADD_ENUM(clang::driver::Action::ActionClass);
 
 namespace ccelerate {
 
@@ -32,11 +34,12 @@ struct InputInfo {
 
 struct Command {
   string executable;
+  clang::driver::Action::ActionClass kind;
   vector<string> args;
   vector<InputInfo> input_infos;
   vector<string> output_files;
 
-  MSGPACK_DEFINE(executable, args, input_infos, output_files);
+  MSGPACK_DEFINE(executable, kind, args, input_infos, output_files);
 };
 
 struct ParsedArgs {
