@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 #include <fmt/format.h>
+#include <fstream>
 #include <xxhash.h>
 
 #include "array.hh"
@@ -9,6 +10,7 @@
 #include "clang_for_ccelerate_io.hh"
 #include "config.hh"
 #include "get_current_executable_path.hh"
+#include "local_code_frontmatter.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
 
@@ -124,28 +126,24 @@ handle_command__clang_cc1(const ClientID &client_id,
     const string local_id = path_to_local_id(obj_file);
     const ProcessResult extract_result = extract_local_code_with_clang(
         command.args, local_code_file, working_dir, local_id, config_paths);
+    send_response_incomplete(
+        client_id, extract_result.stdout_data, extract_result.stderr_data);
     if (extract_result.exit_code() != 0) {
-      send_response_incomplete(
-          client_id, extract_result.stdout_data, extract_result.stderr_data);
       return extract_result.exit_code_or_error();
     }
-    vector<string> compile_args = command.args;
-    const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
-    return run_process_stream_output_traced(
-        ProcessArgs()
-            .arg(clang_for_ccelerate_exe)
-            .args({"compile-local-code",
-                   "--input",
-                   local_code_file,
-                   "--output",
-                   obj_file,
-                   "--"})
-            .args(compile_args)
-            .working_dir(working_dir),
-        [&](string stdout_data, string stderr_data) {
-          send_response_incomplete(
-              client_id, std::move(stdout_data), std::move(stderr_data));
-        });
+    // Output a dummy .o file so because the caller might expect that. Actual
+    // compilation will happen later.
+    path obj_path = obj_file;
+    if (obj_path.is_relative()) {
+      obj_path = path(working_dir) / obj_path;
+    }
+    {
+      std::ofstream placeholder(obj_path, std::ios::binary | std::ios::trunc);
+      if (!placeholder) {
+        return 1;
+      }
+    }
+    return 0;
   } else {
     return run_process_stream_output_traced(
         ProcessArgs()
@@ -159,9 +157,10 @@ handle_command__clang_cc1(const ClientID &client_id,
   }
 }
 
-static vector<string> rewrite_link_args(const string &working_dir,
-                                        const span<const string> old_args) {
-  vector<string> new_args;
+static ExitCodeOrError rewrite_link_args(const ClientID &client_id,
+                                         const string &working_dir,
+                                         const span<const string> old_args,
+                                         vector<string> &new_args) {
   size_t old_arg_i = 0;
   while (old_arg_i < old_args.size()) {
     const string &arg = old_args[old_arg_i];
@@ -185,17 +184,62 @@ static vector<string> rewrite_link_args(const string &working_dir,
       continue;
     }
 
+    if (arg.ends_with(".o")) {
+      path local_obj_path = arg;
+      if (local_obj_path.is_relative()) {
+        local_obj_path = path(working_dir) / local_obj_path;
+      }
+      local_obj_path = local_obj_path.lexically_normal();
+      local_obj_path.replace_extension(extensions::object);
+      if (std::filesystem::is_regular_file(local_obj_path)) {
+        std::optional<LocalCodeFrontmatter> frontmatter_opt =
+            LocalCodeFrontmatter::from_path(local_obj_path);
+        if (!frontmatter_opt || !frontmatter_opt->cc1_args) {
+          return 1;
+        }
+        std::string tmp_file = std::tmpnam(nullptr);
+        const path &clang_for_ccelerate_exe =
+            get_clang_for_ccelerate_executable();
+        ExitCodeOrError result = run_process_stream_output_traced(
+            ProcessArgs()
+                .arg(clang_for_ccelerate_exe)
+                .args({"compile-local-code",
+                       "--input",
+                       local_obj_path,
+                       "--output",
+                       tmp_file,
+                       "--"})
+                .args(*frontmatter_opt->cc1_args)
+                .working_dir(working_dir),
+            [&](string stdout_data, string stderr_data) {
+              send_response_incomplete(
+                  client_id, std::move(stdout_data), std::move(stderr_data));
+            });
+        if (result.exit_code() != 0) {
+          return result;
+        }
+        new_args.push_back(std::move(tmp_file));
+        old_arg_i++;
+        continue;
+      }
+    }
+
     // Can rewrite arguments in the future.
     new_args.push_back(arg);
     old_arg_i++;
   }
-  return new_args;
+  return 0;
 }
 
 static ExitCodeOrError handle_command__link(const ClientID &client_id,
                                             const clang_io::Command &command,
                                             const string &working_dir) {
-  vector<string> link_args = rewrite_link_args(working_dir, command.args);
+  vector<string> link_args;
+  ExitCodeOrError rewrite_result =
+      rewrite_link_args(client_id, working_dir, command.args, link_args);
+  if (rewrite_result.exit_code() != 0) {
+    return rewrite_result;
+  }
   return run_process_stream_output_traced(
       ProcessArgs()
           .arg(command.executable)
