@@ -1025,6 +1025,11 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       table["include_defines"] = toml::value(state.include_defines, fmt);
       table["source_language"] =
           clang::languageToString(state.input_kind.getLanguage());
+      if (args.path_maps.empty()) {
+        // Can't properly apply path maps here, so skip it. Otherwise local-code
+        // tests are not easily reproducible.
+        table["cc1_args"] = toml::value(cc1_args, fmt);
+      }
       string toml_str = toml::format(table);
       fs << trim_whitespace(toml_str) << '\n';
     }
