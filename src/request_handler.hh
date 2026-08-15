@@ -36,4 +36,14 @@ void send_response_final(const ClientID &client_id,
                          int exit_code);
 void send_response_error(const ClientID &client_id, string_view message);
 
+struct BuildLocalObjectsResult {
+  vector<path> paths;
+  bool success = false;
+};
+BuildLocalObjectsResult
+build_local_objects(const ClientID &client_id,
+                    const span<const path> local_obj_files);
+optional<path> local_code_path_of_obj_if_exists(const path cwd,
+                                                const path &obj_file);
+
 } // namespace ccelerate

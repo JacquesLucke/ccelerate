@@ -62,6 +62,67 @@ cc1_args_to_compatibility_key(const span<const string> old_args) {
   return key;
 }
 
+optional<path> local_code_path_of_obj_if_exists(const path cwd,
+                                                const path &obj_file) {
+  if (obj_file.extension() != ".o") {
+    return nullopt;
+  }
+  path local_obj_path = (cwd / obj_file).lexically_normal();
+  local_obj_path.replace_extension(extensions::object);
+  if (std::filesystem::is_regular_file(local_obj_path)) {
+    return local_obj_path;
+  }
+  return nullopt;
+}
+
+BuildLocalObjectsResult
+build_local_objects(const ClientID &client_id,
+                    const span<const path> local_obj_files) {
+  BuildLocalObjectsResult result;
+
+  std::unordered_map<CompatibilityKey, vector<path>> compatibility_map;
+  for (const path &local_obj_path : local_obj_files) {
+    std::optional<LocalCodeFrontmatter> frontmatter_opt =
+        LocalCodeFrontmatter::from_path(local_obj_path);
+    if (!frontmatter_opt) {
+      return result;
+    }
+    CompatibilityKey key =
+        cc1_args_to_compatibility_key(*frontmatter_opt->cc1_args);
+    compatibility_map[std::move(key)].push_back(local_obj_path);
+  }
+
+  for (const auto &[key, paths] : compatibility_map) {
+    const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
+
+    ProcessArgs args;
+    args.arg(clang_for_ccelerate_exe).arg("compile-local-code");
+    for (const path &p : paths) {
+      args.arg("--input").arg(p);
+    }
+
+    std::string out_path = std::tmpnam(nullptr);
+    args.arg("--output").arg(out_path);
+    args.arg("--");
+    args.args(key.cc1_args);
+
+    ExitCodeOrError compile_result = run_process_stream_output_traced(
+        args, [&](string stdout_data, string stderr_data) {
+          send_response_incomplete(
+              client_id, std::move(stdout_data), std::move(stderr_data));
+        });
+    if (compile_result.exit_code() != 0) {
+      send_response_incomplete(
+          client_id, "", compile_result.error_message().value_or(""));
+      return result;
+    }
+
+    result.paths.push_back(out_path);
+  }
+  result.success = true;
+  return result;
+}
+
 void handle_request__ar(const Request &request) {
   if (request.args.size() <= 1) {
     handle_request__eager(request);
@@ -77,69 +138,26 @@ void handle_request__ar(const Request &request) {
     vector<path> local_obj_paths;
     vector<path> other_paths;
     for (size_t i = 2; i < request.args.size(); i++) {
-      const path src_path =
-          std::filesystem::absolute(request.working_dir / request.args[i])
-              .lexically_normal();
-      if (src_path.extension() == ".o") {
-        path local_obj_path = src_path;
-        local_obj_path.replace_extension(extensions::object);
-        if (std::filesystem::is_regular_file(local_obj_path)) {
-          local_obj_paths.push_back(local_obj_path);
-        }
-        continue;
+      if (const optional<path> local_obj_path =
+              local_code_path_of_obj_if_exists(request.working_dir,
+                                               request.args[i])) {
+        local_obj_paths.push_back(*local_obj_path);
+      } else {
+        other_paths.push_back(request.args[i]);
       }
-      other_paths.push_back(src_path);
     }
 
-    std::unordered_map<CompatibilityKey, vector<path>> compatibility_map;
-    for (const path &local_obj_path : local_obj_paths) {
-      std::optional<LocalCodeFrontmatter> frontmatter_opt =
-          LocalCodeFrontmatter::from_path(local_obj_path);
-      if (!frontmatter_opt) {
-        // TODO: Error handling.
-        continue;
-      }
-      CompatibilityKey key =
-          cc1_args_to_compatibility_key(*frontmatter_opt->cc1_args);
-      compatibility_map[std::move(key)].push_back(local_obj_path);
-    }
-
-    vector<path> local_compiled_obj_files;
-    for (const auto &[key, paths] : compatibility_map) {
-      const path &clang_for_ccelerate_exe =
-          get_clang_for_ccelerate_executable();
-
-      ProcessArgs args;
-      args.arg(clang_for_ccelerate_exe).arg("compile-local-code");
-      for (const path &p : paths) {
-        args.arg("--input").arg(p);
-      }
-
-      std::string out_path = std::tmpnam(nullptr);
-      args.arg("--output").arg(out_path);
-      args.arg("--");
-      args.args(key.cc1_args);
-
-      ExitCodeOrError result = run_process_stream_output_traced(
-          args, [&](string stdout_data, string stderr_data) {
-            send_response_incomplete(request.client_id,
-                                     std::move(stdout_data),
-                                     std::move(stderr_data));
-          });
-      if (result.exit_code() != 0) {
-        send_response_final(request.client_id,
-                            "",
-                            result.error_message().value_or(""),
-                            result.exit_code().value_or(1));
-        return;
-      }
-      local_compiled_obj_files.push_back(out_path);
+    BuildLocalObjectsResult build_result =
+        build_local_objects(request.client_id, local_obj_paths);
+    if (!build_result.success) {
+      send_response_final(request.client_id, "", "", 1);
+      return;
     }
 
     vector<string> final_ar_args;
     final_ar_args.push_back("qc");
     final_ar_args.push_back(archive_file);
-    for (const path &p : local_compiled_obj_files) {
+    for (const path &p : build_result.paths) {
       final_ar_args.push_back(p);
     }
     for (const path &p : other_paths) {
