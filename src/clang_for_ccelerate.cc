@@ -1196,9 +1196,12 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
       state.all_include_defines.push_back(define);
     }
     state.language = frontmatter.source_language;
-    state.merged_local_code.append("#pragma GCC diagnostics push\n");
+    // Isolate diagnostics per file.
+    state.merged_local_code.append("#pragma GCC diagnostic push\n");
+    state.merged_local_code.append("#pragma clang diagnostic push\n");
     state.merged_local_code.append(code_str);
-    state.merged_local_code.append("#pragma GCC diagnostics pop\n");
+    state.merged_local_code.append("#pragma clang diagnostic pop\n");
+    state.merged_local_code.append("#pragma GCC diagnostic pop\n");
   }
 
   // Preprocess headers.
