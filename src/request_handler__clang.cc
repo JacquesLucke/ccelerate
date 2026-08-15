@@ -149,13 +149,47 @@ handle_command__clang_cc1(const ClientID &client_id,
   }
 }
 
+static vector<string> rewrite_link_args(const string &working_dir,
+                                        const span<const string> old_args) {
+  vector<string> new_args;
+  size_t old_arg_i = 0;
+  while (old_arg_i < old_args.size()) {
+    const string &arg = old_args[old_arg_i];
+
+    // Handle parameters with arguments.
+    if (arg == "-o" || arg == "-dynamic-linker" || arg == "-m" ||
+        arg == "-rpath") {
+      new_args.push_back(arg);
+      old_arg_i++;
+      if (old_arg_i < old_args.size()) {
+        new_args.push_back(old_args[old_arg_i]);
+        old_arg_i++;
+      }
+      continue;
+    }
+
+    // Handle some options.
+    if (arg.starts_with("-")) {
+      new_args.push_back(arg);
+      old_arg_i++;
+      continue;
+    }
+
+    // Can rewrite arguments in the future.
+    new_args.push_back(arg);
+    old_arg_i++;
+  }
+  return new_args;
+}
+
 static ExitCodeOrError handle_command__link(const ClientID &client_id,
                                             const clang_io::Command &command,
                                             const string &working_dir) {
+  vector<string> link_args = rewrite_link_args(working_dir, command.args);
   return run_process_stream_output_traced(
       ProcessArgs()
           .arg(command.executable)
-          .args(command.args)
+          .args(link_args)
           .working_dir(working_dir),
       [&](string stdout_data, string stderr_data) {
         send_response_incomplete(
