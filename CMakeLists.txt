@@ -31,6 +31,7 @@ find_package(Tracy CONFIG REQUIRED)
 find_package(ctre CONFIG REQUIRED)
 find_package(toml11 CONFIG REQUIRED)
 find_package(re2 CONFIG REQUIRED)
+find_package(xxHash CONFIG REQUIRED)
 find_path(TL_FUNCTION_REF_INCLUDE_DIRS "tl/function_ref.hpp")
 
 # Prepare LLVM and Clang libraries.

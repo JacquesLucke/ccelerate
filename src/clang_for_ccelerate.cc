@@ -993,8 +993,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   // Write the local code output as frontmatter (.toml) + preprocessed code
   // (.i / .ii).
   {
-    const bool is_cxx =
-        state.input_kind.getLanguage() == clang::Language::CXX;
+    const bool is_cxx = state.input_kind.getLanguage() == clang::Language::CXX;
     path code_path = args.local_code_path;
     code_path.replace_extension(is_cxx ? "ii" : "i");
 
@@ -1180,9 +1179,8 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
 
     std::ifstream code_fs(code_path);
     if (!code_fs.is_open()) {
-      fmt::println(stderr,
-                   "Could not open local code file: {}",
-                   code_path.string());
+      fmt::println(
+          stderr, "Could not open local code file: {}", code_path.string());
       return 1;
     }
     string code_str((std::istreambuf_iterator<char>(code_fs)),
@@ -1198,7 +1196,9 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
       state.all_include_defines.push_back(define);
     }
     state.language = frontmatter.source_language;
+    state.merged_local_code.append("#pragma GCC diagnostics push\n");
     state.merged_local_code.append(code_str);
+    state.merged_local_code.append("#pragma GCC diagnostics pop\n");
   }
 
   // Preprocess headers.

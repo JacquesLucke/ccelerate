@@ -29,6 +29,7 @@ target_link_libraries(ccelerate_lib PUBLIC
   Tracy::TracyClient
   toml11::toml11
   re2::re2
+  xxHash::xxhash
 )
 target_compile_options(ccelerate_lib PRIVATE
   $<$<OR:$<CXX_COMPILER_ID:GNU>,$<CXX_COMPILER_ID:Clang>>:

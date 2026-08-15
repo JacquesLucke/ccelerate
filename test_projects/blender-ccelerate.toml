@@ -30,6 +30,7 @@ local_header_patterns = [
     "**/shaders/**.info",
     # Shader libs must stay after VERTEX_SHADER_CREATE_INFO `using namespace`.
     "**/*.glsl",
+    "**/BLI_strict_flags.hh",
 ]
 include_defines = [
     "GHASH_INTERNAL_API",

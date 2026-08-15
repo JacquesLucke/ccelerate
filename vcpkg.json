@@ -15,6 +15,7 @@
     "ctre",
     "toml11",
     "re2",
+    "xxhash",
     {
       "name": "tracy",
       "features": ["on-demand"]

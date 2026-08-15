@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
 
+#include <fmt/format.h>
+#include <xxhash.h>
+
 #include "array.hh"
 #include "ccelerate_extensions.hh"
 #include "clang_call.hh"
@@ -86,6 +89,12 @@ extract_local_code_with_clang(span<const string> cc1_args,
   return run_process_traced(args);
 }
 
+static string path_to_local_id(const path &path) {
+  const string s = path.native();
+  const XXH64_hash_t hash = XXH3_64bits(s.data(), s.size());
+  return fmt::format("_{:016x}", hash);
+}
+
 static ExitCodeOrError
 handle_command__clang_cc1(const ClientID &client_id,
                           const clang_io::Command &command,
@@ -112,8 +121,9 @@ handle_command__clang_cc1(const ClientID &client_id,
     local_code_file.replace_extension(extensions::object);
 
     const vector<path> config_paths = ConfigDiscovery::get().config_paths();
+    const string local_id = path_to_local_id(obj_file);
     const ProcessResult extract_result = extract_local_code_with_clang(
-        command.args, local_code_file, working_dir, "__", config_paths);
+        command.args, local_code_file, working_dir, local_id, config_paths);
     if (extract_result.exit_code() != 0) {
       send_response_incomplete(
           client_id, extract_result.stdout_data, extract_result.stderr_data);
