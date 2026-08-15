@@ -1,0 +1,8 @@
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+    {is_system_header = false, path = "<REPO_DIR>/test_local_code/z_provides.hh"},
+    {is_system_header = false, path = "<REPO_DIR>/test_local_code/a_requires.hh"},
+]
+local_code_path = "include_order.ii"

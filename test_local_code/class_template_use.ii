@@ -1,0 +1,25 @@
+# 1 "class_template_use.cc"
+namespace {
+
+template <typename T>
+struct A__ {
+  T v;
+  explicit A__(T x) : v(x) {}
+};
+
+template <typename U>
+struct B__ {
+  A__<U> *p;
+  explicit B__(A__<U> *q) : p(q) {}
+};
+
+template <typename T>
+int f__(T x) {
+  A__<T> a(x);
+  B__<T> b(&a);
+  return static_cast<int>(b.p->v);
+}
+
+}
+
+int main() { return f__(1); }

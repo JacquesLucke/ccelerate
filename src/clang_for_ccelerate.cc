@@ -36,7 +36,6 @@
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/VirtualFileSystem.h>
 #include <llvm/TargetParser/Host.h>
-#include <toml.hpp>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -44,6 +43,7 @@
 #include "config.hh"
 #include "error_code.hh"
 #include "get_current_executable_path.hh"
+#include "local_code_frontmatter.hh"
 #include "memory.hh"
 #include "span.hh"
 #include "string.hh"
@@ -269,13 +269,6 @@ static string_view trim_whitespace(const string_view str) {
   const size_t end = str.find_last_not_of(" \t\n\r");
   return str.substr(start, end - start + 1);
 }
-
-struct DirectInclude {
-  path include_path;
-  bool is_system_header = false;
-  // Match pure_c_header_patterns: wrap with extern "C" when replaying into C++.
-  bool is_pure_c = false;
-};
 
 struct LocalCodeState {
   const Cmd_ExtractLocalCode &args;
@@ -997,47 +990,58 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     }
   }
 
-  // Write the local code output.
+  // Write the local code output as frontmatter (.toml) + preprocessed code
+  // (.i / .ii).
   {
-    error_code ec;
-    llvm::raw_fd_ostream fs(state.args.local_code_path.string(), ec);
+    const bool is_cxx =
+        state.input_kind.getLanguage() == clang::Language::CXX;
+    path code_path = args.local_code_path;
+    code_path.replace_extension(is_cxx ? "ii" : "i");
 
-    // Write frontmatter.
-    fs << "+++\n";
     {
-      vector<toml::value> direct_include_values;
-      direct_include_values.reserve(state.direct_includes.size());
-      for (const DirectInclude &include : state.direct_includes) {
-        toml::value entry;
-        entry["path"] =
-            path(apply_path_maps(include.include_path, args.path_maps))
-                .string();
-        entry["is_system_header"] = include.is_system_header;
-        if (include.is_pure_c) {
-          entry["is_pure_c"] = true;
-        }
-        direct_include_values.push_back(std::move(entry));
+      error_code ec;
+      llvm::raw_fd_ostream fs(code_path.string(), ec);
+      if (ec) {
+        fmt::println(stderr,
+                     "Could not write local code file: {}: {}",
+                     code_path.string(),
+                     ec.message());
+        return 1;
       }
-      toml::array_format_info fmt;
-      fmt.fmt = toml::array_format::multiline;
-      toml::value table;
-      table["direct_includes"] = toml::value(direct_include_values, fmt);
-      table["include_defines"] = toml::value(state.include_defines, fmt);
-      table["source_language"] =
-          clang::languageToString(state.input_kind.getLanguage());
-      if (args.path_maps.empty()) {
-        // Can't properly apply path maps here, so skip it. Otherwise local-code
-        // tests are not easily reproducible.
-        table["cc1_args"] = toml::value(cc1_args, fmt);
+      for (const string_view line : state.local_code_lines) {
+        fs << line << '\n';
       }
-      string toml_str = toml::format(table);
-      fs << trim_whitespace(toml_str) << '\n';
     }
-    fs << "+++\n";
 
-    // Actual code.
-    for (const string_view line : state.local_code_lines) {
-      fs << line << '\n';
+    LocalCodeFrontmatter frontmatter;
+    frontmatter.local_code_path = code_path.filename();
+    frontmatter.source_language =
+        string(clang::languageToString(state.input_kind.getLanguage()));
+    frontmatter.include_defines = state.include_defines;
+    frontmatter.direct_includes.reserve(state.direct_includes.size());
+    for (const DirectInclude &include : state.direct_includes) {
+      frontmatter.direct_includes.push_back(DirectInclude{
+          .include_path =
+              path(apply_path_maps(include.include_path, args.path_maps)),
+          .is_system_header = include.is_system_header,
+          .is_pure_c = include.is_pure_c,
+      });
+    }
+    if (args.path_maps.empty()) {
+      // Can't properly apply path maps here, so skip it. Otherwise local-code
+      // tests are not easily reproducible.
+      vector<string> cc1_arg_strings;
+      cc1_arg_strings.reserve(cc1_args.size());
+      for (const char *arg : cc1_args) {
+        cc1_arg_strings.emplace_back(arg);
+      }
+      frontmatter.cc1_args = std::move(cc1_arg_strings);
+    }
+    if (!frontmatter.write_to_path(args.local_code_path)) {
+      fmt::println(stderr,
+                   "Could not write local code frontmatter: {}",
+                   args.local_code_path.string());
+      return 1;
     }
   }
 
@@ -1151,65 +1155,50 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
 
   CompileLocalCodeState state;
 
-  // Gather inputs.
-  for (const path &local_code_path : args.local_code_paths) {
-    std::ifstream fs(local_code_path);
-    if (!fs.is_open()) {
+  // Gather inputs from frontmatter (.toml) + preprocessed code (.i / .ii).
+  for (const path &frontmatter_path : args.local_code_paths) {
+    optional<LocalCodeFrontmatter> frontmatter_opt =
+        LocalCodeFrontmatter::from_path(frontmatter_path);
+    if (!frontmatter_opt) {
+      fmt::println(stderr,
+                   "Could not read local code frontmatter: {}",
+                   frontmatter_path.string());
+      return 1;
+    }
+    const LocalCodeFrontmatter &frontmatter = *frontmatter_opt;
+
+    path code_path = frontmatter.local_code_path;
+    if (code_path.empty()) {
+      fmt::println(stderr,
+                   "Missing local_code_path in frontmatter: {}",
+                   frontmatter_path.string());
+      return 1;
+    }
+    if (code_path.is_relative()) {
+      code_path = frontmatter_path.parent_path() / code_path;
+    }
+
+    std::ifstream code_fs(code_path);
+    if (!code_fs.is_open()) {
       fmt::println(stderr,
                    "Could not open local code file: {}",
-                   local_code_path.string());
+                   code_path.string());
       return 1;
     }
-    string fs_str((std::istreambuf_iterator<char>(fs)),
-                  std::istreambuf_iterator<char>());
+    string code_str((std::istreambuf_iterator<char>(code_fs)),
+                    std::istreambuf_iterator<char>());
 
-    constexpr string_view frontmatter_delim = "+++";
-    const size_t front_open = fs_str.find(frontmatter_delim);
-    if (front_open == string::npos) {
-      fmt::println(stderr,
-                   "Missing frontmatter in local code file: {}",
-                   local_code_path.string());
-      return 1;
-    }
-    size_t toml_start = front_open + frontmatter_delim.size();
-    if (toml_start < fs_str.size() && fs_str[toml_start] == '\n') {
-      ++toml_start;
-    }
-    const size_t front_close = fs_str.find(frontmatter_delim, toml_start);
-    if (front_close == string::npos) {
-      fmt::println(stderr,
-                   "Unterminated frontmatter in local code file: {}",
-                   local_code_path.string());
-      return 1;
-    }
-
-    string toml_str = fs_str.substr(toml_start, front_close - toml_start);
-    auto data_opt = toml::try_parse_str(std::move(toml_str));
-    if (data_opt.is_err()) {
-      fmt::println(stderr,
-                   "Failed to parse frontmatter TOML in local code file: {}",
-                   local_code_path.string());
-      return 1;
-    }
-    toml::value &data = data_opt.unwrap();
-    for (const toml::value &entry :
-         toml::find_or_default<toml::array>(data, "direct_includes")) {
+    for (const DirectInclude &include : frontmatter.direct_includes) {
       add_direct_include(state,
-                         path(toml::find<string>(entry, "path")),
-                         toml::find_or<bool>(entry, "is_system_header", false),
-                         toml::find_or<bool>(entry, "is_pure_c", false));
+                         include.include_path,
+                         include.is_system_header,
+                         include.is_pure_c);
     }
-    for (const string &define :
-         toml::find_or_default<vector<string>>(data, "include_defines")) {
+    for (const string &define : frontmatter.include_defines) {
       state.all_include_defines.push_back(define);
     }
-    state.language = toml::find_or_default<string>(data, "source_language");
-
-    size_t code_start = front_close + frontmatter_delim.size();
-    if (code_start < fs_str.size() && fs_str[code_start] == '\n') {
-      ++code_start;
-    }
-    state.merged_local_code.append(fs_str, code_start);
+    state.language = frontmatter.source_language;
+    state.merged_local_code.append(code_str);
   }
 
   // Preprocess headers.
@@ -1366,7 +1355,9 @@ int clang_ops_main(const int argc, char **argv) {
   Cmd_ExtractLocalCode extract_local_code_args;
   extract_local_code_cmd.add_option("--local-code-path",
                                     extract_local_code_args.local_code_path,
-                                    "Path to write the local code to");
+                                    "Path to write the local code frontmatter "
+                                    "(.toml); preprocessed code is written "
+                                    "alongside as .i/.ii");
   extract_local_code_cmd.add_option("--local-id",
                                     extract_local_code_args.local_id,
                                     "Suffix to use to make symbols unique");
@@ -1389,7 +1380,8 @@ int clang_ops_main(const int argc, char **argv) {
   Cmd_CompileLocalCode compile_local_code_args;
   compile_local_code_cmd.add_option("--input",
                                     compile_local_code_args.local_code_paths,
-                                    "Path to local code (repeatable)");
+                                    "Path to local code frontmatter .toml "
+                                    "(repeatable)");
   compile_local_code_cmd
       .add_option("--output",
                   compile_local_code_args.obj_output_path,

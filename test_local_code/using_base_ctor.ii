@@ -1,0 +1,19 @@
+# 1 "using_base_ctor.cc"
+struct A {
+  explicit A(int x) : v(x) {}
+  int v;
+};
+
+namespace {
+
+struct B__ : A {
+  using A::A;
+};
+
+struct C__ : B__ {
+  using B__::B__;
+};
+
+}
+
+int main() { return B__(1).v; }

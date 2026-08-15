@@ -1,0 +1,33 @@
+# 1 "simple_constructor.cc"
+namespace hello {
+struct A {
+  int x_;
+  A(int x) : x_(x) {}
+};
+}
+
+namespace {
+struct B__ {
+  int x_;
+  B__(int x) : x_(x) {}
+};
+}
+
+namespace {
+struct C__ {
+  C__();
+  ~C__();
+  C__(const C__ &);
+
+  operator int() const;
+
+  C__ hello();
+};
+}
+
+C__::C__() = default;
+C__::~C__() {}
+C__::C__(const C__ &) {}
+C__::operator int() const { return 0; }
+
+C__ C__::hello() { return C__(); }

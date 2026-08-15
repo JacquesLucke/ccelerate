@@ -1,0 +1,6 @@
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+]
+local_code_path = "simple_macro.ii"

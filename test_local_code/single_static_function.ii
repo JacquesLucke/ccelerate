@@ -1,0 +1,4 @@
+# 1 "single_static_function.cc"
+static int x__ = 0;
+
+int main() { return x__; }

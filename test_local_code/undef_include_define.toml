@@ -1,0 +1,9 @@
+source_language = "C++"
+include_defines = [
+    "#define DEFINE_A 1",
+    "#define DEFINE_A 10",
+]
+direct_includes = [
+    {is_system_header = false, path = "<REPO_DIR>/test_local_code/after_redefine.hh"},
+]
+local_code_path = "undef_include_define.ii"

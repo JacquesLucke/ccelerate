@@ -1,0 +1,7 @@
+source_language = "C"
+include_defines = [
+]
+direct_includes = [
+    {is_system_header = true, path = "/usr/include/stdio.h"},
+]
+local_code_path = "simple_c.i"

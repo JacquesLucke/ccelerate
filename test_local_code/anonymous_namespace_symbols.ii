@@ -1,0 +1,8 @@
+# 1 "anonymous_namespace_symbols.cc"
+namespace {
+int x__ = 0;
+int get_x__() { return x__; }
+
+}
+
+int main() { return get_x__(); }

@@ -8,6 +8,7 @@ add_library(ccelerate_lib STATIC
   request_handler__clang.cc
   run_process_traced.cc
   config.cc
+  local_code_frontmatter.cc
 )
 target_include_directories(ccelerate_lib PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -71,6 +72,7 @@ add_ccelerate_wrapper(ccelerate_cmake CMake)
 add_executable(clang_for_ccelerate
   clang_for_ccelerate.cc
   config.cc
+  local_code_frontmatter.cc
 )
 target_link_libraries(clang_for_ccelerate PRIVATE
   fmt::fmt

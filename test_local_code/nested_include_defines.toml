@@ -1,0 +1,8 @@
+source_language = "C++"
+include_defines = [
+    "#define DEFINE_A(a) 10 + a",
+    "#define DEFINE_B 10 + 5",
+]
+direct_includes = [
+]
+local_code_path = "nested_include_defines.ii"

@@ -22,6 +22,7 @@
 #include "base/vector.hh"
 #include "clang_call.hh"
 #include "default_endpoint.hh"
+#include "local_code_frontmatter.hh"
 
 namespace ccelerate::tests {
 
@@ -234,8 +235,8 @@ public:
         std::get<clang_io::ParsedArgs>(parse_args_result);
     ASSERT_EQ(parsed_args.commands.size(), 1);
 
-    const path output_path = output_dir / (stem.string() + ".local");
-    const path reference_path = src_dir / (stem.string() + ".local");
+    const path output_toml_path = output_dir / (stem.string() + ".toml");
+    const path reference_toml_path = src_dir / (stem.string() + ".toml");
 
     const vector<PathMap> path_maps = {
         {args.repo_dir, "<REPO_DIR>"},
@@ -243,28 +244,45 @@ public:
     };
     const ProcessResult extract_result =
         extract_local_code_with_clang(parsed_args.commands[0].args,
-                                      output_path,
+                                      output_toml_path,
                                       src_dir,
                                       "__",
                                       span(&ccelerate_config, 1),
                                       path_maps);
     ASSERT_EQ(extract_result.exit_code(), 0) << extract_result.stderr_data;
 
-    ASSERT_TRUE(std::filesystem::exists(output_path)) << output_path;
+    ASSERT_TRUE(std::filesystem::exists(output_toml_path)) << output_toml_path;
+
+    const optional<LocalCodeFrontmatter> frontmatter_opt =
+        LocalCodeFrontmatter::from_path(output_toml_path);
+    ASSERT_TRUE(frontmatter_opt.has_value()) << output_toml_path;
+    path output_code_path = frontmatter_opt->local_code_path;
+    ASSERT_FALSE(output_code_path.empty());
+    if (output_code_path.is_relative()) {
+      output_code_path = output_toml_path.parent_path() / output_code_path;
+    }
+    ASSERT_TRUE(std::filesystem::exists(output_code_path)) << output_code_path;
+
+    const path reference_code_path = src_dir / output_code_path.filename();
 
     if (should_update_tests()) {
       std::filesystem::copy_file(
-          output_path,
-          reference_path,
+          output_toml_path,
+          reference_toml_path,
+          std::filesystem::copy_options::overwrite_existing);
+      std::filesystem::copy_file(
+          output_code_path,
+          reference_code_path,
           std::filesystem::copy_options::overwrite_existing);
     }
 
-    ASSERT_TRUE(std::filesystem::exists(reference_path)) << reference_path;
+    ASSERT_TRUE(std::filesystem::exists(reference_toml_path))
+        << reference_toml_path;
+    ASSERT_TRUE(std::filesystem::exists(reference_code_path))
+        << reference_code_path;
 
-    const string reference_output = read_file(reference_path);
-    const string actual_output = read_file(output_path);
-
-    EXPECT_EQ(actual_output, reference_output);
+    EXPECT_EQ(read_file(output_toml_path), read_file(reference_toml_path));
+    EXPECT_EQ(read_file(output_code_path), read_file(reference_code_path));
   }
 
 private:

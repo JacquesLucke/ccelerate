@@ -1,0 +1,7 @@
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+    {is_system_header = true, path = "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/vector"},
+]
+local_code_path = "simple_inline_header.ii"

@@ -1,0 +1,8 @@
+# 1 "pure_c_header.cc"
+extern "C" {
+# 3 "pure_c_header.cc"
+}
+
+extern "C" int pure_c_fn(void) { return 0; }
+
+int main() { return pure_c_fn(); }

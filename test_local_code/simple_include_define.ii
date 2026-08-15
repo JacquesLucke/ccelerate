@@ -1,0 +1,3 @@
+# 4 "simple_include_define.cc"
+
+int main() { return 10; }

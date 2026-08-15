@@ -1,0 +1,9 @@
+# 1 "simple_anonymous_class.cc"
+namespace {
+class A__ {
+public:
+  int get_value() { return 10; }
+};
+}
+
+int main() { return A__().get_value(); }

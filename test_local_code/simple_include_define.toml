@@ -1,0 +1,8 @@
+source_language = "C++"
+include_defines = [
+    "#define DEFINE_A 10",
+]
+direct_includes = [
+    {is_system_header = true, path = "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/iostream"},
+]
+local_code_path = "simple_include_define.ii"

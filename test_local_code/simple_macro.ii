@@ -1,0 +1,4 @@
+# 1 "simple_macro.cc"
+
+
+int main() { return 10; }

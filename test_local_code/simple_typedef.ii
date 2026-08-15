@@ -1,0 +1,8 @@
+# 1 "simple_typedef.cc"
+namespace {
+typedef int A__;
+}
+
+typedef int B;
+
+A__ main() { return B{}; }
