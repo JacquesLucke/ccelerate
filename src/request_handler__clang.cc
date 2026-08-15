@@ -184,44 +184,32 @@ static ExitCodeOrError rewrite_link_args(const ClientID &client_id,
       continue;
     }
 
-    if (arg.ends_with(".o")) {
-      path local_obj_path = arg;
-      if (local_obj_path.is_relative()) {
-        local_obj_path = path(working_dir) / local_obj_path;
-      }
-      local_obj_path = local_obj_path.lexically_normal();
-      local_obj_path.replace_extension(extensions::object);
-      if (std::filesystem::is_regular_file(local_obj_path)) {
-        std::optional<LocalCodeFrontmatter> frontmatter_opt =
-            LocalCodeFrontmatter::from_path(local_obj_path);
-        if (!frontmatter_opt || !frontmatter_opt->cc1_args) {
-          return 1;
+    if (arg.ends_with(".o") &&
+        local_code_path_of_obj_if_exists(working_dir, arg)) {
+      vector<path> local_obj_paths;
+      while (old_arg_i < old_args.size()) {
+        const string &obj_arg = old_args[old_arg_i];
+        if (!obj_arg.ends_with(".o")) {
+          break;
         }
-        std::string tmp_file = std::tmpnam(nullptr);
-        const path &clang_for_ccelerate_exe =
-            get_clang_for_ccelerate_executable();
-        ExitCodeOrError result = run_process_stream_output_traced(
-            ProcessArgs()
-                .arg(clang_for_ccelerate_exe)
-                .args({"compile-local-code",
-                       "--input",
-                       local_obj_path,
-                       "--output",
-                       tmp_file,
-                       "--"})
-                .args(*frontmatter_opt->cc1_args)
-                .working_dir(working_dir),
-            [&](string stdout_data, string stderr_data) {
-              send_response_incomplete(
-                  client_id, std::move(stdout_data), std::move(stderr_data));
-            });
-        if (result.exit_code() != 0) {
-          return result;
+        const optional<path> local_obj_path =
+            local_code_path_of_obj_if_exists(working_dir, obj_arg);
+        if (!local_obj_path) {
+          break;
         }
-        new_args.push_back(std::move(tmp_file));
+        local_obj_paths.push_back(*local_obj_path);
         old_arg_i++;
-        continue;
       }
+      assert(!local_obj_paths.empty());
+      BuildLocalObjectsResult build_result =
+          build_local_objects(client_id, local_obj_paths);
+      if (!build_result.success) {
+        return 1;
+      }
+      for (const path &p : build_result.paths) {
+        new_args.push_back(p);
+      }
+      continue;
     }
 
     // Can rewrite arguments in the future.
