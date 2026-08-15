@@ -33,6 +33,7 @@ void handle_request__ar(const Request &request) {
     fmt.fmt = toml::array_format::multiline;
     toml::value table;
     table["sources"] = toml::value(src_files, fmt);
+    table["working_dir"] = toml::value(request.working_dir.string());
     const string toml_str = toml::format(table);
     std::ofstream file(ccelerate_output_file);
     file << toml_str;
