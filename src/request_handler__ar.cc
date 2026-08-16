@@ -11,23 +11,39 @@
 #include "local_code_frontmatter.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
+#include "string.hh"
 
 namespace ccelerate {
 
 struct CompatibilityKey {
   vector<string> cc1_args;
+  string language;
+  vector<string> include_defines;
+  vector<string> using_namespaces;
 
   bool operator==(const CompatibilityKey &) const = default;
 };
 
 } // namespace ccelerate
 
+static size_t hash_combine(size_t seed, const std::string_view str) {
+  seed ^= std::hash<std::string_view>{}(str) + 0x9e3779b9 + (seed << 6) +
+          (seed >> 2);
+  return seed;
+}
+
 template <> struct std::hash<ccelerate::CompatibilityKey> {
   size_t operator()(const ccelerate::CompatibilityKey &key) const noexcept {
     size_t seed = key.cc1_args.size();
     for (const std::string &arg : key.cc1_args) {
-      seed ^= std::hash<std::string>{}(arg) + 0x9e3779b9 + (seed << 6) +
-              (seed >> 2);
+      seed = hash_combine(seed, arg);
+    }
+    seed = hash_combine(seed, key.language);
+    for (const std::string &define : key.include_defines) {
+      seed = hash_combine(seed, define);
+    }
+    for (const std::string &using_namespace : key.using_namespaces) {
+      seed = hash_combine(seed, using_namespace);
     }
     return seed;
   }
@@ -36,11 +52,11 @@ template <> struct std::hash<ccelerate::CompatibilityKey> {
 namespace ccelerate {
 
 static CompatibilityKey
-cc1_args_to_compatibility_key(const span<const string> old_args) {
+cc1_args_to_compatibility_key(const LocalCodeFrontmatter &info) {
   CompatibilityKey key;
   size_t old_arg_i = 0;
-  while (old_arg_i < old_args.size()) {
-    const string &arg = old_args[old_arg_i];
+  while (old_arg_i < info.cc1_args->size()) {
+    const string &arg = (*info.cc1_args)[old_arg_i];
 
     // Skip some file arguments.
     if (arg == "-o" || arg == "-main-file-name" || arg == "-dependency-file" ||
@@ -50,7 +66,7 @@ cc1_args_to_compatibility_key(const span<const string> old_args) {
     }
 
     // Input file is the last argument, skip it.
-    if (old_arg_i + 1 == old_args.size()) {
+    if (old_arg_i + 1 == info.cc1_args->size()) {
       old_arg_i++;
       continue;
     }
@@ -58,6 +74,12 @@ cc1_args_to_compatibility_key(const span<const string> old_args) {
     // Other options are kept.
     key.cc1_args.push_back(arg);
     old_arg_i++;
+  }
+  key.language = info.source_language;
+  key.include_defines = info.include_defines;
+  for (const UsingNamespaceInfo &using_namespace : info.using_namespaces) {
+    key.using_namespaces.push_back(
+        fmt::format("{}{}", using_namespace.parent, using_namespace.used));
   }
   return key;
 }
@@ -87,8 +109,7 @@ build_local_objects(const ClientID &client_id,
     if (!frontmatter_opt) {
       return result;
     }
-    CompatibilityKey key =
-        cc1_args_to_compatibility_key(*frontmatter_opt->cc1_args);
+    CompatibilityKey key = cc1_args_to_compatibility_key(*frontmatter_opt);
     compatibility_map[std::move(key)].push_back(local_obj_path);
   }
 
