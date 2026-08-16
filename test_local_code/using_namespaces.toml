@@ -1,0 +1,12 @@
+source_language = "C++"
+include_defines = [
+]
+using_namespaces = [
+    {used = "A::B", parent = "C"},
+    {used = "C", parent = ""},
+    {used = "A", parent = "(anonymous)"},
+    {used = "A", parent = "D::(anonymous)"},
+]
+direct_includes = [
+]
+local_code_path = "using_namespaces.ii"

@@ -5,6 +5,7 @@
 #include <clang/AST/ASTConsumer.h>
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/DeclTemplate.h>
+#include <clang/AST/NestedNameSpecifier.h>
 #include <clang/AST/TypeLoc.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
@@ -287,6 +288,8 @@ struct LocalCodeState {
   std::unordered_set<string> seen_local_define_names;
   std::vector<string> include_defines;
 
+  vector<UsingNamespaceInfo> using_namespaces;
+
   optional<clang::Rewriter> rewriter;
   string rewrite_result;
 };
@@ -517,6 +520,91 @@ public:
     state_.local_code_lines.resize(committed_kept_lines);
     // Final newline mapping.
     state_.map_parser_to_local_lines.push_back(-1);
+  }
+};
+
+static bool mapped_location_is_local(const LocalCodeState &state,
+                                     clang::SourceLocation loc,
+                                     const clang::SourceManager &sm) {
+  if (!loc.isValid()) {
+    return false;
+  }
+  const size_t line = sm.getExpansionLineNumber(loc);
+  if (line == 0 || line > state.map_parser_to_local_lines.size()) {
+    return false;
+  }
+  return state.map_parser_to_local_lines[line - 1] != -1;
+}
+
+// Walk past linkage-specs etc.; reject function/class scope.
+static const clang::DeclContext *
+enclosing_file_context(const clang::DeclContext *dc) {
+  while (dc) {
+    if (dc->isFunctionOrMethod() || dc->isRecord()) {
+      return nullptr;
+    }
+    if (dc->isFileContext()) {
+      return dc;
+    }
+    dc = dc->getParent();
+  }
+  return nullptr;
+}
+
+static string format_used_namespace(const clang::UsingDirectiveDecl &ud,
+                                    const clang::PrintingPolicy &policy) {
+  string result;
+  llvm::raw_string_ostream os(result);
+  if (const clang::NestedNameSpecifier *qualifier = ud.getQualifier()) {
+    qualifier->print(os, policy);
+  }
+  if (const clang::NamedDecl *nominated =
+          ud.getNominatedNamespaceAsWritten()) {
+    os << nominated->getName();
+  }
+  os.flush();
+  return result;
+}
+
+static string
+format_parent_namespace(const clang::DeclContext *file_context) {
+  if (const auto *ns = llvm::dyn_cast_or_null<clang::NamespaceDecl>(
+          file_context)) {
+    return ns->getQualifiedNameAsString();
+  }
+  return {};
+}
+
+class UsingNamespaceCollector
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
+private:
+  LocalCodeState &state_;
+  clang::SourceManager &sm_;
+
+public:
+  UsingNamespaceCollector(LocalCodeState &state)
+      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+
+  void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    const clang::UsingDirectiveDecl *ud =
+        result.Nodes.getNodeAs<clang::UsingDirectiveDecl>("usingNamespace");
+    if (!ud) {
+      return;
+    }
+    if (!mapped_location_is_local(state_, ud->getLocation(), sm_)) {
+      return;
+    }
+    const clang::DeclContext *file_context =
+        enclosing_file_context(ud->getLexicalDeclContext());
+    if (!file_context) {
+      return;
+    }
+    const clang::PrintingPolicy policy(result.Context->getLangOpts());
+    state_.using_namespaces.push_back(UsingNamespaceInfo{
+        .parent = format_parent_namespace(file_context),
+        .used = format_used_namespace(*ud, policy),
+    });
   }
 };
 
@@ -761,28 +849,20 @@ public:
   }
 
   bool location_is_in_local_code(clang::SourceLocation loc) const {
-
-    if (!loc.isValid()) {
-      return false;
-    }
-    const size_t line = sm_.getExpansionLineNumber(loc);
-    if (line == 0 || line > state_.map_parser_to_local_lines.size()) {
-      return false;
-    }
-    const int mapped_line = state_.map_parser_to_local_lines[line - 1];
-    const bool is_local = mapped_line != -1;
-    return is_local;
+    return mapped_location_is_local(state_, loc, sm_);
   }
 };
 
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
+  UsingNamespaceCollector using_namespace_collector_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
 
 public:
-  LocalCodeASTConsumer(LocalCodeState &state) : renamer_(state), state_(state) {
+  LocalCodeASTConsumer(LocalCodeState &state)
+      : renamer_(state), using_namespace_collector_(state), state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
@@ -812,6 +892,8 @@ public:
     finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
                            .bind("typedefTypeLoc"),
                        &renamer_);
+    finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
+                       &using_namespace_collector_);
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {
@@ -1036,6 +1118,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       }
       frontmatter.cc1_args = std::move(cc1_arg_strings);
     }
+    frontmatter.using_namespaces = std::move(state.using_namespaces);
     if (!frontmatter.write_to_path(args.local_code_path)) {
       fmt::println(stderr,
                    "Could not write local code frontmatter: {}",

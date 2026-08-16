@@ -1,0 +1,29 @@
+# 1 "using_namespaces.cc"
+namespace A {
+namespace B {
+int value = 1;
+}
+}
+
+namespace C {
+using namespace A::B;
+
+int use_value() { return value; }
+}
+
+using namespace C;
+
+namespace {
+using namespace A;
+}
+
+namespace D {
+namespace {
+using namespace A;
+}
+}
+
+int main() {
+  using namespace A;
+  return use_value();
+}

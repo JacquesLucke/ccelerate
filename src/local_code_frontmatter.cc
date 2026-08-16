@@ -32,6 +32,15 @@ string LocalCodeFrontmatter::to_toml_string() const {
     direct_include_values.push_back(std::move(entry));
   }
 
+  vector<toml::value> using_namespace_values;
+  using_namespace_values.reserve(using_namespaces.size());
+  for (const UsingNamespaceInfo &info : using_namespaces) {
+    toml::value entry;
+    entry["parent"] = info.parent;
+    entry["used"] = info.used;
+    using_namespace_values.push_back(std::move(entry));
+  }
+
   toml::value table;
   table["local_code_path"] = local_code_path.string();
   table["direct_includes"] = toml::value(direct_include_values, fmt);
@@ -39,6 +48,9 @@ string LocalCodeFrontmatter::to_toml_string() const {
   table["source_language"] = source_language;
   if (cc1_args) {
     table["cc1_args"] = toml::value(*cc1_args, fmt);
+  }
+  if (!using_namespaces.empty()) {
+    table["using_namespaces"] = toml::value(using_namespace_values, fmt);
   }
   return string(trim_whitespace(toml::format(table))) + '\n';
 }
@@ -80,6 +92,14 @@ LocalCodeFrontmatter::from_toml_string(string toml_str) {
 
   if (data.contains("cc1_args")) {
     frontmatter.cc1_args = toml::find<vector<string>>(data, "cc1_args");
+  }
+
+  for (const toml::value &entry :
+       toml::find_or_default<toml::array>(data, "using_namespaces")) {
+    frontmatter.using_namespaces.push_back(UsingNamespaceInfo{
+        .parent = toml::find_or_default<string>(entry, "parent"),
+        .used = toml::find_or_default<string>(entry, "used"),
+    });
   }
 
   return frontmatter;

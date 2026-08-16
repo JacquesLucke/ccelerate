@@ -16,12 +16,18 @@ struct DirectInclude {
   bool is_pure_c = false;
 };
 
+struct UsingNamespaceInfo {
+  string parent;
+  string used;
+};
+
 struct LocalCodeFrontmatter {
   path local_code_path;
   string source_language;
   vector<string> include_defines;
   vector<DirectInclude> direct_includes;
   optional<vector<string>> cc1_args;
+  vector<UsingNamespaceInfo> using_namespaces;
 
   string to_toml_string() const;
   bool write_to_path(const path &path) const;
