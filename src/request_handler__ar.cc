@@ -3,6 +3,8 @@
 #include <fmt/format.h>
 #include <fstream>
 #include <functional>
+#include <tbb/parallel_for.h>
+#include <tbb/parallel_invoke.h>
 #include <toml.hpp>
 #include <unordered_map>
 
@@ -97,48 +99,106 @@ optional<path> local_code_path_of_obj_if_exists(const path cwd,
   return nullopt;
 }
 
+static BuildLocalObjectsResult
+build_compatible_local_objects(const ClientID &client_id,
+                               const CompatibilityKey &compatibility_key,
+                               const span<const path> local_obj_files) {
+  BuildLocalObjectsResult result;
+  const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
+  const bool is_single = local_obj_files.size() == 1;
+
+  ProcessArgs args;
+  args.arg(clang_for_ccelerate_exe).arg("compile-local-code");
+  for (const path &p : local_obj_files) {
+    args.arg("--input").arg(p);
+  }
+
+  std::string out_path = std::tmpnam(nullptr);
+  args.arg("--output").arg(out_path);
+  args.arg("--");
+  args.args(compatibility_key.cc1_args);
+
+  ExitCodeOrError compile_result = run_process_stream_output_traced(
+      args, [&](string stdout_data, string stderr_data) {
+        if (is_single) {
+          send_response_incomplete(
+              client_id, std::move(stdout_data), std::move(stderr_data));
+        }
+      });
+  if (compile_result.exit_code() == 0) {
+    result.paths.push_back(out_path);
+    result.success = true;
+    return result;
+  }
+  if (is_single) {
+    send_response_incomplete(
+        client_id, "", compile_result.error_message().value_or(""));
+    return result;
+  }
+
+  BuildLocalObjectsResult sub_result_1;
+  BuildLocalObjectsResult sub_result_2;
+  const int split_index = local_obj_files.size() / 2;
+  const span<const path> files_1 = local_obj_files.first(split_index);
+  const span<const path> files_2 = local_obj_files.last(split_index);
+  tbb::parallel_invoke(
+      [&]() {
+        sub_result_1 = build_compatible_local_objects(
+            client_id, compatibility_key, files_1);
+      },
+      [&]() {
+        sub_result_2 = build_compatible_local_objects(
+            client_id, compatibility_key, files_2);
+      });
+  if (sub_result_1.success && sub_result_2.success) {
+    result.paths.insert(result.paths.end(),
+                        sub_result_1.paths.begin(),
+                        sub_result_1.paths.end());
+    result.paths.insert(result.paths.end(),
+                        sub_result_2.paths.begin(),
+                        sub_result_2.paths.end());
+    result.success = true;
+    return result;
+  }
+  return result;
+}
+
 BuildLocalObjectsResult
 build_local_objects(const ClientID &client_id,
                     const span<const path> local_obj_files) {
-  BuildLocalObjectsResult result;
-
   std::unordered_map<CompatibilityKey, vector<path>> compatibility_map;
   for (const path &local_obj_path : local_obj_files) {
     std::optional<LocalCodeFrontmatter> frontmatter_opt =
         LocalCodeFrontmatter::from_path(local_obj_path);
     if (!frontmatter_opt) {
-      return result;
+      return {};
     }
     CompatibilityKey key = cc1_args_to_compatibility_key(*frontmatter_opt);
     compatibility_map[std::move(key)].push_back(local_obj_path);
   }
-
+  vector<pair<const CompatibilityKey *, const vector<path> *>> groups;
+  groups.reserve(compatibility_map.size());
   for (const auto &[key, paths] : compatibility_map) {
-    const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
+    groups.emplace_back(&key, &paths);
+  }
 
-    ProcessArgs args;
-    args.arg(clang_for_ccelerate_exe).arg("compile-local-code");
-    for (const path &p : paths) {
-      args.arg("--input").arg(p);
-    }
+  vector<BuildLocalObjectsResult> sub_results(groups.size());
+  tbb::parallel_for(tbb::blocked_range<size_t>(0, groups.size(), 1),
+                    [&](const tbb::blocked_range<size_t> &range) {
+                      for (size_t i = range.begin(); i < range.end(); i++) {
+                        const auto &[key, paths] = groups[i];
+                        sub_results[i] = build_compatible_local_objects(
+                            client_id, *key, *paths);
+                      }
+                    });
 
-    std::string out_path = std::tmpnam(nullptr);
-    args.arg("--output").arg(out_path);
-    args.arg("--");
-    args.args(key.cc1_args);
-
-    ExitCodeOrError compile_result = run_process_stream_output_traced(
-        args, [&](string stdout_data, string stderr_data) {
-          send_response_incomplete(
-              client_id, std::move(stdout_data), std::move(stderr_data));
-        });
-    if (compile_result.exit_code() != 0) {
-      send_response_incomplete(
-          client_id, "", compile_result.error_message().value_or(""));
+  BuildLocalObjectsResult result;
+  for (const BuildLocalObjectsResult &sub_result : sub_results) {
+    if (!sub_result.success) {
       return result;
     }
-
-    result.paths.push_back(out_path);
+    result.paths.insert(
+        result.paths.end(), sub_result.paths.begin(), sub_result.paths.end());
   }
   result.success = true;
   return result;

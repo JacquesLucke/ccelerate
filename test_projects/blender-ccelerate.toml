@@ -30,6 +30,7 @@ local_header_patterns = [
     "**/shaders/**.info",
     # Shader libs must stay after VERTEX_SHADER_CREATE_INFO `using namespace`.
     "**/*.glsl",
+    "**/*.cc",
 ]
 include_defines = [
     "GHASH_INTERNAL_API",
@@ -67,6 +68,7 @@ eager_obj_patterns = [
     "**/gpu_shader_depencency.cc.o",
     "**/intern/gpu_shader_create_info.cc.o",
     "**/intern/wayland_dynload_egl.c.o",
+    "**/makesrna/intern/**_gen.cc.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.

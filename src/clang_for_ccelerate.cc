@@ -966,6 +966,9 @@ private:
       return !mapped_location_is_local(
           state_, info.getLocation(), info.getSourceManager());
     }
+    if (id == clang::diag::warn_unused_function) {
+      return true;
+    }
     return false;
   }
 };
