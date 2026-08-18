@@ -959,6 +959,8 @@ public:
 private:
   bool should_ignore_diagnostic(const clang::Diagnostic &info) const {
     const uint32_t id = info.getID();
+    // There can be false positives of this warning due to
+    // #shouldSkipFunctionBody.
     if (id == clang::diag::warn_unused_private_field) {
       assert(info.hasSourceManager());
       return !mapped_location_is_local(
