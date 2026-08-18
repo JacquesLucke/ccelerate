@@ -958,6 +958,8 @@ public:
 
 private:
   bool should_ignore_diagnostic(const clang::Diagnostic &info) const {
+    // Ignore all at this level for now.
+    return true;
     const uint32_t id = info.getID();
     // There can be false positives of this warning due to
     // #shouldSkipFunctionBody.
