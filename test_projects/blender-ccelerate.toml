@@ -71,6 +71,9 @@ eager_obj_patterns = [
     "**/intern/gpu_shader_create_info.cc.o",
     "**/intern/wayland_dynload_egl.c.o",
     "**/makesrna/intern/**_gen.cc.o",
+    # Generated DNA tables; makesdna_test supplies its own TUs for these symbols.
+    "**/bf_dna.dir/dna.cc.o",
+    "**/bf_dna.dir/dna_struct_ids.cc.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
