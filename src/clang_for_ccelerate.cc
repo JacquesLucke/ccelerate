@@ -9,6 +9,7 @@
 #include <clang/AST/TypeLoc.h>
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
+#include <clang/Basic/DiagnosticSema.h>
 #include <clang/Basic/Version.h>
 #include <clang/CodeGen/CodeGenAction.h>
 #include <clang/Driver/Compilation.h>
@@ -558,18 +559,16 @@ static string format_used_namespace(const clang::UsingDirectiveDecl &ud,
   if (const clang::NestedNameSpecifier *qualifier = ud.getQualifier()) {
     qualifier->print(os, policy);
   }
-  if (const clang::NamedDecl *nominated =
-          ud.getNominatedNamespaceAsWritten()) {
+  if (const clang::NamedDecl *nominated = ud.getNominatedNamespaceAsWritten()) {
     os << nominated->getName();
   }
   os.flush();
   return result;
 }
 
-static string
-format_parent_namespace(const clang::DeclContext *file_context) {
-  if (const auto *ns = llvm::dyn_cast_or_null<clang::NamespaceDecl>(
-          file_context)) {
+static string format_parent_namespace(const clang::DeclContext *file_context) {
+  if (const auto *ns =
+          llvm::dyn_cast_or_null<clang::NamespaceDecl>(file_context)) {
     return ns->getQualifiedNameAsString();
   }
   return {};
@@ -910,6 +909,65 @@ public:
   }
 };
 
+class CustomDiagnosticsConsumer : public clang::DiagnosticConsumer {
+  const LocalCodeState &state_;
+  unique_ptr<clang::DiagnosticConsumer> inner_;
+
+  // Notes after an ignored diagnostic are suppressed until the next non-ignored
+  // diagnostic.
+  bool ignore_notes_ = false;
+
+public:
+  CustomDiagnosticsConsumer(const LocalCodeState &state,
+                            unique_ptr<clang::DiagnosticConsumer> inner)
+      : state_(state), inner_(std::move(inner)) {}
+
+  void BeginSourceFile(const clang::LangOptions &lang_opts,
+                       const clang::Preprocessor *pp) override {
+    inner_->BeginSourceFile(lang_opts, pp);
+  }
+
+  void EndSourceFile() override { inner_->EndSourceFile(); }
+
+  void finish() override { inner_->finish(); }
+
+  void clear() override {
+    DiagnosticConsumer::clear();
+    inner_->clear();
+    ignore_notes_ = false;
+  }
+
+  bool IncludeInDiagnosticCounts() const override {
+    return inner_->IncludeInDiagnosticCounts();
+  }
+
+  void HandleDiagnostic(clang::DiagnosticsEngine::Level level,
+                        const clang::Diagnostic &info) override {
+    if (level == clang::DiagnosticsEngine::Note) {
+      if (ignore_notes_) {
+        return;
+      }
+    } else {
+      ignore_notes_ = this->should_ignore_diagnostic(info);
+      if (ignore_notes_) {
+        return;
+      }
+    }
+    inner_->HandleDiagnostic(level, info);
+  }
+
+private:
+  bool should_ignore_diagnostic(const clang::Diagnostic &info) const {
+    const uint32_t id = info.getID();
+    if (id == clang::diag::warn_unused_private_field) {
+      assert(info.hasSourceManager());
+      return !mapped_location_is_local(
+          state_, info.getLocation(), info.getSourceManager());
+    }
+    return false;
+  }
+};
+
 class RewriteLocalCodeAction : public clang::ASTFrontendAction {
 private:
   LocalCodeState &state_;
@@ -1042,6 +1100,10 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     if (!success) {
       return 1;
     }
+    clang_instance.getDiagnostics().setClient(
+        new CustomDiagnosticsConsumer(
+            state, clang_instance.getDiagnostics().takeClient()),
+        true);
     auto &inputs = clang_instance.getFrontendOpts().Inputs;
     clang::InputKind kind = inputs.front().getKind().getPreprocessed();
     inputs.clear();
