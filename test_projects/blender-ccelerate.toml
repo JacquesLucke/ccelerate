@@ -65,6 +65,8 @@ include_defines = [
 eager_obj_patterns = [
     "**/cycles_kernel_cpu.dir/kernel.cpp.o",
     "**/cycles_kernel_cpu.dir/kernel_avx2.cpp.o",
+    "**/cycles_device.dir/*/device_impl.cpp.o",
+    "**/cycles_device.dir/*/queue.cpp.o",
     "**/gpu_shader_depencency.cc.o",
     "**/intern/gpu_shader_create_info.cc.o",
     "**/intern/wayland_dynload_egl.c.o",

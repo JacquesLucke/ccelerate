@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: MIT
 
 #include <fmt/format.h>
-#include <fstream>
 #include <functional>
 #include <tbb/parallel_for.h>
 #include <tbb/parallel_invoke.h>
@@ -10,6 +9,7 @@
 
 #include "ccelerate_extensions.hh"
 #include "clang_call.hh"
+#include "create_temporary_path.hh"
 #include "local_code_frontmatter.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
@@ -113,8 +113,11 @@ build_compatible_local_objects(const ClientID &client_id,
     args.arg("--input").arg(p);
   }
 
-  std::string out_path = std::tmpnam(nullptr);
-  args.arg("--output").arg(out_path);
+  const path out_path = create_temporary_path();
+  if (out_path.empty()) {
+    return result;
+  }
+  args.arg("--output").arg(out_path.native());
   args.arg("--");
   args.args(compatibility_key.cc1_args);
 
