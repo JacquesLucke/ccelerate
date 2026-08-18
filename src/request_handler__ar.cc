@@ -9,6 +9,7 @@
 
 #include "ccelerate_extensions.hh"
 #include "clang_call.hh"
+#include "config.hh"
 #include "create_temporary_path.hh"
 #include "local_code_frontmatter.hh"
 #include "request_handler.hh"
@@ -91,6 +92,9 @@ optional<path> local_code_path_of_obj_if_exists(const path cwd,
   if (obj_file.extension() != ".o") {
     return nullopt;
   }
+  if (ConfigDiscovery::get().get_latest().is_eager_obj(obj_file)) {
+    return nullopt;
+  }
   path local_obj_path = (cwd / obj_file).lexically_normal();
   local_obj_path.replace_extension(extensions::object);
   if (std::filesystem::is_regular_file(local_obj_path)) {
@@ -143,7 +147,7 @@ build_compatible_local_objects(const ClientID &client_id,
   BuildLocalObjectsResult sub_result_2;
   const int split_index = local_obj_files.size() / 2;
   const span<const path> files_1 = local_obj_files.first(split_index);
-  const span<const path> files_2 = local_obj_files.last(split_index);
+  const span<const path> files_2 = local_obj_files.subspan(split_index);
   tbb::parallel_invoke(
       [&]() {
         sub_result_1 = build_compatible_local_objects(
