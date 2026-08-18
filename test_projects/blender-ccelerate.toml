@@ -74,6 +74,8 @@ eager_obj_patterns = [
     # Generated DNA tables; makesdna_test supplies its own TUs for these symbols.
     "**/bf_dna.dir/dna.cc.o",
     "**/bf_dna.dir/dna_struct_ids.cc.o",
+    # Something related to SolveP2/SolveP3.
+    "**/extern_bullet.dir/**/BulletSoftBody/**.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
