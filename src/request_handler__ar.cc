@@ -107,8 +107,51 @@ optional<path> local_code_path_of_obj_if_exists(const path cwd,
 static BuildLocalObjectsResult
 build_compatible_local_objects(const ClientID &client_id,
                                const CompatibilityKey &compatibility_key,
-                               const span<const path> local_obj_files) {
+                               const span<const path> local_obj_files);
+
+static BuildLocalObjectsResult
+build_compatible_local_objects__split(const ClientID &client_id,
+                                      const CompatibilityKey &compatibility_key,
+                                      const span<const path> local_obj_files) {
+  BuildLocalObjectsResult sub_result_1;
+  BuildLocalObjectsResult sub_result_2;
+  const int split_index = local_obj_files.size() / 2;
+  const span<const path> files_1 = local_obj_files.first(split_index);
+  const span<const path> files_2 = local_obj_files.subspan(split_index);
+  tbb::parallel_invoke(
+      [&]() {
+        sub_result_1 = build_compatible_local_objects(
+            client_id, compatibility_key, files_1);
+      },
+      [&]() {
+        sub_result_2 = build_compatible_local_objects(
+            client_id, compatibility_key, files_2);
+      });
   BuildLocalObjectsResult result;
+  if (sub_result_1.success && sub_result_2.success) {
+    result.paths.insert(result.paths.end(),
+                        sub_result_1.paths.begin(),
+                        sub_result_1.paths.end());
+    result.paths.insert(result.paths.end(),
+                        sub_result_2.paths.begin(),
+                        sub_result_2.paths.end());
+    result.success = true;
+    return result;
+  }
+  return result;
+}
+
+static BuildLocalObjectsResult
+build_compatible_local_objects(const ClientID &client_id,
+                               const CompatibilityKey &compatibility_key,
+                               const span<const path> local_obj_files) {
+  const int size_threshold = 10;
+  BuildLocalObjectsResult result;
+  if (local_obj_files.size() > size_threshold) {
+    return build_compatible_local_objects__split(
+        client_id, compatibility_key, local_obj_files);
+  }
+
   const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
   const bool is_single = local_obj_files.size() == 1;
 
@@ -143,32 +186,8 @@ build_compatible_local_objects(const ClientID &client_id,
         client_id, "", compile_result.error_message().value_or(""));
     return result;
   }
-
-  BuildLocalObjectsResult sub_result_1;
-  BuildLocalObjectsResult sub_result_2;
-  const int split_index = local_obj_files.size() / 2;
-  const span<const path> files_1 = local_obj_files.first(split_index);
-  const span<const path> files_2 = local_obj_files.subspan(split_index);
-  tbb::parallel_invoke(
-      [&]() {
-        sub_result_1 = build_compatible_local_objects(
-            client_id, compatibility_key, files_1);
-      },
-      [&]() {
-        sub_result_2 = build_compatible_local_objects(
-            client_id, compatibility_key, files_2);
-      });
-  if (sub_result_1.success && sub_result_2.success) {
-    result.paths.insert(result.paths.end(),
-                        sub_result_1.paths.begin(),
-                        sub_result_1.paths.end());
-    result.paths.insert(result.paths.end(),
-                        sub_result_2.paths.begin(),
-                        sub_result_2.paths.end());
-    result.success = true;
-    return result;
-  }
-  return result;
+  return build_compatible_local_objects__split(
+      client_id, compatibility_key, local_obj_files);
 }
 
 BuildLocalObjectsResult
@@ -189,8 +208,6 @@ build_local_objects(const ClientID &client_id,
   for (const auto &[key, paths] : compatibility_map) {
     groups.emplace_back(&key, &paths);
   }
-
-  constexpr int max_chunk_size = 10;
 
   vector<BuildLocalObjectsResult> sub_results(groups.size());
   tbb::parallel_for(tbb::blocked_range<size_t>(0, groups.size(), 1),
