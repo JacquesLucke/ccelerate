@@ -111,7 +111,7 @@ handle_command__clang_cc1(const ClientID &client_id,
       return run_process_stream_output_traced(
           ProcessArgs()
               .arg(clang_for_ccelerate_exe)
-              .args({"compile_obj", "--"})
+              .args({"compile-object", "--"})
               .args(command.args)
               .working_dir(working_dir),
           [&](string stdout_data, string stderr_data) {

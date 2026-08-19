@@ -24,10 +24,12 @@ struct LocalCodeInfo {
   };
 
   path local_code_path;
+  path object_path;
   string source_language;
   vector<string> include_defines;
   vector<DirectInclude> direct_includes;
-  optional<vector<string>> cc1_args;
+  path cwd;
+  vector<string> cc1_args;
   vector<UsingNamespace> using_namespaces;
 
   string to_toml_string() const;

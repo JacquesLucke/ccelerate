@@ -58,8 +58,8 @@ static CompatibilityKey
 cc1_args_to_compatibility_key(const LocalCodeInfo &info) {
   CompatibilityKey key;
   size_t old_arg_i = 0;
-  while (old_arg_i < info.cc1_args->size()) {
-    const string &arg = (*info.cc1_args)[old_arg_i];
+  while (old_arg_i < info.cc1_args.size()) {
+    const string &arg = info.cc1_args[old_arg_i];
 
     // Skip some file arguments.
     if (arg == "-o" || arg == "-main-file-name" || arg == "-dependency-file" ||
@@ -69,7 +69,7 @@ cc1_args_to_compatibility_key(const LocalCodeInfo &info) {
     }
 
     // Input file is the last argument, skip it.
-    if (old_arg_i + 1 == info.cc1_args->size()) {
+    if (old_arg_i + 1 == info.cc1_args.size()) {
       old_arg_i++;
       continue;
     }
@@ -155,39 +155,54 @@ build_compatible_local_objects(const ClientID &client_id,
   const path &clang_for_ccelerate_exe = get_clang_for_ccelerate_executable();
   const bool is_single = local_obj_files.size() == 1;
 
-  ProcessArgs args;
-  args.arg(clang_for_ccelerate_exe).arg("compile-local-code");
-  for (const path &p : local_obj_files) {
-    args.arg("--input").arg(p);
-  }
-
-  const path out_path = create_temporary_path();
-  if (out_path.empty()) {
-    return result;
-  }
-  args.arg("--output").arg(out_path.native());
-  args.arg("--");
-  args.args(compatibility_key.cc1_args);
-
-  ExitCodeOrError compile_result = run_process_stream_output_traced(
-      args, [&](string stdout_data, string stderr_data) {
-        if (is_single) {
+  if (is_single) {
+    // Compile the object file with its original command instead of using the
+    // local code to produce more precise diagnostics.
+    const path local_obj_path = local_obj_files[0];
+    const optional<LocalCodeInfo> info =
+        LocalCodeInfo::from_path(local_obj_path);
+    if (!info) {
+      return result;
+    }
+    ProcessArgs args;
+    args.arg(clang_for_ccelerate_exe).arg("compile-object").arg("--");
+    args.args(info->cc1_args);
+    args.working_dir(info->cwd);
+    const ExitCodeOrError compile_result = run_process_stream_output_traced(
+        args, [&](string stdout_data, string stderr_data) {
           send_response_incomplete(
               client_id, std::move(stdout_data), std::move(stderr_data));
-        }
-      });
-  if (compile_result.exit_code() == 0) {
-    result.paths.push_back(out_path);
-    result.success = true;
+        });
+    if (compile_result.exit_code() == 0) {
+      result.paths.push_back(info->object_path);
+      result.success = true;
+      return result;
+    }
     return result;
+  } else {
+    ProcessArgs args;
+    args.arg(clang_for_ccelerate_exe).arg("compile-local-code");
+    for (const path &p : local_obj_files) {
+      args.arg("--input").arg(p);
+    }
+
+    const path out_path = create_temporary_path();
+    if (out_path.empty()) {
+      return result;
+    }
+    args.arg("--output").arg(out_path.native());
+    args.arg("--");
+    args.args(compatibility_key.cc1_args);
+
+    const ProcessResult compile_result = run_process_traced(args);
+    if (compile_result.exit_code() == 0) {
+      result.paths.push_back(out_path);
+      result.success = true;
+      return result;
+    }
+    return build_compatible_local_objects__split(
+        client_id, compatibility_key, local_obj_files);
   }
-  if (is_single) {
-    send_response_incomplete(
-        client_id, "", compile_result.error_message().value_or(""));
-    return result;
-  }
-  return build_compatible_local_objects__split(
-      client_id, compatibility_key, local_obj_files);
 }
 
 BuildLocalObjectsResult

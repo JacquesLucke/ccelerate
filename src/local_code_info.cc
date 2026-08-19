@@ -46,8 +46,14 @@ string LocalCodeInfo::to_toml_string() const {
   table["direct_includes"] = toml::value(direct_include_values, fmt);
   table["include_defines"] = toml::value(include_defines, fmt);
   table["source_language"] = source_language;
-  if (cc1_args) {
-    table["cc1_args"] = toml::value(*cc1_args, fmt);
+  if (!cc1_args.empty()) {
+    table["cc1_args"] = toml::value(cc1_args, fmt);
+  }
+  if (!cwd.empty()) {
+    table["cwd"] = cwd.string();
+  }
+  if (!object_path.empty()) {
+    table["object_path"] = object_path.string();
   }
   if (!using_namespaces.empty()) {
     table["using_namespaces"] = toml::value(using_namespace_values, fmt);
@@ -64,8 +70,7 @@ bool LocalCodeInfo::write_to_path(const path &path) const {
   return static_cast<bool>(file);
 }
 
-optional<LocalCodeInfo>
-LocalCodeInfo::from_toml_string(string toml_str) {
+optional<LocalCodeInfo> LocalCodeInfo::from_toml_string(string toml_str) {
   auto data_opt = toml::try_parse_str(std::move(toml_str));
   if (data_opt.is_err()) {
     return nullopt;
@@ -75,8 +80,7 @@ LocalCodeInfo::from_toml_string(string toml_str) {
   LocalCodeInfo info;
   info.local_code_path =
       path(toml::find_or_default<string>(data, "local_code_path"));
-  info.source_language =
-      toml::find_or_default<string>(data, "source_language");
+  info.source_language = toml::find_or_default<string>(data, "source_language");
   info.include_defines =
       toml::find_or_default<vector<string>>(data, "include_defines");
 
@@ -90,9 +94,9 @@ LocalCodeInfo::from_toml_string(string toml_str) {
     });
   }
 
-  if (data.contains("cc1_args")) {
-    info.cc1_args = toml::find<vector<string>>(data, "cc1_args");
-  }
+  info.cc1_args = toml::find_or_default<vector<string>>(data, "cc1_args");
+  info.cwd = path(toml::find_or_default<string>(data, "cwd"));
+  info.object_path = path(toml::find_or_default<string>(data, "object_path"));
 
   for (const toml::value &entry :
        toml::find_or_default<toml::array>(data, "using_namespaces")) {
@@ -105,8 +109,7 @@ LocalCodeInfo::from_toml_string(string toml_str) {
   return info;
 }
 
-optional<LocalCodeInfo>
-LocalCodeInfo::from_path(const path &path) {
+optional<LocalCodeInfo> LocalCodeInfo::from_path(const path &path) {
   std::ifstream file(path);
   if (!file.is_open()) {
     return nullopt;

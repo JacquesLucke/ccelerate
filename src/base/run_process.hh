@@ -37,7 +37,14 @@ struct ProcessArgs {
     return *this;
   }
 
-  ProcessArgs &args(std::ranges::range auto &&r) {
+  template <typename T>
+  static constexpr bool is_single_arg =
+      std::same_as<T, path> || std::same_as<T, string> ||
+      std::same_as<T, string_view>;
+
+  ProcessArgs &args(std::ranges::range auto &&r)
+    requires(!is_single_arg<std::remove_cvref_t<decltype(r)>>)
+  {
     this->data.args.insert(this->data.args.end(), std::begin(r), std::end(r));
     return *this;
   }

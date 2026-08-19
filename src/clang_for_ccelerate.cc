@@ -277,6 +277,8 @@ struct LocalCodeState {
   const Config &config;
   llvm::BumpPtrAllocator alloc;
 
+  path object_path;
+
   clang::InputKind input_kind;
   string raw_preprocessed;
   string code_for_parser;
@@ -1065,6 +1067,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       return 1;
     }
 
+    state.object_path = clang_instance.getFrontendOpts().OutputFile;
+
     const auto &inputs = clang_instance.getFrontendOpts().Inputs;
     if (!inputs.empty()) {
       state.input_kind = inputs.front().getKind();
@@ -1151,21 +1155,22 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       }
     }
 
-    LocalCodeInfo frontmatter;
-    frontmatter.local_code_path = code_path.filename();
-    frontmatter.source_language =
+    LocalCodeInfo info;
+    info.local_code_path = code_path.filename();
+    info.source_language =
         string(clang::languageToString(state.input_kind.getLanguage()));
-    frontmatter.include_defines = state.include_defines;
-    frontmatter.direct_includes.reserve(state.direct_includes.size());
+    info.include_defines = state.include_defines;
+    info.direct_includes.reserve(state.direct_includes.size());
     for (const LocalCodeInfo::DirectInclude &include : state.direct_includes) {
-      frontmatter.direct_includes.push_back(LocalCodeInfo::DirectInclude{
+      info.direct_includes.push_back(LocalCodeInfo::DirectInclude{
           .include_path =
               path(apply_path_maps(include.include_path, args.path_maps)),
           .is_system_header = include.is_system_header,
           .is_pure_c = include.is_pure_c,
       });
     }
-    if (args.path_maps.empty()) {
+    const bool write_all = args.path_maps.empty();
+    if (write_all) {
       // Can't properly apply path maps here, so skip it. Otherwise local-code
       // tests are not easily reproducible.
       vector<string> cc1_arg_strings;
@@ -1173,12 +1178,14 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       for (const char *arg : cc1_args) {
         cc1_arg_strings.emplace_back(arg);
       }
-      frontmatter.cc1_args = std::move(cc1_arg_strings);
+      info.cc1_args = std::move(cc1_arg_strings);
+      info.cwd = std::filesystem::current_path();
+      info.object_path = state.object_path;
     }
-    frontmatter.using_namespaces = std::move(state.using_namespaces);
-    if (!frontmatter.write_to_path(args.local_code_path)) {
+    info.using_namespaces = std::move(state.using_namespaces);
+    if (!info.write_to_path(args.local_code_path)) {
       fmt::println(stderr,
-                   "Could not write local code frontmatter: {}",
+                   "Could not write local code info: {}",
                    args.local_code_path.string());
       return 1;
     }
@@ -1491,7 +1498,7 @@ int clang_ops_main(const int argc, char **argv) {
   parse_args_cmd.add_option(
       "passthrough", parse_args.clang_args, "Arguments passed to clang");
 
-  CLI::App &compile_obj_cmd = *app.add_subcommand("compile_obj");
+  CLI::App &compile_obj_cmd = *app.add_subcommand("compile-object");
   Cmd_CompileObj compile_obj_args;
   compile_obj_cmd.add_option(
       "passthrough", compile_obj_args.clang_args, "Arguments passed to clang");
