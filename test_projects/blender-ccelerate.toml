@@ -76,6 +76,7 @@ eager_obj_patterns = [
     "**/bf_dna.dir/dna_struct_ids.cc.o",
     # Something related to SolveP2/SolveP3.
     "**/extern_bullet.dir/**/BulletSoftBody/**.o",
+    "**/extern_mantaflow.dir/preprocessed/grid*.cpp.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
@@ -84,3 +85,4 @@ pure_c_header_patterns = [
     # Same for curve_fit_nd.
     "**/curve_fit_nd.h",
 ]
+local_type_patterns = ["**LocalData"]

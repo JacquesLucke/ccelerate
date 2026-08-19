@@ -1,0 +1,11 @@
+# 1 "local_type_patterns.cc"
+namespace pattern_local_type {
+struct OnlyLocalType__ {
+  int x;
+  OnlyLocalType__(int value) : x(value) {}
+};
+
+OnlyLocalType__ make_value() { return OnlyLocalType__(7); }
+}
+
+int main() { return pattern_local_type::make_value().x; }

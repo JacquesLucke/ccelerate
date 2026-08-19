@@ -1,5 +1,4 @@
 ARRAY_SIZE
-typeList
 
 /home/jacques/blender/blender/source/blender/editors/sculpt_paint/mesh/brushes/clay.cc:189:39: error: reference to 'LocalData' is ambiguous
   189 |   threading::EnumerableThreadSpecific<LocalData> all_tls;

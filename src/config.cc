@@ -25,6 +25,8 @@ optional<ConfigFile> ConfigFile::from_toml_string(string toml_str) {
   toml::value &data = data_opt.unwrap();
   auto local_header_patterns =
       toml::find_or_default<vector<string>>(data, "local_header_patterns");
+  auto local_type_patterns =
+      toml::find_or_default<vector<string>>(data, "local_type_patterns");
   auto pure_c_header_patterns =
       toml::find_or_default<vector<string>>(data, "pure_c_header_patterns");
   auto include_defines =
@@ -34,6 +36,7 @@ optional<ConfigFile> ConfigFile::from_toml_string(string toml_str) {
 
   ConfigFile config_file;
   config_file.local_header_patterns = std::move(local_header_patterns);
+  config_file.local_type_patterns = std::move(local_type_patterns);
   config_file.pure_c_header_patterns = std::move(pure_c_header_patterns);
   config_file.include_defines = std::move(include_defines);
   config_file.eager_obj_patterns = std::move(eager_obj_patterns);
@@ -100,6 +103,7 @@ static string glob_to_regex(string_view glob) {
 Config Config::from_config_files(const span<const ConfigFile> config_files) {
   Config config;
   string is_local_header_expr;
+  string is_local_type_expr;
   string is_pure_c_header_expr;
   string is_include_define_expr;
   string is_eager_obj_expr;
@@ -113,6 +117,9 @@ Config Config::from_config_files(const span<const ConfigFile> config_files) {
     for (const string &pattern : config_file.local_header_patterns) {
       append_pattern(is_local_header_expr, pattern);
     }
+    for (const string &pattern : config_file.local_type_patterns) {
+      append_pattern(is_local_type_expr, pattern);
+    }
     for (const string &pattern : config_file.pure_c_header_patterns) {
       append_pattern(is_pure_c_header_expr, pattern);
     }
@@ -125,6 +132,9 @@ Config Config::from_config_files(const span<const ConfigFile> config_files) {
   }
   if (!is_local_header_expr.empty()) {
     config.is_local_header_ = make_unique<re2::RE2>(is_local_header_expr);
+  }
+  if (!is_local_type_expr.empty()) {
+    config.is_local_type_ = make_unique<re2::RE2>(is_local_type_expr);
   }
   if (!is_pure_c_header_expr.empty()) {
     config.is_pure_c_header_ = make_unique<re2::RE2>(is_pure_c_header_expr);
@@ -143,6 +153,13 @@ bool Config::is_local_header(const path &path) const {
     return false;
   }
   return re2::RE2::FullMatch(path.string(), *is_local_header_);
+}
+
+bool Config::is_local_type(string_view type_name) const {
+  if (!is_local_type_ || !is_local_type_->ok()) {
+    return false;
+  }
+  return re2::RE2::FullMatch(type_name, *is_local_type_);
 }
 
 bool Config::is_pure_c_header(const path &path) const {

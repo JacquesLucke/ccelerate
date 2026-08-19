@@ -782,9 +782,6 @@ public:
   }
 
   bool name_should_be_localized(const clang::NamedDecl &decl) {
-    if (decl.isExternallyVisible()) {
-      return false;
-    }
     if (const auto *ctor = llvm::dyn_cast<clang::CXXConstructorDecl>(&decl)) {
       if (ctor->isInheritingConstructor()) {
         return false;
@@ -799,6 +796,9 @@ public:
       return this->function_overload_set_should_be_localized(*fd);
     }
     if (const auto *vd = llvm::dyn_cast<clang::VarDecl>(&decl)) {
+      if (decl.isExternallyVisible()) {
+        return false;
+      }
       if (const clang::VarDecl *def = vd->getDefinition()) {
         const clang::DeclContext *dc = def->getDeclContext();
         if (dc->isFunctionOrMethod() || dc->isRecord()) {
@@ -813,10 +813,16 @@ public:
         if (dc->isFunctionOrMethod() || dc->isRecord()) {
           return false;
         }
+        if (decl.isExternallyVisible()) {
+          return state_.config.is_local_type(def->getQualifiedNameAsString());
+        }
         return this->location_is_in_local_code(def->getLocation());
       }
     }
     if (const auto *ecd = llvm::dyn_cast<clang::EnumConstantDecl>(&decl)) {
+      if (decl.isExternallyVisible()) {
+        return false;
+      }
       const auto *ed = llvm::cast<clang::EnumDecl>(ecd->getDeclContext());
       // Scoped enumerators are not injected into the enclosing scope, so
       // renaming the enum type is enough to avoid collisions.
@@ -832,6 +838,9 @@ public:
       }
     }
     if (const auto *td = llvm::dyn_cast<clang::TypedefNameDecl>(&decl)) {
+      if (decl.isExternallyVisible()) {
+        return state_.config.is_local_type(td->getQualifiedNameAsString());
+      }
       if (!td->isInAnonymousNamespace()) {
         return false;
       }
@@ -843,8 +852,8 @@ public:
         if (!this->location_is_in_local_code(redecl->getLocation())) {
           return false;
         }
-        return true;
       }
+      return true;
     }
     return false;
   }
