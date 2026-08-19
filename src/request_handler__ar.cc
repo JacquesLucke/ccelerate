@@ -80,7 +80,8 @@ cc1_args_to_compatibility_key(const LocalCodeInfo &info) {
   }
   key.language = info.source_language;
   key.include_defines = info.include_defines;
-  for (const LocalCodeInfo::UsingNamespace &using_namespace : info.using_namespaces) {
+  for (const LocalCodeInfo::UsingNamespace &using_namespace :
+       info.using_namespaces) {
     key.using_namespaces.push_back(
         fmt::format("{}{}", using_namespace.parent, using_namespace.used));
   }
@@ -188,6 +189,8 @@ build_local_objects(const ClientID &client_id,
   for (const auto &[key, paths] : compatibility_map) {
     groups.emplace_back(&key, &paths);
   }
+
+  constexpr int max_chunk_size = 10;
 
   vector<BuildLocalObjectsResult> sub_results(groups.size());
   tbb::parallel_for(tbb::blocked_range<size_t>(0, groups.size(), 1),
