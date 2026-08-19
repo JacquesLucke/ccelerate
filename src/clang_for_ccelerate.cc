@@ -45,7 +45,7 @@
 #include "config.hh"
 #include "error_code.hh"
 #include "get_current_executable_path.hh"
-#include "local_code_frontmatter.hh"
+#include "local_code_info.hh"
 #include "memory.hh"
 #include "span.hh"
 #include "string.hh"
@@ -284,12 +284,12 @@ struct LocalCodeState {
   vector<int> map_parser_to_local_lines;
   // Include order needs to be preserved.
   std::unordered_map<path, size_t> direct_include_index;
-  vector<DirectInclude> direct_includes;
+  vector<LocalCodeInfo::DirectInclude> direct_includes;
 
   std::unordered_set<string> seen_local_define_names;
   std::vector<string> include_defines;
 
-  vector<UsingNamespaceInfo> using_namespaces;
+  vector<LocalCodeInfo::UsingNamespace> using_namespaces;
 
   optional<clang::Rewriter> rewriter;
   string rewrite_result;
@@ -473,7 +473,7 @@ public:
                 const bool is_pure_c =
                     state_.config.is_pure_c_header(include_path);
                 if (inserted) {
-                  state_.direct_includes.push_back(DirectInclude{
+                  state_.direct_includes.push_back(LocalCodeInfo::DirectInclude{
                       .include_path = include_path,
                       .is_system_header = line_marker->is_system_header,
                       .is_pure_c = is_pure_c,
@@ -600,7 +600,7 @@ public:
       return;
     }
     const clang::PrintingPolicy policy(result.Context->getLangOpts());
-    state_.using_namespaces.push_back(UsingNamespaceInfo{
+    state_.using_namespaces.push_back(LocalCodeInfo::UsingNamespace{
         .parent = format_parent_namespace(file_context),
         .used = format_used_namespace(*ud, policy),
     });
@@ -1163,14 +1163,14 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       }
     }
 
-    LocalCodeFrontmatter frontmatter;
+    LocalCodeInfo frontmatter;
     frontmatter.local_code_path = code_path.filename();
     frontmatter.source_language =
         string(clang::languageToString(state.input_kind.getLanguage()));
     frontmatter.include_defines = state.include_defines;
     frontmatter.direct_includes.reserve(state.direct_includes.size());
-    for (const DirectInclude &include : state.direct_includes) {
-      frontmatter.direct_includes.push_back(DirectInclude{
+    for (const LocalCodeInfo::DirectInclude &include : state.direct_includes) {
+      frontmatter.direct_includes.push_back(LocalCodeInfo::DirectInclude{
           .include_path =
               path(apply_path_maps(include.include_path, args.path_maps)),
           .is_system_header = include.is_system_header,
@@ -1201,7 +1201,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
 
 struct CompileLocalCodeState {
   std::unordered_map<path, size_t> seen_direct_include_paths;
-  vector<DirectInclude> ordered_direct_include_paths;
+  vector<LocalCodeInfo::DirectInclude> ordered_direct_include_paths;
   vector<string> all_include_defines;
   string merged_local_code;
   string language;
@@ -1256,7 +1256,7 @@ static void add_direct_include(CompileLocalCodeState &state,
   const auto [it, inserted] = state.seen_direct_include_paths.emplace(
       include_path, state.ordered_direct_include_paths.size());
   if (inserted) {
-    state.ordered_direct_include_paths.push_back(DirectInclude{
+    state.ordered_direct_include_paths.push_back(LocalCodeInfo::DirectInclude{
         .include_path = std::move(include_path),
         .is_system_header = is_system_header,
         .is_pure_c = is_pure_c,
@@ -1308,15 +1308,15 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
 
   // Gather inputs from frontmatter (.toml) + preprocessed code (.i / .ii).
   for (const path &frontmatter_path : args.local_code_paths) {
-    optional<LocalCodeFrontmatter> frontmatter_opt =
-        LocalCodeFrontmatter::from_path(frontmatter_path);
+    optional<LocalCodeInfo> frontmatter_opt =
+        LocalCodeInfo::from_path(frontmatter_path);
     if (!frontmatter_opt) {
       fmt::println(stderr,
                    "Could not read local code frontmatter: {}",
                    frontmatter_path.string());
       return 1;
     }
-    const LocalCodeFrontmatter &frontmatter = *frontmatter_opt;
+    const LocalCodeInfo &frontmatter = *frontmatter_opt;
 
     path code_path = frontmatter.local_code_path;
     if (code_path.empty()) {
@@ -1338,7 +1338,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     string code_str((std::istreambuf_iterator<char>(code_fs)),
                     std::istreambuf_iterator<char>());
 
-    for (const DirectInclude &include : frontmatter.direct_includes) {
+    for (const LocalCodeInfo::DirectInclude &include : frontmatter.direct_includes) {
       add_direct_include(state,
                          include.include_path,
                          include.is_system_header,
@@ -1391,7 +1391,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     system_wrapper_bodies.reserve(state.ordered_direct_include_paths.size());
     size_t system_wrapper_i = 0;
     const bool wrap_pure_c = state.language == "C++";
-    for (const DirectInclude &include : state.ordered_direct_include_paths) {
+    for (const LocalCodeInfo::DirectInclude &include : state.ordered_direct_include_paths) {
       const string spelling =
           get_best_include_path_spelling(include.include_path, search_prefixes);
       const bool needs_extern_c = wrap_pure_c && include.is_pure_c;

@@ -10,7 +10,7 @@
 #include "clang_for_ccelerate_io.hh"
 #include "config.hh"
 #include "get_current_executable_path.hh"
-#include "local_code_frontmatter.hh"
+#include "local_code_info.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
 

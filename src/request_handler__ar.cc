@@ -11,7 +11,7 @@
 #include "clang_call.hh"
 #include "config.hh"
 #include "create_temporary_path.hh"
-#include "local_code_frontmatter.hh"
+#include "local_code_info.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
 #include "string.hh"
@@ -55,7 +55,7 @@ template <> struct std::hash<ccelerate::CompatibilityKey> {
 namespace ccelerate {
 
 static CompatibilityKey
-cc1_args_to_compatibility_key(const LocalCodeFrontmatter &info) {
+cc1_args_to_compatibility_key(const LocalCodeInfo &info) {
   CompatibilityKey key;
   size_t old_arg_i = 0;
   while (old_arg_i < info.cc1_args->size()) {
@@ -80,7 +80,7 @@ cc1_args_to_compatibility_key(const LocalCodeFrontmatter &info) {
   }
   key.language = info.source_language;
   key.include_defines = info.include_defines;
-  for (const UsingNamespaceInfo &using_namespace : info.using_namespaces) {
+  for (const LocalCodeInfo::UsingNamespace &using_namespace : info.using_namespaces) {
     key.using_namespaces.push_back(
         fmt::format("{}{}", using_namespace.parent, using_namespace.used));
   }
@@ -175,8 +175,8 @@ build_local_objects(const ClientID &client_id,
                     const span<const path> local_obj_files) {
   std::unordered_map<CompatibilityKey, vector<path>> compatibility_map;
   for (const path &local_obj_path : local_obj_files) {
-    std::optional<LocalCodeFrontmatter> frontmatter_opt =
-        LocalCodeFrontmatter::from_path(local_obj_path);
+    std::optional<LocalCodeInfo> frontmatter_opt =
+        LocalCodeInfo::from_path(local_obj_path);
     if (!frontmatter_opt) {
       return {};
     }

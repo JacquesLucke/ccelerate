@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-#include "local_code_frontmatter.hh"
+#include "local_code_info.hh"
 
 #include <fstream>
 #include <toml.hpp>
@@ -16,7 +16,7 @@ static string_view trim_whitespace(const string_view str) {
   return str.substr(start, end - start + 1);
 }
 
-string LocalCodeFrontmatter::to_toml_string() const {
+string LocalCodeInfo::to_toml_string() const {
   toml::array_format_info fmt;
   fmt.fmt = toml::array_format::multiline;
 
@@ -34,7 +34,7 @@ string LocalCodeFrontmatter::to_toml_string() const {
 
   vector<toml::value> using_namespace_values;
   using_namespace_values.reserve(using_namespaces.size());
-  for (const UsingNamespaceInfo &info : using_namespaces) {
+  for (const UsingNamespace &info : using_namespaces) {
     toml::value entry;
     entry["parent"] = info.parent;
     entry["used"] = info.used;
@@ -55,7 +55,7 @@ string LocalCodeFrontmatter::to_toml_string() const {
   return string(trim_whitespace(toml::format(table))) + '\n';
 }
 
-bool LocalCodeFrontmatter::write_to_path(const path &path) const {
+bool LocalCodeInfo::write_to_path(const path &path) const {
   std::ofstream file(path);
   if (!file.is_open()) {
     return false;
@@ -64,25 +64,25 @@ bool LocalCodeFrontmatter::write_to_path(const path &path) const {
   return static_cast<bool>(file);
 }
 
-optional<LocalCodeFrontmatter>
-LocalCodeFrontmatter::from_toml_string(string toml_str) {
+optional<LocalCodeInfo>
+LocalCodeInfo::from_toml_string(string toml_str) {
   auto data_opt = toml::try_parse_str(std::move(toml_str));
   if (data_opt.is_err()) {
     return nullopt;
   }
   toml::value &data = data_opt.unwrap();
 
-  LocalCodeFrontmatter frontmatter;
-  frontmatter.local_code_path =
+  LocalCodeInfo info;
+  info.local_code_path =
       path(toml::find_or_default<string>(data, "local_code_path"));
-  frontmatter.source_language =
+  info.source_language =
       toml::find_or_default<string>(data, "source_language");
-  frontmatter.include_defines =
+  info.include_defines =
       toml::find_or_default<vector<string>>(data, "include_defines");
 
   for (const toml::value &entry :
        toml::find_or_default<toml::array>(data, "direct_includes")) {
-    frontmatter.direct_includes.push_back(DirectInclude{
+    info.direct_includes.push_back(DirectInclude{
         .include_path = path(toml::find<string>(entry, "path")),
         .is_system_header =
             toml::find_or<bool>(entry, "is_system_header", false),
@@ -91,29 +91,29 @@ LocalCodeFrontmatter::from_toml_string(string toml_str) {
   }
 
   if (data.contains("cc1_args")) {
-    frontmatter.cc1_args = toml::find<vector<string>>(data, "cc1_args");
+    info.cc1_args = toml::find<vector<string>>(data, "cc1_args");
   }
 
   for (const toml::value &entry :
        toml::find_or_default<toml::array>(data, "using_namespaces")) {
-    frontmatter.using_namespaces.push_back(UsingNamespaceInfo{
+    info.using_namespaces.push_back(UsingNamespace{
         .parent = toml::find_or_default<string>(entry, "parent"),
         .used = toml::find_or_default<string>(entry, "used"),
     });
   }
 
-  return frontmatter;
+  return info;
 }
 
-optional<LocalCodeFrontmatter>
-LocalCodeFrontmatter::from_path(const path &path) {
+optional<LocalCodeInfo>
+LocalCodeInfo::from_path(const path &path) {
   std::ifstream file(path);
   if (!file.is_open()) {
     return nullopt;
   }
   string toml_str((std::istreambuf_iterator<char>(file)),
                   std::istreambuf_iterator<char>());
-  return LocalCodeFrontmatter::from_toml_string(std::move(toml_str));
+  return LocalCodeInfo::from_toml_string(std::move(toml_str));
 }
 
 } // namespace ccelerate

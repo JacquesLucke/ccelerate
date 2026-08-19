@@ -22,7 +22,7 @@
 #include "base/vector.hh"
 #include "clang_call.hh"
 #include "default_endpoint.hh"
-#include "local_code_frontmatter.hh"
+#include "local_code_info.hh"
 
 namespace ccelerate::tests {
 
@@ -253,8 +253,8 @@ public:
 
     ASSERT_TRUE(std::filesystem::exists(output_toml_path)) << output_toml_path;
 
-    const optional<LocalCodeFrontmatter> frontmatter_opt =
-        LocalCodeFrontmatter::from_path(output_toml_path);
+    const optional<LocalCodeInfo> frontmatter_opt =
+        LocalCodeInfo::from_path(output_toml_path);
     ASSERT_TRUE(frontmatter_opt.has_value()) << output_toml_path;
     path output_code_path = frontmatter_opt->local_code_path;
     ASSERT_FALSE(output_code_path.empty());
