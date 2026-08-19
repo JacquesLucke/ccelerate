@@ -77,6 +77,7 @@ eager_obj_patterns = [
     # Something related to SolveP2/SolveP3.
     "**/extern_bullet.dir/**/BulletSoftBody/**.o",
     "**/extern_mantaflow.dir/preprocessed/grid*.cpp.o",
+    "**/audaspace/**/PluginManager.cpp.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
