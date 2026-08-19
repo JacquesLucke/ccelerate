@@ -1,0 +1,218 @@
+ARRAY_SIZE
+typeList
+
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/mesh/brushes/clay.cc:189:39: error: reference to 'LocalData' is ambiguous
+  189 |   threading::EnumerableThreadSpecific<LocalData> all_tls;
+      |                                       ^
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/mesh/brushes/bmesh_topology_rake.cc:32:8: note: candidate found by name lookup is 'blender::ed::sculpt_paint::brushes::bmesh_topology_rake_cc::LocalData'
+   32 | struct LocalData {
+      |        ^
+
+/home/jacques/blender/blender/source/blender/depsgraph/intern/depsgraph_query_iter_test.cc:36:14: error: cannot initialize a variable of type 'Depsgraph *' (aka 'blender::deg::Depsgraph *') with an rvalue of type 'Depsgraph *' (aka 'blender::Depsgraph *')
+   36 |   Depsgraph *depsgraph = DEG_graph_new(bmain, scene, view_layer, DAG_EVAL_VIEWPORT);
+      |              ^           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In file included from core_to_preprocess:16:
+In file included from /home/jacques/blender/blender/source/blender/io/usd/intern/usd_reader_camera.hh:11:
+In file included from /home/jacques/blender/blender/source/blender/io/usd/intern/usd_reader_xform.hh:11:
+In file included from /home/jacques/blender/blender/source/blender/io/usd/intern/usd_reader_prim.hh:11:
+/home/jacques/blender/blender/source/blender/io/usd/intern/usd_hash_types.hh:29:19: error: explicit specialization of 'blender::DefaultHash<pxrBlender_v26_03__pxrReserved__::SdfPath>' after instantiation
+   29 | template<> struct DefaultHash<pxr::SdfPath> {
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~~
+/home/jacques/blender/blender/source/blender/blenlib/BLI_map.hh:156:30: note: implicit instantiation first required here
+  156 |   [[no_unique_address]] Hash hash_;
+      |                              ^
+
+/home/jacques/blender/blender/source/blender/freestyle/intern/geometry/FitCurve.cpp:23:7: error: typedef redefinition with different types ('Vector2 *' (aka 'Freestyle::Point2 *') vs 'Freestyle::BezierCurve')
+   23 | using BezierCurve = Vector2 *;
+      |       ^
+/home/jacques/blender/blender/source/blender/freestyle/intern/geometry/Bezier.h:48:7: note: previous definition is here
+   48 | class BezierCurve {
+      |       ^
+
+/home/jacques/blender/blender/intern/libmv/intern/tracksN.cc:10:11: error: target of using declaration conflicts with declaration already in scope
+   10 | using mv::Marker;
+      |           ^
+/home/jacques/blender/blender/intern/libmv/libmv/autotrack/predict_tracks.h:29:8: note: target of using declaration
+   29 | struct Marker;
+      |        ^
+/home/jacques/blender/blender/intern/libmv/libmv/simple_pipeline/tracks.h:46:8: note: conflicting declaration
+   46 | struct Marker {
+      |        ^
+
+/home/jacques/blender/blender/extern/mantaflow/helper/pwrapper/pvec3.cpp:27:8: error: redefinition of 'PbVec3'
+   27 | struct PbVec3 {
+      |        ^
+/home/jacques/blender/blender/extern/mantaflow/helper/pwrapper/pconvert.cpp:30:8: note: previous definition is here
+   30 | struct PbVec3 {
+      |        ^
+
+/home/jacques/blender/blender/source/blender/editors/animation/transformable.cc:258:23: error: no member named 'get_pose_bone_rna_path' in namespace 'blender::ed::animrig'; did you mean '::blender::animrig::get_pose_bone_rna_path'?
+  258 |   rna_path_from_id_ = animrig::get_pose_bone_rna_path(pchan);
+      |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      |                       ::blender::animrig::get_pose_bone_rna_path
+
+/home/jacques/blender/blender/source/blender/bmesh/intern/bmesh_marking.cc:116:3: error: use of undeclared identifier 'BM_iter_parallel'
+  116 |   BM_iter_parallel(bm, iter_type, range_func, nullptr, &settings);
+      |   ^
+
+
+__BLI_TASK_H__
+
+/home/jacques/blender/blender/source/blender/draw/intern/draw_color_management.cc:66:16: error: cannot initialize a variable of type 'const Image *' with an lvalue of type 'struct Image *const'
+   66 |   const Image *image = sima.image;
+      |                ^       ~~~~~~~~~~
+
+/home/jacques/blender/blender/source/blender/editors/animation/anim_asset_ops.cc:122:3: error: reference to 'Strip' is ambiguous
+  122 |   Strip &strip = layer.strip_add(action, Strip::Type::Keyframe);
+      |   ^
+/home/jacques/blender/blender/source/blender/sequencer/SEQ_utils.hh:20:8: note: candidate found by name lookup is 'blender::Strip'
+   20 | struct Strip;
+      |        ^
+/home/jacques/blender/blender/source/blender/animrig/ANIM_action_iterators.hh:24:7: note: candidate found by name lookup is 'blender::animrig::Strip'
+   24 | class Strip;
+      |       ^
+
+
+/home/jacques/blender/blender/source/blender/editors/pointcloud/intern/join.cc:70:50: error: no member named 'realize_instances' in namespace 'blender::ed::geometry'
+   70 |   bke::GeometrySet realized_geometry = geometry::realize_instances(
+      |                                        ~~~~~~~~~~^
+
+
+In file included from core_to_preprocess:12:
+In file included from /__ccelerate__/system_include_0.h:2:
+/home/jacques/blender/blender/lib/linux_x64/epoxy/include/epoxy/gl.h:38:2: error: epoxy/gl.h must be included before (or in place of) GL/gl.h
+   38 | #error epoxy/gl.h must be included before (or in place of) GL/gl.h
+      |  ^
+1 error generated.
+
+
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/mesh/sculpt_boundary_tests.cc:17:7: error: redefinition of 'MeshTests'
+   17 | class MeshTests : public bke::BlenderGTestBase {
+      |       ^
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/mesh/mesh_brush_common_tests.cc:22:7: note: previous definition is here
+   22 | class MeshTests : public bke::BlenderGTestBase {
+      |       ^
+
+
+/home/jacques/blender/builds/ccelerate/extern/audaspace/PluginManager.cpp:70:7: error: redefinition of 'PulseAudioDevice'
+   70 | class PulseAudioDevice { public: static void registerPlugin(); };
+      |       ^
+/home/jacques/blender/blender/extern/audaspace/plugins/pulseaudio/PulseAudioDevice.h:40:7: note: previous definition is here
+   40 | class PulseAudioDevice : public MixingThreadDevice
+      |       ^
+/home/jacques/blender/builds/ccelerate/extern/audaspace/PluginManager.cpp:71:7: error: redefinition of 'PipeWireDevice'
+   71 | class PipeWireDevice { public: static void registerPlugin(); };
+      |       ^
+/home/jacques/blender/blender/extern/audaspace/plugins/pipewire/PipeWireDevice.h:40:7: note: previous definition is here
+   40 | class PipeWireDevice : public MixingThreadDevice
+      |       ^
+
+
+/home/jacques/blender/blender/source/blender/editors/interface/templates/interface_template_curve_profile.cc:32:8: error: redefinition of 'CurveRuntimeProperties'
+   32 | struct CurveRuntimeProperties {
+      |        ^
+/home/jacques/blender/blender/source/blender/editors/interface/templates/interface_template_curve_mapping.cc:35:8: note: previous definition is here
+   35 | struct CurveRuntimeProperties {
+      |        ^
+
+
+In file included from core_to_preprocess:1:
+In file included from /home/jacques/blender/blender/source/blender/blenlib/BLI_math_vector.hh:13:
+/home/jacques/blender/blender/source/blender/blenlib/BLI_math_base.hh:276:29: error: invalid operands to binary expression ('QuaternionBase<float>' and 'QuaternionBase<float>')
+  276 |   auto result = a * (1 - t) + b * t;
+      |                 ~~~~~~~~~~~ ^ ~~~~~
+/home/jacques/blender/blender/source/blender/blenlib/BLI_length_parameterize.hh:63:37: note: in instantiation of function template specialization 'blender::math::interpolate<blender::math::QuaternionBase<float>, float>' requested here
+   63 |         dst[dst_segment[i]] = math::interpolate(src.last(), src.first(), factor);
+      |                                     ^
+/home/jacques/blender/blender/source/blender/blenlib/BLI_length_parameterize.hh:78:3: note: in instantiation of function template specialization 'blender::length_parameterize::interpolate_to_masked<blender::math::QuaternionBase<float>>' requested here
+   78 |   interpolate_to_masked(src, indices, factors, dst.index_range(), dst);
+      |   ^
+
+
+/home/jacques/blender/blender/source/blender/gpu/vulkan/vk_texture.hh:179:85: error: functions that differ only in their return type cannot be overloaded
+  179 | static inline __attribute__((always_inline)) __attribute__((__unused__)) VKTexture *unwrap(Texture *texture)
+      |                                                                          ~~~~~~~~~~~^
+/home/jacques/blender/blender/source/blender/gpu/opengl/gl_texture.hh:375:85: note: previous definition is here
+  375 | static inline __attribute__((always_inline)) __attribute__((__unused__)) GLTexture *unwrap(Texture *tex)
+      |                                                                          ~~~~~~~~~~~^
+
+/home/jacques/blender/blender/source/blender/io/usd/intern/usd_mesh_utils.cc:123:18: error: no member named 'displayColor' in namespace 'blender::io::usd::usdtokens'; did you mean '::blender::usdtokens::displayColor'?
+  123 |   if (pv_name == usdtokens::displayColor &&
+      |                  ^~~~~~~~~~~~~~~~~~~~~~~
+      |                  ::blender::usdtokens::displayColor
+/home/jacques/blender/blender/source/blender/io/usd/intern/usd_attribute_utils.hh:37:27: note: '::blender::usdtokens::displayColor' declared here
+   37 | inline const pxr::TfToken displayColor("displayColor", pxr::TfToken::Immortal);
+      |                           ^
+
+
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/grease_pencil/vertex_paint.cc:93:30: error: no template named 'Traits' in namespace 'blender::ed::sculpt_paint::color'; did you mean '::blender::color::Traits'?
+   93 |               using Traits = color::Traits<Color>;
+      |                              ^~~~~~~~~~~~~
+      |                              ::blender::color::Traits
+/home/jacques/blender/blender/source/blender/blenlib/BLI_color_mix.hh:99:22: note: '::blender::color::Traits' declared here
+   99 | template<typename T> using Traits = typename TraitsType<T>::type;
+      |                      ^
+
+
+In file included from core_to_preprocess:31:
+/home/jacques/blender/blender/source/blender/draw/engines/workbench/workbench_private.hh:264:3: error: reference to 'UniformBuffer' is ambiguous
+  264 |   UniformBuffer<WorldData> world_buf = {};
+      |   ^
+/home/jacques/blender/blender/source/blender/draw/engines/eevee/eevee_world.hh:23:8: note: candidate found by name lookup is 'blender::UniformBuffer'
+   23 | struct UniformBuffer;
+      |        ^
+/home/jacques/blender/blender/source/blender/draw/intern/DRW_gpu_wrapper.hh:305:7: note: candidate found by name lookup is 'blender::draw::UniformBuffer'
+  305 | class UniformBuffer : public T, public detail::UniformCommon<T, 1, false> {
+      |       ^
+
+
+/home/jacques/blender/blender/source/blender/bmesh/operators/bmo_space_edge_loops_evenly.cc:63:8: error: redefinition of 'SplineCoeffs'
+   63 | struct SplineCoeffs {
+      |        ^
+/home/jacques/blender/blender/source/blender/bmesh/operators/bmo_relax_edge_loops.cc:52:8: note: previous definition is here
+   52 | struct SplineCoeffs {
+      |        ^
+
+
+/home/jacques/blender/blender/source/blender/editors/grease_pencil/intern/grease_pencil_select.cc:1201:12: error: redefinition of 'StrokeType'
+ 1201 | enum class StrokeType : int8_t { Stroke, Fill };
+      |            ^
+/home/jacques/blender/blender/source/blender/editors/grease_pencil/intern/grease_pencil_edit.cc:5090:12: note: previous definition is here
+ 5090 | enum class StrokeType : int8_t { Stroke = 0, Fill = 1, Both = 2 };
+      |            ^
+
+
+/home/jacques/blender/blender/source/blender/io/alembic/exporter/abc_writer_curves.h:17:26: error: expected unqualified-id
+   17 | extern const std::string "blender:resolution";
+      |    
+
+
+In file included from core_to_preprocess:31:
+/home/jacques/blender/blender/source/blender/draw/engines/workbench/workbench_private.hh:264:3: error: reference to 'UniformBuffer' is ambiguous
+  264 |   UniformBuffer<WorldData> world_buf = {};
+      |   ^
+/home/jacques/blender/blender/source/blender/draw/engines/eevee/eevee_world.hh:23:8: note: candidate found by name lookup is 'blender::UniformBuffer'
+   23 | struct UniformBuffer;
+      |        ^
+/home/jacques/blender/blender/source/blender/draw/intern/DRW_gpu_wrapper.hh:305:7: note: candidate found by name lookup is 'blender::draw::UniformBuffer'
+  305 | class UniformBuffer : public T, public detail::UniformCommon<T, 1, false> {
+      |       ^
+
+
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/mesh/sculpt_trim.cc:111:10: error: no member named 'boolean' in namespace 'blender::ed::geometry'; did you mean '::blender::geometry::boolean'?
+  111 |     {int(geometry::boolean::Solver::MeshArr),
+      |          ^~~~~~~~~~~~~~~~~
+      |          ::blender::geometry::boolean
+/home/jacques/blender/blender/source/blender/geometry/GEO_mesh_boolean.hh:16:21: note: '::blender::geometry::boolean' declared here
+   16 | namespace geometry::boolean {
+      |                     ^
+
+
+/home/jacques/blender/blender/source/blender/editors/sculpt_paint/curves/sculpt_add.cc:201:11: error: no type named 'ReverseUVSampler' in namespace 'blender::ed::geometry'; did you mean '::blender::geometry::ReverseUVSampler'?
+  201 |     const geometry::ReverseUVSampler reverse_uv_sampler{surface_uv_map, surface_corner_tris_orig};
+      |           ^~~~~~~~~~~~~~~~~~~~~~~~~~
+      |           ::blender::geometry::ReverseUVSampler
+/home/jacques/blender/blender/source/blender/geometry/GEO_reverse_uv_sampler.hh:17:7: note: '::blender::geometry::ReverseUVSampler' declared here
+   17 | class ReverseUVSampler {
+      |       ^
