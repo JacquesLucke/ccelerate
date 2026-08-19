@@ -31,5 +31,13 @@ ninja install
 real	35m25.738s
 user	0m39.180s
 sys	    0m57.626s
+```
 
+## 2026-08-19
+
+```
+ninja install
+real	27m29.136s
+user	0m36.717s
+sys	0m53.067s
 ```
