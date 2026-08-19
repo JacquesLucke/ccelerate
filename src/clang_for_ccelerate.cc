@@ -958,19 +958,7 @@ public:
 
 private:
   bool should_ignore_diagnostic(const clang::Diagnostic &info) const {
-    // Ignore all at this level for now.
-    return true;
-    const uint32_t id = info.getID();
-    // There can be false positives of this warning due to
-    // #shouldSkipFunctionBody.
-    if (id == clang::diag::warn_unused_private_field) {
-      assert(info.hasSourceManager());
-      return !mapped_location_is_local(
-          state_, info.getLocation(), info.getSourceManager());
-    }
-    if (id == clang::diag::warn_unused_function) {
-      return true;
-    }
+    // Don't ignore any diagnostics for now.
     return false;
   }
 };
@@ -1338,7 +1326,8 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     string code_str((std::istreambuf_iterator<char>(code_fs)),
                     std::istreambuf_iterator<char>());
 
-    for (const LocalCodeInfo::DirectInclude &include : frontmatter.direct_includes) {
+    for (const LocalCodeInfo::DirectInclude &include :
+         frontmatter.direct_includes) {
       add_direct_include(state,
                          include.include_path,
                          include.is_system_header,
@@ -1391,7 +1380,8 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     system_wrapper_bodies.reserve(state.ordered_direct_include_paths.size());
     size_t system_wrapper_i = 0;
     const bool wrap_pure_c = state.language == "C++";
-    for (const LocalCodeInfo::DirectInclude &include : state.ordered_direct_include_paths) {
+    for (const LocalCodeInfo::DirectInclude &include :
+         state.ordered_direct_include_paths) {
       const string spelling =
           get_best_include_path_spelling(include.include_path, search_prefixes);
       const bool needs_extern_c = wrap_pure_c && include.is_pure_c;
