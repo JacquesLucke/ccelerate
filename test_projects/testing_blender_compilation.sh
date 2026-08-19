@@ -40,4 +40,9 @@ ninja install
 real	27m29.136s
 user	0m36.717s
 sys	0m53.067s
+
+
+Success rate:
+69.9%
+81.8%
 ```

@@ -86,4 +86,4 @@ pure_c_header_patterns = [
     # Same for curve_fit_nd.
     "**/curve_fit_nd.h",
 ]
-local_type_patterns = ["**LocalData"]
+local_type_patterns = ["**::LocalData"]
