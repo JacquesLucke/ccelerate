@@ -31,7 +31,7 @@ struct A {};
 }
 
 namespace N {
-using namespace M;
+using namespace ::N::M;
 
 void use() {
   ::N::M::A::B &x = ::N::M::A::B::get();

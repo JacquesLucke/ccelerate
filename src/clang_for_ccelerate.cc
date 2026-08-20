@@ -1153,7 +1153,8 @@ static bool try_qualify_type_nested_name_specifier(
 //
 // - No prior declaration: `struct B` / `friend class B` can introduce `B`, but
 //   a qualified name requires `B` to already exist. If a declaration appears
-//   before the use, qualifying is fine (e.g. `friend R`, or `B *` after `struct B`).
+//   before the use, qualifying is fine (e.g. `friend R`, or `B *` after `struct
+//   B`).
 // - Nested-name *inner* components: the `C` in `test::C::VALUE` (would become
 //   `test::::test::C`). The *leading* component (`Instance` in
 //   `Instance::StaticData`) has no prefix and should be qualified so
@@ -1371,11 +1372,70 @@ public:
   }
 };
 
+class UsingNamespaceQualifierInserter
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
+  LocalCodeState &state_;
+  clang::SourceManager &sm_;
+  std::unordered_set<uint32_t> edited_locs_;
+
+public:
+  UsingNamespaceQualifierInserter(LocalCodeState &state)
+      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+
+  void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    const clang::UsingDirectiveDecl *ud =
+        result.Nodes.getNodeAs<clang::UsingDirectiveDecl>("usingNamespace");
+    if (!ud) {
+      return;
+    }
+    if (!mapped_location_is_local(state_, ud->getLocation(), sm_)) {
+      return;
+    }
+    const clang::NamespaceDecl *nominated = ud->getNominatedNamespace();
+    if (!nominated || nominated->isAnonymousNamespace()) {
+      return;
+    }
+    const std::string name = nominated->getNameAsString();
+    if (name.empty()) {
+      return;
+    }
+    const clang::LangOptions &lang_opts = state_.rewriter->getLangOpts();
+    const clang::SourceLocation name_loc = ud->getIdentLocation();
+    if (!name_loc.isValid() ||
+        !token_spells_name(name_loc, name, sm_, lang_opts)) {
+      return;
+    }
+    clang::SourceLocation begin = name_loc;
+    if (const clang::NestedNameSpecifierLoc qualifier = ud->getQualifierLoc()) {
+      begin = qualifier.getBeginLoc();
+    }
+    const string qualified =
+        generate_fully_qualified_name_for_rewrite(*nominated, lang_opts);
+    const clang::CharSourceRange range =
+        clang::CharSourceRange::getTokenRange(begin, name_loc);
+    if (!range.isValid()) {
+      return;
+    }
+    const llvm::StringRef existing =
+        clang::Lexer::getSourceText(range, sm_, lang_opts);
+    if (existing == qualified) {
+      return;
+    }
+    const uint32_t loc_key = range.getBegin().getRawEncoding();
+    if (!edited_locs_.insert(loc_key).second) {
+      return;
+    }
+    state_.rewriter->ReplaceText(range, qualified);
+  }
+};
+
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
   CallQualifierInserter namespace_qualify_inserter_;
   TypeQualifierInserter type_qualify_inserter_;
+  UsingNamespaceQualifierInserter using_namespace_qualify_inserter_;
   UsingNamespaceCollector using_namespace_collector_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
@@ -1383,8 +1443,8 @@ private:
 public:
   LocalCodeASTConsumer(LocalCodeState &state)
       : renamer_(state), namespace_qualify_inserter_(state),
-        type_qualify_inserter_(state), using_namespace_collector_(state),
-        state_(state) {
+        type_qualify_inserter_(state), using_namespace_qualify_inserter_(state),
+        using_namespace_collector_(state), state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
@@ -1431,6 +1491,8 @@ public:
       finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
                              .bind("typedefTypeLoc"),
                          &type_qualify_inserter_);
+      finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
+                         &using_namespace_qualify_inserter_);
     }
   }
 

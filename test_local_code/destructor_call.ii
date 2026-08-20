@@ -10,6 +10,6 @@ struct Type {
 using Type = ::A::B::C::Type;
 }
 
-using namespace A;
+using namespace ::A;
 
 void end(::A::Type *p) { p->~Type(); }

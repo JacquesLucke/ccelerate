@@ -6,6 +6,6 @@ struct S {
 }
 
 bool test() {
-  using namespace A;
+  using namespace ::A;
   return ::A::S() == ::A::S();
 }

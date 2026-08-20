@@ -6,24 +6,24 @@ int value = 1;
 }
 
 namespace C {
-using namespace A::B;
+using namespace ::A::B;
 
 int use_value() { return ::A::B::value; }
 }
 
-using namespace C;
+using namespace ::C;
 
 namespace {
-using namespace A;
+using namespace ::A;
 }
 
 namespace D {
 namespace {
-using namespace A;
+using namespace ::A;
 }
 }
 
 int main() {
-  using namespace A;
+  using namespace ::A;
   return ::C::use_value();
 }

@@ -1,0 +1,18 @@
+# 1 "using_namespace_nested.cc"
+namespace A {
+namespace B {
+int x = 1;
+}
+}
+
+namespace C {
+namespace A {
+int y = 2;
+}
+
+void use() {
+  using namespace ::A::B;
+  (void)::A::B::x;
+}
+
+}

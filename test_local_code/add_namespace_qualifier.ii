@@ -18,8 +18,8 @@ template <typename T> struct Box {
 typedef int IntAlias;
 }
 
-using namespace A;
-using namespace C;
+using namespace ::A;
+using namespace ::C;
 
 void test() {
   ::A::a();
