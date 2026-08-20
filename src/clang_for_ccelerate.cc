@@ -1026,7 +1026,7 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
 // Skip TypeLocs that are not ordinary type-ids. Qualifying these is wrong:
 //
 // - Nested name: the `C` in `test::C::VALUE` (would become `test::::test::C`).
-// - Destructor name: `~C()` (must not become `~::C()`).
+// - Destructor name: `~C()` / `p->~C()` (must not become `~::C()`).
 // - Using-declarator / inheriting ctor: `using Base::Base`.
 // - Friend type with no prior declaration: `friend class B` can introduce `B`,
 //   but a qualified friend requires `B` to already exist. If a declaration
@@ -1056,8 +1056,14 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
     }
     for (const clang::DynTypedNode &parent : parents) {
       if (parent.get<clang::UsingDecl>() ||
-          parent.get<clang::CXXDestructorDecl>()) {
+          parent.get<clang::CXXDestructorDecl>() ||
+          parent.get<clang::CXXPseudoDestructorExpr>()) {
         return true;
+      }
+      if (const auto *member = parent.get<clang::MemberExpr>()) {
+        if (llvm::isa<clang::CXXDestructorDecl>(member->getMemberDecl())) {
+          return true;
+        }
       }
       if (const auto *friend_decl = parent.get<clang::FriendDecl>()) {
         return !type_has_declaration_before(

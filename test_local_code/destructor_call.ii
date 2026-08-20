@@ -1,0 +1,15 @@
+# 1 "destructor_call.cc"
+namespace A {
+namespace B {
+namespace C {
+struct Type {
+  ~Type() {}
+};
+}
+}
+using Type = ::A::B::C::Type;
+}
+
+using namespace A;
+
+void end(::A::Type *p) { p->~Type(); }
