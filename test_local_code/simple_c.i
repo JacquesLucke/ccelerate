@@ -4,4 +4,4 @@ static int test__() {
     return 10;
 }
 
-int main() { return ::test__(); }
+int main() { return test__(); }

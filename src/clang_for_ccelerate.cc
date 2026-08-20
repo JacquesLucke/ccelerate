@@ -1013,8 +1013,10 @@ public:
                        &renamer_);
     finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
                        &using_namespace_collector_);
-    finder_.addMatcher(declRefExpr().bind("declRef"),
-                       &namespace_qualify_inserter_);
+    if (state.rewriter->getLangOpts().CPlusPlus) {
+      finder_.addMatcher(declRefExpr().bind("declRef"),
+                         &namespace_qualify_inserter_);
+    }
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {
