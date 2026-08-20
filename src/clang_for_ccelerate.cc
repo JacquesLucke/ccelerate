@@ -539,6 +539,22 @@ static bool mapped_location_is_local(const LocalCodeState &state,
   return state.map_parser_to_local_lines[line - 1] != -1;
 }
 
+// True when the token at the location literally spells expected string. False
+// for an implicit ctor of an anonymous union: getNameAsString() is
+// "(anonymous union at file:line:col)" while `loc` points at the `union`
+// keyword.
+static bool token_spells_name(clang::SourceLocation loc,
+                              llvm::StringRef expected,
+                              const clang::SourceManager &sm,
+                              const clang::LangOptions &lang_opts) {
+  if (!loc.isValid()) {
+    return false;
+  }
+  const uint32_t tok_len = clang::Lexer::MeasureTokenLength(loc, sm, lang_opts);
+  const llvm::StringRef tok_spelling(sm.getCharacterData(loc), tok_len);
+  return tok_spelling == expected;
+}
+
 // Walk past linkage-specs etc.; reject function/class scope.
 static const clang::DeclContext *
 enclosing_file_context(const clang::DeclContext *dc) {
@@ -719,14 +735,8 @@ public:
     if (old_name.empty()) {
       return;
     }
-    // Anonymous structs/unions (and their implicit ctors/dtors) report pretty
-    // names like "(unnamed union at file:line:col)" while the source location
-    // points at the `union`/`struct` keyword. Only rewrite when the token at
-    // `loc` actually spells the decl name.
-    const uint32_t tok_len = clang::Lexer::MeasureTokenLength(
-        loc, sm_, state_.rewriter->getLangOpts());
-    const llvm::StringRef tok_spelling(sm_.getCharacterData(loc), tok_len);
-    if (tok_spelling != old_name) {
+    if (!token_spells_name(
+            loc, old_name, sm_, state_.rewriter->getLangOpts())) {
       return;
     }
     const uint32_t loc_key = loc.getRawEncoding();
@@ -863,16 +873,115 @@ public:
   }
 };
 
+// Checks if ADL is used in this call.
+static bool is_adl_call_expr(const clang::DeclRefExpr &ref,
+                             clang::ASTContext &ast) {
+  if (ref.getQualifier()) {
+    return false;
+  }
+  const clang::Stmt *current = &ref;
+  while (current) {
+    const clang::DynTypedNodeList parents = ast.getParents(*current);
+    if (parents.empty()) {
+      return false;
+    }
+    const clang::DynTypedNode &parent = parents[0];
+    if (parent.get<clang::ImplicitCastExpr>() ||
+        parent.get<clang::ParenExpr>()) {
+      current = parent.get<clang::Stmt>();
+      continue;
+    }
+    if (const auto *call = parent.get<clang::CallExpr>()) {
+      return call->usesADL() &&
+             call->getCallee()->IgnoreParenImpCasts() == &ref;
+    }
+    return false;
+  }
+  return false;
+}
+
+static string
+generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
+                                          const clang::LangOptions &lang) {
+  clang::PrintingPolicy policy(lang);
+  policy.SuppressUnwrittenScope = true;
+  string result = "::";
+  llvm::raw_string_ostream os(result);
+  decl.printQualifiedName(os, policy);
+  os.flush();
+  return result;
+}
+
+class NamespaceQualifyInserter
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
+  LocalCodeState &state_;
+  clang::SourceManager &sm_;
+  std::unordered_set<uint32_t> edited_locs_;
+
+public:
+  NamespaceQualifyInserter(LocalCodeState &state)
+      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+
+  void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    if (const clang::DeclRefExpr *ref =
+            result.Nodes.getNodeAs<clang::DeclRefExpr>("declRef")) {
+      clang::SourceLocation loc = ref->getLocation();
+      if (!mapped_location_is_local(state_, loc, sm_)) {
+        return;
+      }
+      const clang::ValueDecl *decl = ref->getDecl();
+      const std::string name = decl->getNameAsString();
+      if (name.empty()) {
+        return;
+      }
+      const clang::LangOptions &lang_opts = state_.rewriter->getLangOpts();
+      if (!token_spells_name(loc, name, sm_, lang_opts)) {
+        return;
+      }
+      const clang::DeclContext *decl_ctx = decl->getDeclContext();
+      if (!decl_ctx->isFileContext()) {
+        return;
+      }
+      if (is_adl_call_expr(*ref, *result.Context)) {
+        return;
+      }
+
+      const string qualified =
+          generate_fully_qualified_name_for_rewrite(*decl, lang_opts);
+
+      const clang::CharSourceRange range =
+          clang::CharSourceRange::getTokenRange(ref->getSourceRange());
+      if (!range.isValid()) {
+        return;
+      }
+      const llvm::StringRef existing =
+          clang::Lexer::getSourceText(range, sm_, lang_opts);
+      if (existing == qualified) {
+        return;
+      }
+
+      const uint32_t loc_key = range.getBegin().getRawEncoding();
+      if (!edited_locs_.insert(loc_key).second) {
+        return;
+      }
+      state_.rewriter->ReplaceText(range, qualified);
+    }
+  }
+};
+
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
+  NamespaceQualifyInserter namespace_qualify_inserter_;
   UsingNamespaceCollector using_namespace_collector_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
 
 public:
   LocalCodeASTConsumer(LocalCodeState &state)
-      : renamer_(state), using_namespace_collector_(state), state_(state) {
+      : renamer_(state), namespace_qualify_inserter_(state),
+        using_namespace_collector_(state), state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
@@ -904,6 +1013,8 @@ public:
                        &renamer_);
     finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
                        &using_namespace_collector_);
+    finder_.addMatcher(declRefExpr().bind("declRef"),
+                       &namespace_qualify_inserter_);
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {

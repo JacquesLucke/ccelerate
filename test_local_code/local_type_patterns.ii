@@ -8,4 +8,4 @@ struct OnlyLocalType__ {
 OnlyLocalType__ make_value() { return OnlyLocalType__(7); }
 }
 
-int main() { return pattern_local_type::make_value().x; }
+int main() { return ::pattern_local_type::make_value().x; }

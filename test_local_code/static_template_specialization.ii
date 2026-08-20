@@ -16,10 +16,10 @@ int compute__<double>(const double &v)
 
 static int run__(int x, double y)
 {
-  return compute__(x) + compute__(y);
+  return ::compute__(x) + ::compute__(y);
 }
 
 int main()
 {
-  return run__(1, 2.0);
+  return ::run__(1, 2.0);
 }

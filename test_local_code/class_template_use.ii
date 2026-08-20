@@ -22,4 +22,4 @@ int f__(T x) {
 
 }
 
-int main() { return f__(1); }
+int main() { return ::f__(1); }

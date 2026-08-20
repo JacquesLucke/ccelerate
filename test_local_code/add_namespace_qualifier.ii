@@ -1,0 +1,17 @@
+# 1 "add_namespace_qualifier.cc"
+namespace A {
+void a();
+}
+
+namespace B {
+struct BStruct {};
+
+void fn(const BStruct &b);
+}
+
+using namespace A;
+
+void test() {
+  ::A::a();
+  fn(B::BStruct());
+}

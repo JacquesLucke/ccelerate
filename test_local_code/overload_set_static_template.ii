@@ -21,16 +21,16 @@ static void f(A &dst, const B &src) {
 
 template <typename D, typename S>
 void g(D *dst, const S *src) {
-  f(dst[0], src[0]);
+  ::ns::f(dst[0], src[0]);
 }
 
 int use() {
   A a{};
   B b{1};
-  g(&a, &b);
+  ::ns::g(&a, &b);
   return a.v;
 }
 
 }
 
-int main() { return ns::use(); }
+int main() { return ::ns::use(); }

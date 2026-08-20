@@ -8,7 +8,7 @@ int value = 1;
 namespace C {
 using namespace A::B;
 
-int use_value() { return value; }
+int use_value() { return ::A::B::value; }
 }
 
 using namespace C;
@@ -25,5 +25,5 @@ using namespace A;
 
 int main() {
   using namespace A;
-  return use_value();
+  return ::C::use_value();
 }

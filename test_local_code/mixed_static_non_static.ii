@@ -12,6 +12,6 @@ int get_other_value__() { return 11; }
 }
 
 int main() {
-  return x + y__ + hello::z + hello::w__ + hello::get_value() +
-         hello::get_other_value__();
+  return ::x + ::y__ + ::hello::z + ::hello::w__ + ::hello::get_value() +
+         ::hello::get_other_value__();
 }

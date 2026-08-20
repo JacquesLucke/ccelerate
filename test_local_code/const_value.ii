@@ -18,5 +18,5 @@ extern const int l__ = 12;
 }
 
 int main() {
-  return a__ + b__ + c + d + test::e__ + test::f__ + test::g + test::h + i__ + j__ + k__ + l__;
+  return ::a__ + ::b__ + ::c + ::d + ::test::e__ + ::test::f__ + ::test::g + ::test::h + ::i__ + ::j__ + ::k__ + ::l__;
 }
