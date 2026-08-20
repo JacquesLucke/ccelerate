@@ -13,13 +13,15 @@ using namespace A;
 namespace E {
 struct F {};
 struct C : ::D::E::F {};
-} // namespace E
+}
 
-} // namespace D
+}
 
 namespace N {
 using namespace D;
 
-int use(::A::B t) { return t == ::A::C; }
+int use(::A::B t) {
+  return t == ::A::C;
+}
 
-} // namespace N
+}

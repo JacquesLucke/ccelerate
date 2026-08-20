@@ -1,0 +1,24 @@
+# 3 "param_named_like_type.cc"
+
+namespace A {
+
+struct B {
+  B(int context, ::std::string s, int font);
+};
+
+struct C {
+  ::A::B &get(int context, const ::std::string string, int font) {
+    auto &b = *::std::make_unique<::A::B>(context, string, font);
+    return b;
+  }
+
+  ::A::B &get_lambda(int context, const ::std::string string, int font) {
+    auto make = [&]() {
+      return ::std::make_unique<::A::B>(context, string, font);
+    };
+    auto &b = *make();
+    return b;
+  }
+};
+
+}

@@ -1163,6 +1163,12 @@ static bool try_qualify_type_nested_name_specifier(
 //   This also covers TypeLocs in Clang-synthesized defaulted move-ctor bodies
 //   (e.g. implicit static_cast) that reuse the constructor name location.
 // - Using-declarator / inheriting ctor: `using Base::Base`.
+// - Implicit CXXConstructExpr TypeLocs: copy/move construction can place a
+//   TypeLoc for the parameter type at the argument expression (e.g. a
+//   parameter named `string` rewritten as `::std::string`). Written type
+//   constructions are CXXTemporaryObjectExpr (`T(args)` / `T{args}`).
+// - Lambda capture fields: capture FieldDecls reuse the body's use location
+//   for their TypeLoc name (same `string` → `::std::string` failure).
 static bool
 should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
                                    const clang::NamedDecl &named_decl,
@@ -1208,6 +1214,21 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
         if (ctor->isInheritingConstructor() ||
             ctor->getNameInfo().getLoc() == name_loc) {
           return true;
+        }
+      }
+      if (const auto *construct = parent.get<clang::CXXConstructExpr>()) {
+        if (!llvm::isa<clang::CXXTemporaryObjectExpr>(construct)) {
+          return true;
+        }
+      }
+      // Lambda captures invent FieldDecls whose TypeLoc name location is the
+      // captured variable's use in the body (e.g. `string` → `::std::string`).
+      if (const auto *field = parent.get<clang::FieldDecl>()) {
+        if (const auto *record =
+                llvm::dyn_cast<clang::CXXRecordDecl>(field->getParent())) {
+          if (record->isLambda()) {
+            return true;
+          }
         }
       }
     }

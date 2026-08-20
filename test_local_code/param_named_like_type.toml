@@ -1,0 +1,8 @@
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+    {is_system_header = true, path = "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/memory"},
+    {is_system_header = true, path = "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/string"},
+]
+local_code_path = "param_named_like_type.ii"
