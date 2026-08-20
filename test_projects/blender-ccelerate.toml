@@ -78,6 +78,11 @@ eager_obj_patterns = [
     "**/extern_bullet.dir/**/BulletSoftBody/**.o",
     "**/extern_mantaflow.dir/preprocessed/grid*.cpp.o",
     "**/audaspace/**/PluginManager.cpp.o",
+    # Duplicate PbVec3/PbVec4 implementation.
+    "**/mantaflow/**/pconvert.cpp.o",
+    "**/mantaflow/**/pbvec3.cpp.o",
+    # Duplicate default values for solvePressure.
+    "**/mantaflow/**/fluidguiding.cpp.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
@@ -86,4 +91,4 @@ pure_c_header_patterns = [
     # Same for curve_fit_nd.
     "**/curve_fit_nd.h",
 ]
-local_type_patterns = ["**::LocalData"]
+local_type_patterns = ["**::LocalData", "blender::SplineCoeffs"]
