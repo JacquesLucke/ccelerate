@@ -1005,11 +1005,19 @@ public:
       // struct Const vs TokenType::Const) cannot hide the enumerator.
       // Scoped enumerators stay as `Enum::Enumerator`; the enum type prefix is
       // handled by TypeQualifierInserter.
+      // Unscoped `Enum::Enumerator` is the same: only qualify the type prefix.
+      // Rewriting the enumerator here overlaps that TypeLoc edit and corrupts
+      // the text (e.g. `EulerOrder::XYZ` → `EulerOrder:math::XYZ`).
       const clang::DeclContext *decl_ctx = decl->getDeclContext();
       if (const auto *ecd = llvm::dyn_cast<clang::EnumConstantDecl>(decl)) {
         const auto *ed = llvm::cast<clang::EnumDecl>(ecd->getDeclContext());
         if (ed->isScoped()) {
           return;
+        }
+        if (const clang::NestedNameSpecifierLoc q = ref->getQualifierLoc()) {
+          if (!q.getTypeLoc().isNull()) {
+            return;
+          }
         }
         decl_ctx = ed->getDeclContext();
       }
@@ -1160,7 +1168,9 @@ static bool try_qualify_type_nested_name_specifier(
   // File-context leading names (`A` in `A::VALUE`) are handled by
   // TypeQualifierInserter. This path is for TypeSpec NNS that nominate a
   // nested type (`Instance::StaticData` in `Instance::StaticData::get`).
-  if (named_decl->getDeclContext()->isFileContext()) {
+  // Function-local types/aliases must stay unqualified (`::MyType` is wrong).
+  const clang::DeclContext *decl_ctx = named_decl->getDeclContext();
+  if (decl_ctx->isFileContext() || decl_ctx->isFunctionOrMethod()) {
     return false;
   }
   const std::string name = named_decl->getNameAsString();

@@ -1,0 +1,11 @@
+source_language = "C++"
+include_defines = [
+]
+using_namespaces = [
+    {used = "A", parent = "N"},
+    {used = "A::B", parent = "N"},
+]
+direct_includes = [
+    {is_system_header = false, path = "<REPO_DIR>/test_local_code/unscoped_enum_nested_name.hh"},
+]
+local_code_path = "unscoped_enum_nested_name.ii"

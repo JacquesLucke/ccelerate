@@ -1,0 +1,26 @@
+# 2 "unscoped_enum_nested_name.cc"
+
+namespace N {
+using namespace ::A;
+using namespace ::A::B;
+
+int use() {
+
+  return int(::A::B::C::D) + int(::A::B::C::E) + int(::A::F::G);
+}
+
+int local_alias() {
+  using G = ::A::B::C;
+
+  return int(G::D);
+}
+
+int local_struct() {
+  struct H {
+    int array[4];
+  };
+
+  return sizeof(H::array);
+}
+
+}
