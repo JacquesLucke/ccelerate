@@ -6,14 +6,14 @@ struct A {
 
 namespace {
 
-struct B__ : A {
+struct B__ : ::A {
   using A::A;
 };
 
-struct C__ : B__ {
+struct C__ : ::B__ {
   using B__::B__;
 };
 
 }
 
-int main() { return B__(1).v; }
+int main() { return ::B__(1).v; }

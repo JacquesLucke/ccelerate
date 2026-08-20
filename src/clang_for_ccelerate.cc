@@ -970,10 +970,207 @@ public:
   }
 };
 
+// Begin of a type name rewrite range. For `B::BStruct`, returns the location of
+// `B` so the existing qualifier is replaced; for an unqualified `BStruct`,
+// returns name_loc.
+static clang::SourceLocation
+find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
+                             const clang::SourceLocation name_loc,
+                             clang::ASTContext &ast) {
+  const clang::DynTypedNodeList parents = ast.getParents(type_loc);
+  if (parents.empty()) {
+    return name_loc;
+  }
+  const clang::TypeLoc *parent_tl = parents[0].get<clang::TypeLoc>();
+  if (!parent_tl) {
+    return name_loc;
+  }
+  const clang::ElaboratedTypeLoc etl =
+      parent_tl->getAs<clang::ElaboratedTypeLoc>();
+  if (etl.isNull()) {
+    return name_loc;
+  }
+  const clang::NestedNameSpecifierLoc qualifier = etl.getQualifierLoc();
+  if (!qualifier) {
+    return name_loc;
+  }
+  return qualifier.getBeginLoc();
+}
+
+// True when this TypeLoc should not be rewritten as a type-id: it is the type
+// in a nested-name-specifier, a destructor name, a using-declarator name, or
+// an inheriting constructor name (`using Base::Base`).
+static bool should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
+                                               clang::ASTContext &ast) {
+  clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      return false;
+    }
+    const clang::TypeLoc *sugar_parent = nullptr;
+    for (const clang::DynTypedNode &parent : parents) {
+      if (parent.get<clang::NestedNameSpecifierLoc>()) {
+        return true;
+      }
+      if (!sugar_parent) {
+        sugar_parent = parent.get<clang::TypeLoc>();
+      }
+    }
+    if (sugar_parent) {
+      node = clang::DynTypedNode::create(*sugar_parent);
+      continue;
+    }
+    for (const clang::DynTypedNode &parent : parents) {
+      if (parent.get<clang::UsingDecl>() ||
+          parent.get<clang::CXXDestructorDecl>()) {
+        return true;
+      }
+      if (const auto *ctor = parent.get<clang::CXXConstructorDecl>()) {
+        if (ctor->isInheritingConstructor()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+}
+
+class TypeQualifierInserter
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
+  LocalCodeState &state_;
+  clang::SourceManager &sm_;
+  std::unordered_set<uint32_t> edited_locs_;
+
+public:
+  TypeQualifierInserter(LocalCodeState &state)
+      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+
+  void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    clang::SourceLocation name_loc;
+    const clang::NamedDecl *named_decl = nullptr;
+    clang::TypeLoc matched_tl;
+
+    if (const clang::TypeLoc *type_loc =
+            result.Nodes.getNodeAs<clang::TypeLoc>("tagTypeLoc")) {
+      const clang::TagTypeLoc tag_tl =
+          type_loc->getAsAdjusted<clang::TagTypeLoc>();
+      if (tag_tl.isNull() || tag_tl.isDefinition()) {
+        return;
+      }
+      name_loc = tag_tl.getNameLoc();
+      named_decl = tag_tl.getDecl();
+      matched_tl = tag_tl;
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>(
+                       "templateSpecTypeLoc")) {
+      const clang::TemplateSpecializationTypeLoc tst =
+          type_loc->getAsAdjusted<clang::TemplateSpecializationTypeLoc>();
+      if (tst.isNull()) {
+        return;
+      }
+      name_loc = tst.getTemplateNameLoc();
+      const clang::TemplateName template_name =
+          tst.getTypePtr()->getTemplateName();
+      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
+        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
+          named_decl = ctd->getTemplatedDecl();
+        } else if (const auto *tatd =
+                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
+          named_decl = tatd->getTemplatedDecl();
+        }
+      }
+      matched_tl = tst;
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>(
+                       "deducedTemplateSpecTypeLoc")) {
+      const clang::DeducedTemplateSpecializationTypeLoc dtst =
+          type_loc
+              ->getAsAdjusted<clang::DeducedTemplateSpecializationTypeLoc>();
+      if (dtst.isNull()) {
+        return;
+      }
+      name_loc = dtst.getTemplateNameLoc();
+      const clang::TemplateName template_name =
+          dtst.getTypePtr()->getTemplateName();
+      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
+        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
+          named_decl = ctd->getTemplatedDecl();
+        } else if (const auto *tatd =
+                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
+          named_decl = tatd->getTemplatedDecl();
+        }
+      }
+      matched_tl = dtst;
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
+      const clang::TypedefTypeLoc typedef_tl =
+          type_loc->getAsAdjusted<clang::TypedefTypeLoc>();
+      if (typedef_tl.isNull()) {
+        return;
+      }
+      name_loc = typedef_tl.getNameLoc();
+      named_decl = typedef_tl.getTypedefNameDecl();
+      matched_tl = typedef_tl;
+    }
+
+    if (!name_loc.isValid() || !named_decl || matched_tl.isNull()) {
+      return;
+    }
+    if (should_skip_type_loc_for_qualifier(matched_tl, *result.Context)) {
+      return;
+    }
+    if (!mapped_location_is_local(state_, name_loc, sm_)) {
+      return;
+    }
+    // Don't rewrite the name token of the declaration itself (including
+    // implicit ctor params whose TypeLoc points at the class name).
+    if (named_decl->getLocation() == name_loc) {
+      return;
+    }
+    const std::string name = named_decl->getNameAsString();
+    if (name.empty()) {
+      return;
+    }
+    const clang::LangOptions &lang_opts = state_.rewriter->getLangOpts();
+    if (!token_spells_name(name_loc, name, sm_, lang_opts)) {
+      return;
+    }
+    const clang::DeclContext *decl_ctx = named_decl->getDeclContext();
+    if (!decl_ctx->isFileContext()) {
+      return;
+    }
+
+    const string qualified =
+        generate_fully_qualified_name_for_rewrite(*named_decl, lang_opts);
+
+    const clang::SourceLocation begin =
+        find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
+    const clang::CharSourceRange range =
+        clang::CharSourceRange::getTokenRange(begin, name_loc);
+    if (!range.isValid()) {
+      return;
+    }
+    const llvm::StringRef existing =
+        clang::Lexer::getSourceText(range, sm_, lang_opts);
+    if (existing == qualified) {
+      return;
+    }
+
+    const uint32_t loc_key = range.getBegin().getRawEncoding();
+    if (!edited_locs_.insert(loc_key).second) {
+      return;
+    }
+    state_.rewriter->ReplaceText(range, qualified);
+  }
+};
+
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
   CallQualifierInserter namespace_qualify_inserter_;
+  TypeQualifierInserter type_qualify_inserter_;
   UsingNamespaceCollector using_namespace_collector_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
@@ -981,7 +1178,8 @@ private:
 public:
   LocalCodeASTConsumer(LocalCodeState &state)
       : renamer_(state), namespace_qualify_inserter_(state),
-        using_namespace_collector_(state), state_(state) {
+        type_qualify_inserter_(state), using_namespace_collector_(state),
+        state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
@@ -1016,6 +1214,18 @@ public:
     if (state.rewriter->getLangOpts().CPlusPlus) {
       finder_.addMatcher(declRefExpr().bind("declRef"),
                          &namespace_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(tag_matcher))))
+                             .bind("tagTypeLoc"),
+                         &type_qualify_inserter_);
+      finder_.addMatcher(
+          templateSpecializationTypeLoc().bind("templateSpecTypeLoc"),
+          &type_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(deducedTemplateSpecializationType()))
+                             .bind("deducedTemplateSpecTypeLoc"),
+                         &type_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
+                             .bind("typedefTypeLoc"),
+                         &type_qualify_inserter_);
     }
   }
 

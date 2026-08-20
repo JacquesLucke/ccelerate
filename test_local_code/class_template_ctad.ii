@@ -9,7 +9,7 @@ struct A__ {
 
 template <typename T>
 int f__(T x) {
-  return A__(x).v;
+  return ::A__(x).v;
 }
 
 }

@@ -5,4 +5,4 @@ typedef int A__;
 
 typedef int B;
 
-A__ main() { return B{}; }
+::A__ main() { return ::B{}; }

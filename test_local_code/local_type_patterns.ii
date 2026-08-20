@@ -5,7 +5,7 @@ struct OnlyLocalType__ {
   OnlyLocalType__(int value) : x(value) {}
 };
 
-OnlyLocalType__ make_value() { return OnlyLocalType__(7); }
+::pattern_local_type::OnlyLocalType__ make_value() { return ::pattern_local_type::OnlyLocalType__(7); }
 }
 
 int main() { return ::pattern_local_type::make_value().x; }

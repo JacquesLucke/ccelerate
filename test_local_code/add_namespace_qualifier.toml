@@ -3,6 +3,7 @@ include_defines = [
 ]
 using_namespaces = [
     {used = "A", parent = ""},
+    {used = "C", parent = ""},
 ]
 direct_includes = [
 ]

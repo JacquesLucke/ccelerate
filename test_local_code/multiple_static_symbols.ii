@@ -3,7 +3,7 @@
 static int get_size__() { return 10; }
 
 namespace hello {
-static std::vector<int> v__;
+static ::std::vector<int> v__;
 static int result__;
 
 static int compute__() {

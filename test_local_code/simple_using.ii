@@ -5,4 +5,4 @@ using A__ = int;
 
 using B = int;
 
-A__ main() { return B{}; }
+::A__ main() { return ::B{}; }

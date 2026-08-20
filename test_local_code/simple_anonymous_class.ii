@@ -6,4 +6,4 @@ public:
 };
 }
 
-int main() { return A__().get_value(); }
+int main() { return ::A__().get_value(); }

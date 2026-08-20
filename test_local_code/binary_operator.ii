@@ -1,11 +1,11 @@
 # 1 "binary_operator.cc"
 namespace A {
 struct S {
-  friend bool operator==(const S &a, const S &b);
+  friend bool operator==(const ::A::S &a, const ::A::S &b);
 };
 }
 
 bool test() {
   using namespace A;
-  return S() == S();
+  return ::A::S() == ::A::S();
 }

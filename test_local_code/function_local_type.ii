@@ -1,0 +1,13 @@
+# 1 "function_local_type.cc"
+namespace A {
+namespace B {
+struct R {};
+int test() {
+  struct S {
+    int x = 4;
+    ::A::B::R r;
+  };
+  return S().x;
+}
+}
+}

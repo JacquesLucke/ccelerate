@@ -9,14 +9,14 @@ struct A__ {
 
 template <typename U>
 struct B__ {
-  A__<U> *p;
-  explicit B__(A__<U> *q) : p(q) {}
+  ::A__<U> *p;
+  explicit B__(::A__<U> *q) : p(q) {}
 };
 
 template <typename T>
 int f__(T x) {
-  A__<T> a(x);
-  B__<T> b(&a);
+  ::A__<T> a(x);
+  ::B__<T> b(&a);
   return static_cast<int>(b.p->v);
 }
 

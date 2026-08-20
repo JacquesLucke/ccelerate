@@ -10,12 +10,12 @@ struct B {
 
 
 template <typename T>
-void f(T &dst, const A &src) {
+void f(T &dst, const ::ns::A &src) {
   dst.v = src.v;
 }
 
 
-static void f(A &dst, const B &src) {
+static void f(::ns::A &dst, const ::ns::B &src) {
   dst.v = src.v;
 }
 
@@ -25,8 +25,8 @@ void g(D *dst, const S *src) {
 }
 
 int use() {
-  A a{};
-  B b{1};
+  ::ns::A a{};
+  ::ns::B b{1};
   ::ns::g(&a, &b);
   return a.v;
 }

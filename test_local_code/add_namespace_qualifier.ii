@@ -6,12 +6,27 @@ void a();
 namespace B {
 struct BStruct {};
 
-void fn(const BStruct &b);
+void fn(const ::B::BStruct &b);
+}
+
+namespace C {
+template <typename T>
+struct Box {
+  T v;
+  explicit Box(T x) : v(x) {}
+};
+
+typedef int IntAlias;
 }
 
 using namespace A;
+using namespace C;
 
 void test() {
   ::A::a();
-  fn(B::BStruct());
+  fn(::B::BStruct());
+
+  ::C::Box<int> explicit_t(1);
+  ::C::Box deduced_t(2);
+  ::C::IntAlias alias_t = 0;
 }
