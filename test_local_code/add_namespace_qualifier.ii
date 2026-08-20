@@ -10,8 +10,7 @@ void fn(const ::B::BStruct &b);
 }
 
 namespace C {
-template <typename T>
-struct Box {
+template <typename T> struct Box {
   T v;
   explicit Box(T x) : v(x) {}
 };
