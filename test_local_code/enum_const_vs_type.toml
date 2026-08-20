@@ -1,0 +1,10 @@
+source_language = "C++"
+include_defines = [
+]
+using_namespaces = [
+    {used = "A", parent = "D"},
+    {used = "D", parent = "N"},
+]
+direct_includes = [
+]
+local_code_path = "enum_const_vs_type.ii"

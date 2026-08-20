@@ -34,20 +34,14 @@ namespace N {
 using namespace M;
 
 void use() {
-
   ::N::M::A::B &x = ::N::M::A::B::get();
   (void)x;
-
 
   ::N::M::A::C &y = ::N::M::A::C::get();
   (void)y;
 
-
-
   int v = ::N::M::D<int>::value();
   (void)v;
-
-
 
   ::N::M::D<int>::E &z = ::N::M::D<int>::E::get();
   (void)z;

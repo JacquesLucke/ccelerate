@@ -9,4 +9,4 @@ namespace test {
 enum C { VALUE_C = 2 };
 }
 
-int main() { return int(VALUE_A) + int(VALUE_B__) + int(test::VALUE_C); }
+int main() { return int(::VALUE_A) + int(::VALUE_B__) + int(::test::VALUE_C); }

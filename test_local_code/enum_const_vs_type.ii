@@ -1,0 +1,25 @@
+# 1 "enum_const_vs_type.cc"
+namespace A {
+
+enum B : unsigned char {
+  C = 'c',
+};
+
+}
+
+namespace D {
+using namespace A;
+
+namespace E {
+struct F {};
+struct C : ::D::E::F {};
+} // namespace E
+
+} // namespace D
+
+namespace N {
+using namespace D;
+
+int use(::A::B t) { return t == ::A::C; }
+
+} // namespace N

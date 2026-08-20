@@ -958,7 +958,20 @@ public:
       if (!token_spells_name(loc, name, sm_, lang_opts)) {
         return;
       }
+      // Unscoped enumerators are injected into the enum's enclosing context, so
+      // DeclContext is the EnumDecl (not a file context). Qualify them so a
+      // merged TU's `using namespace` that introduces a same-named type (e.g.
+      // struct Const vs TokenType::Const) cannot hide the enumerator.
+      // Scoped enumerators stay as `Enum::Enumerator`; the enum type prefix is
+      // handled by TypeQualifierInserter.
       const clang::DeclContext *decl_ctx = decl->getDeclContext();
+      if (const auto *ecd = llvm::dyn_cast<clang::EnumConstantDecl>(decl)) {
+        const auto *ed = llvm::cast<clang::EnumDecl>(ecd->getDeclContext());
+        if (ed->isScoped()) {
+          return;
+        }
+        decl_ctx = ed->getDeclContext();
+      }
       if (!decl_ctx->isFileContext()) {
         return;
       }
