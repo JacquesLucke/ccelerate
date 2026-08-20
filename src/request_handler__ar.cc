@@ -22,7 +22,6 @@ struct CompatibilityKey {
   vector<string> cc1_args;
   string language;
   vector<string> include_defines;
-  vector<string> using_namespaces;
 
   bool operator==(const CompatibilityKey &) const = default;
 };
@@ -44,9 +43,6 @@ template <> struct std::hash<ccelerate::CompatibilityKey> {
     seed = hash_combine(seed, key.language);
     for (const std::string &define : key.include_defines) {
       seed = hash_combine(seed, define);
-    }
-    for (const std::string &using_namespace : key.using_namespaces) {
-      seed = hash_combine(seed, using_namespace);
     }
     return seed;
   }
@@ -80,11 +76,6 @@ cc1_args_to_compatibility_key(const LocalCodeInfo &info) {
   }
   key.language = info.source_language;
   key.include_defines = info.include_defines;
-  for (const LocalCodeInfo::UsingNamespace &using_namespace :
-       info.using_namespaces) {
-    key.using_namespaces.push_back(
-        fmt::format("{}{}", using_namespace.parent, using_namespace.used));
-  }
   return key;
 }
 
@@ -194,10 +185,16 @@ build_compatible_local_objects(const ClientID &client_id,
     args.arg("--");
     args.args(compatibility_key.cc1_args);
 
-    const ProcessResult compile_result = run_process_traced(args);
+    ProcessResult compile_result = run_process_traced(args);
     if (compile_result.exit_code() == 0) {
       result.paths.push_back(out_path);
       result.success = true;
+      return result;
+    }
+    if (is_single) {
+      send_response_incomplete(client_id,
+                               std::move(compile_result.stdout_data),
+                               std::move(compile_result.stderr_data));
       return result;
     }
     return build_compatible_local_objects__split(
