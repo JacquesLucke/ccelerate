@@ -931,6 +931,9 @@ public:
         return;
       }
       const clang::ValueDecl *decl = ref->getDecl();
+      if (decl->isTemplateParameter()) {
+        return;
+      }
       const std::string name = decl->getNameAsString();
       if (name.empty()) {
         return;
