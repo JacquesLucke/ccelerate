@@ -27,4 +27,5 @@ void test() {
   Box<int> explicit_t(1);
   Box deduced_t(2);
   IntAlias alias_t = 0;
+  const C::IntAlias qualified_alias = 0;
 }

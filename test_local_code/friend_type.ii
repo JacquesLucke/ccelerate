@@ -7,5 +7,13 @@ struct S__ {
   friend class B__;
 };
 class B__ {};
+
+struct F__ {
+  friend class FR__;
+};
+struct L__ {
+  friend class FR__;
+};
+class FR__ {};
 }
 }
