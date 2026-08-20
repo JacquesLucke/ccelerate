@@ -950,8 +950,14 @@ public:
       const string qualified =
           generate_fully_qualified_name_for_rewrite(*decl, lang_opts);
 
+      // Only rewrite the qualifier + name and keep explicit template arguments.
+      clang::SourceLocation begin = loc;
+      if (const clang::NestedNameSpecifierLoc qualifier =
+              ref->getQualifierLoc()) {
+        begin = qualifier.getBeginLoc();
+      }
       const clang::CharSourceRange range =
-          clang::CharSourceRange::getTokenRange(ref->getSourceRange());
+          clang::CharSourceRange::getTokenRange(begin, loc);
       if (!range.isValid()) {
         return;
       }
