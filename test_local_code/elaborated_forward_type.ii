@@ -1,14 +1,22 @@
 # 1 "elaborated_forward_type.cc"
 namespace A {
 
+template <typename T> struct Map {};
+
+using Alias = ::A::Map<struct B *>;
+
 struct Context {
-  const struct B *gen;
+  const struct ::A::B *gen;
+  ::A::Alias *alias;
 };
 
 struct B {
   int x;
 };
 
-void use(const ::A::B *p) { (void)p; }
+void use(const ::A::B *p, ::A::Alias *a) {
+  (void)p;
+  (void)a;
+}
 
 }
