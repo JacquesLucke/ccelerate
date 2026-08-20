@@ -5,7 +5,7 @@ template <int N> struct B {
   static int get();
 };
 
-template <int N> int B<N>::get() { return N; }
+template <int N> int ::A::B<N>::get() { return N; }
 
 }
 

@@ -1,0 +1,9 @@
+source_language = "C++"
+include_defines = [
+]
+using_namespaces = [
+    {used = "M", parent = "N"},
+]
+direct_includes = [
+]
+local_code_path = "nested_name_leading_type.ii"

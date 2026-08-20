@@ -912,6 +912,11 @@ generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
   return result;
 }
 
+static bool try_qualify_type_nested_name_specifier(
+    LocalCodeState &state,
+    std::unordered_set<uint32_t> &edited_locs,
+    clang::NestedNameSpecifierLoc nns_loc);
+
 class CallQualifierInserter
     : public clang::ast_matchers::MatchFinder::MatchCallback {
   LocalCodeState &state_;
@@ -933,6 +938,17 @@ public:
       const clang::ValueDecl *decl = ref->getDecl();
       if (decl->isTemplateParameter()) {
         return;
+      }
+      // Qualify type prefixes on any DeclRef nested-name (including methods):
+      // `Instance::StaticData::get` → `::ns::Instance::StaticData::get`.
+      // TypeLoc matchers often miss a separate TagTypeLoc for the leading type
+      // inside DeclRefExpr qualifiers (Clang stores one TypeSpec NNS).
+      if (const clang::NestedNameSpecifierLoc qualifier =
+              ref->getQualifierLoc()) {
+        if (try_qualify_type_nested_name_specifier(
+                state_, edited_locs_, qualifier)) {
+          return;
+        }
       }
       const std::string name = decl->getNameAsString();
       if (name.empty()) {
@@ -1026,12 +1042,109 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
   return false;
 }
 
+// Rewrite a type NestedNameSpecifier such as `Instance::StaticData` in
+// `Instance::StaticData::get()` to the type's fully qualified name. Needed
+// because DeclRefExpr qualifiers are often a single TypeSpec NNS, so there is
+// no separate leading `Instance` TagTypeLoc for TypeQualifierInserter.
+// Returns true if a rewrite was applied.
+static bool try_qualify_type_nested_name_specifier(
+    LocalCodeState &state,
+    std::unordered_set<uint32_t> &edited_locs,
+    clang::NestedNameSpecifierLoc nns_loc) {
+  if (!nns_loc) {
+    return false;
+  }
+  clang::TypeLoc type_loc = nns_loc.getTypeLoc();
+  if (type_loc.isNull()) {
+    return false;
+  }
+  clang::SourceManager &sm = state.rewriter->getSourceMgr();
+  const clang::LangOptions &lang_opts = state.rewriter->getLangOpts();
+
+  clang::SourceLocation begin = nns_loc.getBeginLoc();
+  clang::TypeLoc cur = type_loc;
+  if (const clang::QualifiedTypeLoc qtl =
+          cur.getAs<clang::QualifiedTypeLoc>()) {
+    cur = qtl.getUnqualifiedLoc();
+  }
+
+  // Written `D<int>::…` uses TemplateSpecializationTypeLoc.
+  if (!cur.getAsAdjusted<clang::TemplateSpecializationTypeLoc>().isNull()) {
+    return false;
+  }
+
+  clang::SourceLocation name_loc;
+  const clang::NamedDecl *named_decl = nullptr;
+  if (const clang::TagTypeLoc tag = cur.getAsAdjusted<clang::TagTypeLoc>()) {
+    if (tag.isDefinition() ||
+        llvm::isa<clang::ClassTemplateSpecializationDecl>(tag.getDecl())) {
+      return false;
+    }
+    name_loc = tag.getNameLoc();
+    named_decl = tag.getDecl();
+  } else if (const clang::TypedefTypeLoc td =
+                 cur.getAsAdjusted<clang::TypedefTypeLoc>()) {
+    name_loc = td.getNameLoc();
+    named_decl = td.getTypedefNameDecl();
+  } else {
+    return false;
+  }
+
+  if (!name_loc.isValid() || !named_decl) {
+    return false;
+  }
+  if (!type_has_declaration_before(*named_decl, name_loc, sm)) {
+    return false;
+  }
+  if (!mapped_location_is_local(state, begin, sm) &&
+      !mapped_location_is_local(state, name_loc, sm)) {
+    return false;
+  }
+  if (named_decl->getLocation() == name_loc) {
+    return false;
+  }
+  // File-context leading names (`A` in `A::VALUE`) are handled by
+  // TypeQualifierInserter. This path is for TypeSpec NNS that nominate a
+  // nested type (`Instance::StaticData` in `Instance::StaticData::get`).
+  if (named_decl->getDeclContext()->isFileContext()) {
+    return false;
+  }
+  const std::string name = named_decl->getNameAsString();
+  if (name.empty() || !token_spells_name(name_loc, name, sm, lang_opts)) {
+    return false;
+  }
+
+  // Nested classes are not file-context decls; still OK because we replace the
+  // whole written nested name (`Instance::StaticData`) via printQualifiedName.
+  const string qualified =
+      generate_fully_qualified_name_for_rewrite(*named_decl, lang_opts);
+  const clang::CharSourceRange range =
+      clang::CharSourceRange::getTokenRange(begin, name_loc);
+  if (!range.isValid()) {
+    return false;
+  }
+  const llvm::StringRef existing =
+      clang::Lexer::getSourceText(range, sm, lang_opts);
+  if (existing == qualified) {
+    return false;
+  }
+  const uint32_t loc_key = range.getBegin().getRawEncoding();
+  if (!edited_locs.insert(loc_key).second) {
+    return false;
+  }
+  state.rewriter->ReplaceText(range, qualified);
+  return true;
+}
+
 // Skip TypeLocs that are not ordinary type-ids. Qualifying these is wrong:
 //
 // - No prior declaration: `struct B` / `friend class B` can introduce `B`, but
 //   a qualified name requires `B` to already exist. If a declaration appears
 //   before the use, qualifying is fine (e.g. `friend R`, or `B *` after `struct B`).
-// - Nested name: the `C` in `test::C::VALUE` (would become `test::::test::C`).
+// - Nested-name *inner* components: the `C` in `test::C::VALUE` (would become
+//   `test::::test::C`). The *leading* component (`Instance` in
+//   `Instance::StaticData`) has no prefix and should be qualified so
+//   using-directives cannot make it ambiguous.
 // - Destructor name: `~C()` / `p->~C()` (must not become `~::C()`).
 // - Constructor name: `A::A(...)` / `A(...)` (must not become `A::::ns::A`).
 //   This also covers TypeLocs in Clang-synthesized defaulted move-ctor bodies
@@ -1054,8 +1167,10 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
     }
     const clang::TypeLoc *sugar_parent = nullptr;
     for (const clang::DynTypedNode &parent : parents) {
-      if (parent.get<clang::NestedNameSpecifierLoc>()) {
-        return true;
+      if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
+        if (nns->getPrefix()) {
+          return true;
+        }
       }
       if (!sugar_parent) {
         sugar_parent = parent.get<clang::TypeLoc>();
