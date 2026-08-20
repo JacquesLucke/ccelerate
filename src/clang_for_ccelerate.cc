@@ -1028,20 +1028,24 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
 
 // Skip TypeLocs that are not ordinary type-ids. Qualifying these is wrong:
 //
+// - No prior declaration: `struct B` / `friend class B` can introduce `B`, but
+//   a qualified name requires `B` to already exist. If a declaration appears
+//   before the use, qualifying is fine (e.g. `friend R`, or `B *` after `struct B`).
 // - Nested name: the `C` in `test::C::VALUE` (would become `test::::test::C`).
 // - Destructor name: `~C()` / `p->~C()` (must not become `~::C()`).
 // - Constructor name: `A::A(...)` / `A(...)` (must not become `A::::ns::A`).
 //   This also covers TypeLocs in Clang-synthesized defaulted move-ctor bodies
 //   (e.g. implicit static_cast) that reuse the constructor name location.
 // - Using-declarator / inheriting ctor: `using Base::Base`.
-// - Friend type with no prior declaration: `friend class B` can introduce `B`,
-//   but a qualified friend requires `B` to already exist. If a declaration
-//   appears before the friend, qualifying is fine (e.g. `friend R`).
 static bool
 should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
                                    const clang::NamedDecl &named_decl,
                                    clang::SourceLocation name_loc,
                                    clang::ASTContext &ast) {
+  if (!type_has_declaration_before(
+          named_decl, name_loc, ast.getSourceManager())) {
+    return true;
+  }
   clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
   while (true) {
     const clang::DynTypedNodeList parents = ast.getParents(node);
@@ -1072,10 +1076,6 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
           return true;
         }
       }
-      if (const auto *friend_decl = parent.get<clang::FriendDecl>()) {
-        return !type_has_declaration_before(
-            named_decl, friend_decl->getLocation(), ast.getSourceManager());
-      }
       if (const auto *ctor = parent.get<clang::CXXConstructorDecl>()) {
         if (ctor->isInheritingConstructor() ||
             ctor->getNameInfo().getLoc() == name_loc) {
@@ -1083,6 +1083,8 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
         }
       }
     }
+    // Keep walking through non-type parents. Defaulted move constructors can
+    // embed TypeLocs under implicit casts/exprs before the CXXConstructorDecl.
     node = parents[0];
   }
 }

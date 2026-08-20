@@ -1,0 +1,14 @@
+# 1 "elaborated_forward_type.cc"
+namespace A {
+
+struct Context {
+  const struct B *gen;
+};
+
+struct B {
+  int x;
+};
+
+void use(const ::A::B *p) { (void)p; }
+
+}
