@@ -976,9 +976,11 @@ public:
   }
 };
 
-// Begin of a type name rewrite range. For `B::BStruct`, returns the location of
-// `B` so the existing qualifier is replaced; for an unqualified `BStruct`,
-// returns name_loc.
+// Start of the source range to replace with a fully qualified type name:
+//
+// - `S` → name_loc (`S`)
+// - `B::S` → begin of `B`
+// - `const B::S` → begin of `B` (peels QualifiedTypeLoc first)
 static clang::SourceLocation
 find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
                              const clang::SourceLocation name_loc,
@@ -992,7 +994,7 @@ find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
     return name_loc;
   }
   const clang::ElaboratedTypeLoc etl =
-      parent_tl->getAs<clang::ElaboratedTypeLoc>();
+      parent_tl->getUnqualifiedLoc().getAs<clang::ElaboratedTypeLoc>();
   if (etl.isNull()) {
     return name_loc;
   }
@@ -1010,6 +1012,9 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
     return false;
   }
   for (const clang::Decl *redecl : named_decl.redecls()) {
+    if (redecl->getFriendObjectKind() == clang::Decl::FOK_Undeclared) {
+      continue;
+    }
     const clang::SourceLocation redecl_loc = redecl->getLocation();
     if (redecl_loc.isValid() && sm.isBeforeInTranslationUnit(redecl_loc, loc)) {
       return true;
@@ -1190,7 +1195,6 @@ public:
     if (existing == qualified) {
       return;
     }
-
     const uint32_t loc_key = range.getBegin().getRawEncoding();
     if (!edited_locs_.insert(loc_key).second) {
       return;
