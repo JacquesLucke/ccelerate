@@ -912,14 +912,14 @@ generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
   return result;
 }
 
-class NamespaceQualifyInserter
+class CallQualifierInserter
     : public clang::ast_matchers::MatchFinder::MatchCallback {
   LocalCodeState &state_;
   clang::SourceManager &sm_;
   std::unordered_set<uint32_t> edited_locs_;
 
 public:
-  NamespaceQualifyInserter(LocalCodeState &state)
+  CallQualifierInserter(LocalCodeState &state)
       : state_(state), sm_(state.rewriter->getSourceMgr()) {}
 
   void
@@ -973,7 +973,7 @@ public:
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
-  NamespaceQualifyInserter namespace_qualify_inserter_;
+  CallQualifierInserter namespace_qualify_inserter_;
   UsingNamespaceCollector using_namespace_collector_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
