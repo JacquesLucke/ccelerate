@@ -1030,6 +1030,9 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
 //
 // - Nested name: the `C` in `test::C::VALUE` (would become `test::::test::C`).
 // - Destructor name: `~C()` / `p->~C()` (must not become `~::C()`).
+// - Constructor name: `A::A(...)` / `A(...)` (must not become `A::::ns::A`).
+//   This also covers TypeLocs in Clang-synthesized defaulted move-ctor bodies
+//   (e.g. implicit static_cast) that reuse the constructor name location.
 // - Using-declarator / inheriting ctor: `using Base::Base`.
 // - Friend type with no prior declaration: `friend class B` can introduce `B`,
 //   but a qualified friend requires `B` to already exist. If a declaration
@@ -1037,6 +1040,7 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
 static bool
 should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
                                    const clang::NamedDecl &named_decl,
+                                   clang::SourceLocation name_loc,
                                    clang::ASTContext &ast) {
   clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
   while (true) {
@@ -1073,12 +1077,13 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
             named_decl, friend_decl->getLocation(), ast.getSourceManager());
       }
       if (const auto *ctor = parent.get<clang::CXXConstructorDecl>()) {
-        if (ctor->isInheritingConstructor()) {
+        if (ctor->isInheritingConstructor() ||
+            ctor->getNameInfo().getLoc() == name_loc) {
           return true;
         }
       }
     }
-    return false;
+    node = parents[0];
   }
 }
 
@@ -1168,7 +1173,7 @@ public:
       return;
     }
     if (should_skip_type_loc_for_qualifier(
-            matched_tl, *named_decl, *result.Context)) {
+            matched_tl, *named_decl, name_loc, *result.Context)) {
       return;
     }
     if (!mapped_location_is_local(state_, name_loc, sm_)) {
