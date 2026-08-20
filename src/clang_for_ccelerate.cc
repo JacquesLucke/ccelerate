@@ -902,14 +902,55 @@ static bool is_adl_call_expr(const clang::DeclRefExpr &ref,
 
 static string
 generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
-                                          const clang::LangOptions &lang) {
+                                          const clang::LangOptions &lang,
+                                          bool leading_global_scope = true) {
   clang::PrintingPolicy policy(lang);
   policy.SuppressUnwrittenScope = true;
-  string result = "::";
+  string result = leading_global_scope ? "::" : "";
   llvm::raw_string_ostream os(result);
   decl.printQualifiedName(os, policy);
   os.flush();
   return result;
+}
+
+// True when `type_loc` is the leading type of a DeclaratorDecl nested-name
+// (`A` in `size_t A::k` / `T B::f()`). Qualifying those with a leading `::`
+// yields `size_t ::N::A::k`, which C++ parses as `size_t::N::A::k`.
+static bool is_declarator_qualifier_leading_type_loc(clang::TypeLoc type_loc,
+                                                     clang::ASTContext &ast) {
+  clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      return false;
+    }
+    const clang::TypeLoc *type_loc_parent = nullptr;
+    for (const clang::DynTypedNode &parent : parents) {
+      if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
+        if (nns->getPrefix()) {
+          return false;
+        }
+        const clang::DynTypedNodeList nns_parents = ast.getParents(parent);
+        for (const clang::DynTypedNode &gp : nns_parents) {
+          if (const auto *dd = gp.get<clang::DeclaratorDecl>()) {
+            const clang::NestedNameSpecifierLoc qual = dd->getQualifierLoc();
+            if (qual && qual.getBeginLoc() == nns->getBeginLoc()) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }
+      if (!type_loc_parent) {
+        type_loc_parent = parent.get<clang::TypeLoc>();
+      }
+    }
+    if (type_loc_parent) {
+      node = clang::DynTypedNode::create(*type_loc_parent);
+      continue;
+    }
+    return false;
+  }
 }
 
 static bool try_qualify_type_nested_name_specifier(
@@ -1185,19 +1226,19 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
     if (parents.empty()) {
       return false;
     }
-    const clang::TypeLoc *sugar_parent = nullptr;
+    const clang::TypeLoc *type_loc_parent = nullptr;
     for (const clang::DynTypedNode &parent : parents) {
       if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
         if (nns->getPrefix()) {
           return true;
         }
       }
-      if (!sugar_parent) {
-        sugar_parent = parent.get<clang::TypeLoc>();
+      if (!type_loc_parent) {
+        type_loc_parent = parent.get<clang::TypeLoc>();
       }
     }
-    if (sugar_parent) {
-      node = clang::DynTypedNode::create(*sugar_parent);
+    if (type_loc_parent) {
+      node = clang::DynTypedNode::create(*type_loc_parent);
       continue;
     }
     for (const clang::DynTypedNode &parent : parents) {
@@ -1349,8 +1390,13 @@ public:
       return;
     }
 
-    const string qualified =
-        generate_fully_qualified_name_for_rewrite(*named_decl, lang_opts);
+    // Declarator nested-names cannot start with `::` after a typedef/typename
+    // (`size_t ::N::A::k` parses as `size_t::N::A::k`). Keep the qualification
+    // but drop the global-scope prefix.
+    const bool leading_global_scope =
+        !is_declarator_qualifier_leading_type_loc(matched_tl, *result.Context);
+    const string qualified = generate_fully_qualified_name_for_rewrite(
+        *named_decl, lang_opts, leading_global_scope);
 
     const clang::SourceLocation begin =
         find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);

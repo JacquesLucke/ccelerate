@@ -1,0 +1,10 @@
+# 2 "out_of_line_static_member.cc"
+
+namespace A {
+
+
+const ::A::T A::B::k = 1;
+::A::T A::B::x = 0;
+::A::T A::B::f() { return x; }
+
+}

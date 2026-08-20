@@ -2,11 +2,11 @@
 
 namespace A {
 
-::A::B::B() = default;
-::A::B::B(const ::A::B &other) = default;
-::A::B::B(::A::B &&other) = default;
+A::B::B() = default;
+A::B::B(const ::A::B &other) = default;
+A::B::B(::A::B &&other) = default;
 B::~B() = default;
-::A::B &::A::B::operator=(const ::A::B &other) = default;
-::A::B &::A::B::operator=(::A::B &&other) = default;
+::A::B &A::B::operator=(const ::A::B &other) = default;
+::A::B &A::B::operator=(::A::B &&other) = default;
 
 }
