@@ -1102,6 +1102,9 @@ public:
       if (tag_tl.isNull() || tag_tl.isDefinition()) {
         return;
       }
+      if (llvm::isa<clang::ClassTemplateSpecializationDecl>(tag_tl.getDecl())) {
+        return;
+      }
       name_loc = tag_tl.getNameLoc();
       named_decl = tag_tl.getDecl();
       matched_tl = tag_tl;
