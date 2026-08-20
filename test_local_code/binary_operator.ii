@@ -1,0 +1,11 @@
+# 1 "binary_operator.cc"
+namespace A {
+struct S {
+  friend bool operator==(const S &a, const S &b);
+};
+}
+
+bool test() {
+  using namespace A;
+  return S() == S();
+}
