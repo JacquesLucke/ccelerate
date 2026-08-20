@@ -1,0 +1,11 @@
+# 1 "friend_type.cc"
+namespace A {
+namespace {
+struct R__ {};
+struct S__ {
+  friend ::A::R__;
+  friend class B__;
+};
+class B__ {};
+}
+}

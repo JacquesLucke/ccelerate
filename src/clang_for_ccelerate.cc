@@ -1003,11 +1003,33 @@ find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
   return qualifier.getBeginLoc();
 }
 
-// True when this TypeLoc should not be rewritten as a type-id: it is the type
-// in a nested-name-specifier, a destructor name, a using-declarator name, or
-// an inheriting constructor name (`using Base::Base`).
-static bool should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
-                                               clang::ASTContext &ast) {
+static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
+                                        clang::SourceLocation loc,
+                                        const clang::SourceManager &sm) {
+  if (!loc.isValid()) {
+    return false;
+  }
+  for (const clang::Decl *redecl : named_decl.redecls()) {
+    const clang::SourceLocation redecl_loc = redecl->getLocation();
+    if (redecl_loc.isValid() && sm.isBeforeInTranslationUnit(redecl_loc, loc)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Skip TypeLocs that are not ordinary type-ids. Qualifying these is wrong:
+//
+// - Nested name: the `C` in `test::C::VALUE` (would become `test::::test::C`).
+// - Destructor name: `~C()` (must not become `~::C()`).
+// - Using-declarator / inheriting ctor: `using Base::Base`.
+// - Friend type with no prior declaration: `friend class B` can introduce `B`,
+//   but a qualified friend requires `B` to already exist. If a declaration
+//   appears before the friend, qualifying is fine (e.g. `friend R`).
+static bool
+should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
+                                   const clang::NamedDecl &named_decl,
+                                   clang::ASTContext &ast) {
   clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
   while (true) {
     const clang::DynTypedNodeList parents = ast.getParents(node);
@@ -1031,6 +1053,10 @@ static bool should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
       if (parent.get<clang::UsingDecl>() ||
           parent.get<clang::CXXDestructorDecl>()) {
         return true;
+      }
+      if (const auto *friend_decl = parent.get<clang::FriendDecl>()) {
+        return !type_has_declaration_before(
+            named_decl, friend_decl->getLocation(), ast.getSourceManager());
       }
       if (const auto *ctor = parent.get<clang::CXXConstructorDecl>()) {
         if (ctor->isInheritingConstructor()) {
@@ -1124,7 +1150,8 @@ public:
     if (!name_loc.isValid() || !named_decl || matched_tl.isNull()) {
       return;
     }
-    if (should_skip_type_loc_for_qualifier(matched_tl, *result.Context)) {
+    if (should_skip_type_loc_for_qualifier(
+            matched_tl, *named_decl, *result.Context)) {
       return;
     }
     if (!mapped_location_is_local(state_, name_loc, sm_)) {
