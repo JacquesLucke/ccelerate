@@ -87,6 +87,10 @@ eager_obj_patterns = [
     "**/mantaflow/**/particle.cpp.o",
     # Duplicate default values for projectImg.
     "**/mantaflow/**/simpleimage.cpp.o",
+    # Incompatible using statements for `Marker` and `Tracks`.
+    "**/bf_intern_libmv.dir/intern/reconstruction.cc.o",
+    "**/bf_intern_libmv.dir/intern/tracks.cc.o",
+    "**/bf_intern_libmv.dir/intern/tracksN.cc.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
