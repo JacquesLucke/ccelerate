@@ -83,6 +83,8 @@ eager_obj_patterns = [
     "**/mantaflow/**/pbvec3.cpp.o",
     # Duplicate default values for solvePressure.
     "**/mantaflow/**/fluidguiding.cpp.o",
+    # Duplicate default values for projectImg.
+    "**/mantaflow/**/simpleimage.cpp.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
