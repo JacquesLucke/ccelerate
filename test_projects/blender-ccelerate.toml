@@ -83,6 +83,8 @@ eager_obj_patterns = [
     "**/mantaflow/**/pbvec3.cpp.o",
     # Duplicate default values for solvePressure.
     "**/mantaflow/**/fluidguiding.cpp.o",
+    # Duplicate definition of e.g. KnPtsSum.
+    "**/mantaflow/**/particle.cpp.o",
     # Duplicate default values for projectImg.
     "**/mantaflow/**/simpleimage.cpp.o",
 ]
@@ -93,4 +95,10 @@ pure_c_header_patterns = [
     # Same for curve_fit_nd.
     "**/curve_fit_nd.h",
 ]
-local_type_patterns = ["**::LocalData", "blender::SplineCoeffs"]
+local_type_patterns = [
+    "**::LocalData",
+    "**::MeshLocalData",
+    "**::GridLocalData",
+    "**::BMeshLocalData",
+    "blender::SplineCoeffs",
+]
