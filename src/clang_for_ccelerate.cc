@@ -1203,6 +1203,28 @@ static bool is_declarator_qualifier_leading_type_loc(clang::TypeLoc type_loc,
   }
 }
 
+// `Ctor():Base()` with no space — inserting `::Base` yields `:::Base`.
+// Callers that keep a leading `::` should insert a space in that case.
+// Base-specifiers written as `struct C : ::A` (with a space) are fine; only
+// check the character immediately before the rewrite, do not skip whitespace.
+static bool immediately_preceded_by_colon(clang::SourceLocation loc,
+                                          const clang::SourceManager &sm) {
+  if (!loc.isValid()) {
+    return false;
+  }
+  loc = sm.getSpellingLoc(loc);
+  const auto [fid, offset] = sm.getDecomposedLoc(loc);
+  if (fid.isInvalid() || offset == 0) {
+    return false;
+  }
+  bool invalid = false;
+  const llvm::StringRef buffer = sm.getBufferData(fid, &invalid);
+  if (invalid || offset > buffer.size()) {
+    return false;
+  }
+  return buffer[offset - 1] == ':';
+}
+
 static bool try_qualify_type_nested_name_specifier(
     LocalCodeState &state,
     SymbolRenamer &renamer,
@@ -1698,14 +1720,19 @@ public:
     // Declarator nested-names cannot start with `::` after a typedef/typename
     // (`size_t ::N::A::k` parses as `size_t::N::A::k`). Keep the qualification
     // but drop the global-scope prefix.
-    const bool leading_global_scope =
-        !is_declarator_qualifier_leading_type_loc(matched_tl, *result.Context);
-    const string qualified = generate_fully_qualified_name_for_rewrite(
-        *named_decl, lang_opts, renamer_, state_.args.local_id,
-        leading_global_scope);
-
+    // Ctor-initializers written as `Ctor():Base()` (no space) need a space
+    // before `::` or they become `:::Base`.
     const clang::SourceLocation begin =
         find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
+    const bool leading_global_scope =
+        !is_declarator_qualifier_leading_type_loc(matched_tl, *result.Context);
+    string qualified = generate_fully_qualified_name_for_rewrite(
+        *named_decl, lang_opts, renamer_, state_.args.local_id,
+        leading_global_scope);
+    if (leading_global_scope && immediately_preceded_by_colon(begin, sm_)) {
+      qualified.insert(qualified.begin(), ' ');
+    }
+
     const clang::CharSourceRange range =
         clang::CharSourceRange::getTokenRange(begin, name_loc);
     if (!range.isValid()) {

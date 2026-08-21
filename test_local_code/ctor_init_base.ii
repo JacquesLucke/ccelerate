@@ -1,0 +1,19 @@
+# 1 "ctor_init_base.cc"
+namespace A {
+
+struct B {
+  explicit B(int x) : v(x) {}
+  int v;
+};
+
+struct C : ::A::B {
+  C();
+};
+
+
+
+A::C::C(): ::A::B(1) {}
+
+}
+
+int main() { return ::A::C().v; }
