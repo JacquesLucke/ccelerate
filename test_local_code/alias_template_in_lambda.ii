@@ -1,0 +1,36 @@
+# 1 "alias_template_in_lambda.cc"
+namespace A {
+namespace B {
+
+template <typename T> struct TraitsType {
+  using type = int;
+};
+template <typename T> using Traits = typename ::A::B::TraitsType<T>::type;
+
+template <typename Fn>
+void foreach_index(Fn &&fn) {
+
+  fn(0);
+}
+
+}
+}
+
+namespace N {
+using namespace ::A;
+
+int use() {
+  int sum = 0;
+  ::A::B::foreach_index([&](int i) {
+    using Color = float;
+
+    using Traits = ::A::B::Traits<Color>;
+    Traits x = i;
+    sum += x;
+  });
+  return sum;
+}
+
+}
+
+int main() { return ::N::use(); }

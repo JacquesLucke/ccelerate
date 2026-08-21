@@ -1,0 +1,9 @@
+source_language = "C++"
+include_defines = [
+]
+using_namespaces = [
+    {used = "A", parent = "N"},
+]
+direct_includes = [
+]
+local_code_path = "alias_template_ns.ii"

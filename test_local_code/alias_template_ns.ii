@@ -1,0 +1,27 @@
+# 1 "alias_template_ns.cc"
+namespace A {
+namespace B {
+
+template <typename T> struct TraitsType {
+  using type = int;
+};
+template <typename T> using Traits = typename ::A::B::TraitsType<T>::type;
+
+}
+}
+
+namespace N {
+using namespace ::A;
+
+int use() {
+  using Color = float;
+
+
+  using Traits = ::A::B::Traits<Color>;
+  Traits x = 0;
+  return x;
+}
+
+}
+
+int main() { return ::N::use(); }

@@ -646,7 +646,8 @@ private:
   vector<clang::SourceLocation> pending_renames_;
   // Ranges covered by qualifier ReplaceText. Checked when flushing renames so
   // matcher order between qualify and rename does not matter.
-  vector<std::pair<clang::SourceLocation, clang::SourceLocation>> claimed_ranges_;
+  vector<std::pair<clang::SourceLocation, clang::SourceLocation>>
+      claimed_ranges_;
 
   bool location_is_claimed(clang::SourceLocation loc) const {
     if (!loc.isValid()) {
@@ -964,20 +965,20 @@ static bool is_adl_call_expr(const clang::DeclRefExpr &ref,
 // local_id when that component is localized. Only named contexts that can
 // appear in insertable C++ are handled (anonymous scopes are skipped when
 // collecting).
-static string generate_fully_qualified_name_for_rewrite(
-    const clang::NamedDecl &decl,
-    const clang::LangOptions &lang,
-    SymbolRenamer &renamer,
-    string_view local_id,
-    bool leading_global_scope = true);
+static string
+generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
+                                          const clang::LangOptions &lang,
+                                          SymbolRenamer &renamer,
+                                          string_view local_id,
+                                          bool leading_global_scope = true);
 
-static void append_nested_name_specifier_for_rewrite(
-    string &result,
-    const clang::NamedDecl &decl,
-    const clang::LangOptions &lang,
-    const clang::PrintingPolicy &policy,
-    SymbolRenamer &renamer,
-    string_view local_id);
+static void
+append_nested_name_specifier_for_rewrite(string &result,
+                                         const clang::NamedDecl &decl,
+                                         const clang::LangOptions &lang,
+                                         const clang::PrintingPolicy &policy,
+                                         SymbolRenamer &renamer,
+                                         string_view local_id);
 
 static void append_template_arguments_for_rewrite(
     string &result,
@@ -1042,13 +1043,13 @@ static void append_template_arguments_for_rewrite(
   result += '>';
 }
 
-static void append_qualifying_context_for_rewrite(
-    string &result,
-    const clang::DeclContext &dc,
-    const clang::LangOptions &lang,
-    const clang::PrintingPolicy &policy,
-    SymbolRenamer &renamer,
-    string_view local_id) {
+static void
+append_qualifying_context_for_rewrite(string &result,
+                                      const clang::DeclContext &dc,
+                                      const clang::LangOptions &lang,
+                                      const clang::PrintingPolicy &policy,
+                                      SymbolRenamer &renamer,
+                                      string_view local_id) {
   if (const auto *spec =
           llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(&dc)) {
     const clang::CXXRecordDecl *pattern =
@@ -1068,13 +1069,13 @@ static void append_qualifying_context_for_rewrite(
   }
 }
 
-static void append_nested_name_specifier_for_rewrite(
-    string &result,
-    const clang::NamedDecl &decl,
-    const clang::LangOptions &lang,
-    const clang::PrintingPolicy &policy,
-    SymbolRenamer &renamer,
-    string_view local_id) {
+static void
+append_nested_name_specifier_for_rewrite(string &result,
+                                         const clang::NamedDecl &decl,
+                                         const clang::LangOptions &lang,
+                                         const clang::PrintingPolicy &policy,
+                                         SymbolRenamer &renamer,
+                                         string_view local_id) {
   const clang::DeclContext *ctx = decl.getDeclContext();
   if (ctx->isFunctionOrMethod()) {
     return;
@@ -1335,30 +1336,51 @@ public:
 // Start of the source range to replace with a fully qualified type name:
 //
 // - `S` → name_loc (`S`)
-// - `B::S` → begin of `B`
+// - `B::S` / `ns::Traits<T>` → begin of the written nested-name
 // - `const B::S` → begin of `B` (peels QualifiedTypeLoc first)
 static clang::SourceLocation
 find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
                              const clang::SourceLocation name_loc,
                              clang::ASTContext &ast) {
-  const clang::DynTypedNodeList parents = ast.getParents(type_loc);
-  if (parents.empty()) {
-    return name_loc;
+  clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
+  clang::SourceLocation begin = name_loc;
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      break;
+    }
+    const clang::NestedNameSpecifierLoc *nns_parent = nullptr;
+    const clang::TypeLoc *type_loc_parent = nullptr;
+    for (const clang::DynTypedNode &parent : parents) {
+      // `ns::Traits<T>` may parent the template TypeLoc directly under the NNS
+      // (no ElaboratedTypeLoc wrapper). Include the whole nested-name.
+      if (!nns_parent) {
+        nns_parent = parent.get<clang::NestedNameSpecifierLoc>();
+      }
+      if (!type_loc_parent) {
+        type_loc_parent = parent.get<clang::TypeLoc>();
+      }
+    }
+    if (nns_parent) {
+      begin = nns_parent->getBeginLoc();
+      node = clang::DynTypedNode::create(*nns_parent);
+      continue;
+    }
+    if (!type_loc_parent) {
+      break;
+    }
+    const clang::ElaboratedTypeLoc etl =
+        type_loc_parent->getUnqualifiedLoc().getAs<clang::ElaboratedTypeLoc>();
+    if (!etl.isNull()) {
+      if (const clang::NestedNameSpecifierLoc qualifier =
+              etl.getQualifierLoc()) {
+        begin = qualifier.getBeginLoc();
+      }
+      break;
+    }
+    node = clang::DynTypedNode::create(*type_loc_parent);
   }
-  const clang::TypeLoc *parent_tl = parents[0].get<clang::TypeLoc>();
-  if (!parent_tl) {
-    return name_loc;
-  }
-  const clang::ElaboratedTypeLoc etl =
-      parent_tl->getUnqualifiedLoc().getAs<clang::ElaboratedTypeLoc>();
-  if (etl.isNull()) {
-    return name_loc;
-  }
-  const clang::NestedNameSpecifierLoc qualifier = etl.getQualifierLoc();
-  if (!qualifier) {
-    return name_loc;
-  }
-  return qualifier.getBeginLoc();
+  return begin;
 }
 
 static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
@@ -1488,16 +1510,36 @@ static bool try_qualify_type_nested_name_specifier(
   return true;
 }
 
+static bool
+type_loc_under_decl_ref_or_member_qualifier(clang::DynTypedNode node,
+                                            clang::ASTContext &ast) {
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      return false;
+    }
+    for (const clang::DynTypedNode &parent : parents) {
+      if (parent.get<clang::DeclRefExpr>() || parent.get<clang::MemberExpr>() ||
+          parent.get<clang::DependentScopeDeclRefExpr>() ||
+          parent.get<clang::CXXDependentScopeMemberExpr>()) {
+        return true;
+      }
+    }
+    node = parents[0];
+  }
+}
+
 // Skip TypeLocs that are not ordinary type-ids. Qualifying these is wrong:
 //
 // - No prior declaration: `struct B` / `friend class B` can introduce `B`, but
 //   a qualified name requires `B` to already exist. If a declaration appears
 //   before the use, qualifying is fine (e.g. `friend R`, or `B *` after `struct
 //   B`).
-// - Nested-name *inner* components: the `C` in `test::C::VALUE` (would become
-//   `test::::test::C`). The *leading* component (`Instance` in
-//   `Instance::StaticData`) has no prefix and should be qualified so
-//   using-directives cannot make it ambiguous.
+// - Nested-name *inner* components under a DeclRef/MemberExpr qualifier: the
+//   `C` in `test::C::VALUE` is rewritten with the whole qualifier by
+//   CallQualifierInserter; rewriting only `C` here would become
+//   `test::::test::C`. Type-ids such as `ns::Traits<T>` are *not* skipped —
+//   nothing else qualifies those.
 // - Destructor name: `~C()` / `p->~C()` (must not become `~::C()`).
 // - Constructor name: `A::A(...)` / `A(...)` (must not become `A::::ns::A`).
 //   This also covers TypeLocs in Clang-synthesized defaulted move-ctor bodies
@@ -1530,7 +1572,8 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
     const clang::TypeLoc *type_loc_parent = nullptr;
     for (const clang::DynTypedNode &parent : parents) {
       if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
-        if (nns->getPrefix()) {
+        if (nns->getPrefix() &&
+            type_loc_under_decl_ref_or_member_qualifier(parent, ast)) {
           return true;
         }
       }
@@ -1543,6 +1586,14 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
       continue;
     }
     for (const clang::DynTypedNode &parent : parents) {
+      // Written type-id of a local alias (`using Traits = color::Traits<T>`).
+      // Do not keep walking into enclosing CXXConstructExprs that build the
+      // lambda temporary this alias lives in — that would skip legitimate
+      // qualification.
+      if (parent.get<clang::TypeAliasDecl>() ||
+          parent.get<clang::TypedefDecl>()) {
+        return false;
+      }
       // Only the imported name is skipped; the leading nested-name type is
       // still qualified (`using A::A` → `using ::N::A::A`).
       if (const auto *ud = parent.get<clang::UsingDecl>()) {
@@ -1726,9 +1777,12 @@ public:
         find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
     const bool leading_global_scope =
         !is_declarator_qualifier_leading_type_loc(matched_tl, *result.Context);
-    string qualified = generate_fully_qualified_name_for_rewrite(
-        *named_decl, lang_opts, renamer_, state_.args.local_id,
-        leading_global_scope);
+    string qualified =
+        generate_fully_qualified_name_for_rewrite(*named_decl,
+                                                  lang_opts,
+                                                  renamer_,
+                                                  state_.args.local_id,
+                                                  leading_global_scope);
     if (leading_global_scope && immediately_preceded_by_colon(begin, sm_)) {
       qualified.insert(qualified.begin(), ' ');
     }
@@ -1760,8 +1814,7 @@ class UsingNamespaceQualifierInserter
   std::unordered_set<uint32_t> edited_locs_;
 
 public:
-  UsingNamespaceQualifierInserter(LocalCodeState &state,
-                                  SymbolRenamer &renamer)
+  UsingNamespaceQualifierInserter(LocalCodeState &state, SymbolRenamer &renamer)
       : state_(state), renamer_(renamer), sm_(state.rewriter->getSourceMgr()) {}
 
   void
@@ -1928,10 +1981,9 @@ public:
       finder_.addMatcher(typeLoc(loc(deducedTemplateSpecializationType()))
                              .bind("deducedTemplateSpecTypeLoc"),
                          &type_qualify_inserter_);
-      finder_.addMatcher(
-          typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
-              .bind("typedefTypeLoc"),
-          &type_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
+                             .bind("typedefTypeLoc"),
+                         &type_qualify_inserter_);
       finder_.addMatcher(typeLoc(loc(usingType())).bind("usingTypeLoc"),
                          &type_qualify_inserter_);
       finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
