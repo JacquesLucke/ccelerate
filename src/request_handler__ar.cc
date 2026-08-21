@@ -22,6 +22,7 @@ struct CompatibilityKey {
   vector<string> cc1_args;
   string language;
   vector<string> include_defines;
+  ConfigUnitIsolationKey unit_isolation_key;
 
   bool operator==(const CompatibilityKey &) const = default;
 };
@@ -44,6 +45,8 @@ template <> struct std::hash<ccelerate::CompatibilityKey> {
     for (const std::string &define : key.include_defines) {
       seed = hash_combine(seed, define);
     }
+    seed ^= 23436243 * std::hash<ccelerate::ConfigUnitIsolationKey>{}(
+                           key.unit_isolation_key);
     return seed;
   }
 };
@@ -76,6 +79,9 @@ cc1_args_to_compatibility_key(const LocalCodeInfo &info) {
   }
   key.language = info.source_language;
   key.include_defines = info.include_defines;
+  key.unit_isolation_key =
+      ConfigDiscovery::get().get_latest().get_unit_isolation_key(
+          info.object_path);
   return key;
 }
 

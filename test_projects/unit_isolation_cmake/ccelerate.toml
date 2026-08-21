@@ -1,0 +1,7 @@
+[[unit_isolation_patterns]]
+name = "A"
+patterns = ["**/a/**"]
+
+[[unit_isolation_patterns]]
+name = "B"
+patterns = ["**/b/**"]

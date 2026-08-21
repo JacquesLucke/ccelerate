@@ -102,3 +102,11 @@ local_type_patterns = [
     "**::BMeshLocalData",
     "blender::SplineCoeffs",
 ]
+
+[[unit_isolation_patterns]]
+name = "opengl"
+patterns = ["**/bf_gpu.dir/opengl/**"]
+
+[[unit_isolation_patterns]]
+name = "vulkan"
+patterns = ["**/bf_gpu.dir/vulkan/**"]

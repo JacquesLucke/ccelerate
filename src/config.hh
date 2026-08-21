@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <functional>
 #include <mutex>
 #include <re2/re2.h>
 #include <unordered_set>
@@ -17,24 +18,45 @@ namespace ccelerate {
 
 class ConfigFile {
 public:
+  struct UnitIsolationPattern {
+    string name;
+    vector<string> patterns;
+  };
+
   vector<string> local_header_patterns;
   vector<string> local_type_patterns;
   vector<string> pure_c_header_patterns;
   vector<string> include_defines;
   vector<string> eager_obj_patterns;
+  vector<UnitIsolationPattern> unit_isolation_patterns;
 
   static optional<ConfigFile> from_path(const path &path);
   static optional<ConfigFile> from_toml_string(string toml_str);
 };
 
+class ConfigUnitIsolationKey {
+  vector<string> ordered_matched_patterns;
+
+  friend bool operator==(const ConfigUnitIsolationKey &,
+                         const ConfigUnitIsolationKey &) = default;
+  friend class Config;
+  friend struct std::hash<ConfigUnitIsolationKey>;
+};
+
 class Config {
 private:
+  struct UnitIsolationPattern {
+    string name;
+    unique_ptr<re2::RE2> pattern;
+  };
+
   vector<ConfigFile> config_files_;
   unique_ptr<re2::RE2> is_local_header_;
   unique_ptr<re2::RE2> is_local_type_;
   unique_ptr<re2::RE2> is_pure_c_header_;
   unique_ptr<re2::RE2> is_include_define_;
   unique_ptr<re2::RE2> is_eager_obj_;
+  vector<UnitIsolationPattern> unit_isolation_patterns_;
 
 public:
   static Config from_paths(span<const path> paths);
@@ -45,6 +67,7 @@ public:
   bool is_pure_c_header(const path &path) const;
   bool is_include_define(string_view define) const;
   bool is_eager_obj(const path &path) const;
+  ConfigUnitIsolationKey get_unit_isolation_key(const path &path) const;
 };
 
 class ConfigDiscovery {
@@ -71,3 +94,15 @@ public:
 };
 
 } // namespace ccelerate
+
+template <> struct std::hash<ccelerate::ConfigUnitIsolationKey> {
+  size_t operator()(
+      const ccelerate::ConfigUnitIsolationKey &key) const noexcept {
+    size_t seed = key.ordered_matched_patterns.size();
+    for (const std::string &pattern : key.ordered_matched_patterns) {
+      seed ^= std::hash<std::string_view>{}(pattern) + 0x9e3779b9 +
+              (seed << 6) + (seed >> 2);
+    }
+    return seed;
+  }
+};

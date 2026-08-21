@@ -40,6 +40,16 @@ optional<ConfigFile> ConfigFile::from_toml_string(string toml_str) {
   config_file.pure_c_header_patterns = std::move(pure_c_header_patterns);
   config_file.include_defines = std::move(include_defines);
   config_file.eager_obj_patterns = std::move(eager_obj_patterns);
+
+  for (const toml::value &entry :
+       toml::find_or_default<toml::array>(data, "unit_isolation_patterns")) {
+    ConfigFile::UnitIsolationPattern pattern;
+    pattern.name = toml::find_or_default<string>(entry, "name");
+    pattern.patterns =
+        toml::find_or_default<vector<string>>(entry, "patterns");
+    config_file.unit_isolation_patterns.push_back(std::move(pattern));
+  }
+
   return config_file;
 }
 
@@ -129,6 +139,20 @@ Config Config::from_config_files(const span<const ConfigFile> config_files) {
     for (const string &pattern : config_file.eager_obj_patterns) {
       append_pattern(is_eager_obj_expr, pattern);
     }
+    for (const ConfigFile::UnitIsolationPattern &unit_isolation_pattern :
+         config_file.unit_isolation_patterns) {
+      string expr;
+      for (const string &pattern : unit_isolation_pattern.patterns) {
+        append_pattern(expr, pattern);
+      }
+      if (expr.empty()) {
+        continue;
+      }
+      config.unit_isolation_patterns_.push_back(UnitIsolationPattern{
+          .name = unit_isolation_pattern.name,
+          .pattern = make_unique<re2::RE2>(expr),
+      });
+    }
   }
   if (!is_local_header_expr.empty()) {
     config.is_local_header_ = make_unique<re2::RE2>(is_local_header_expr);
@@ -181,6 +205,22 @@ bool Config::is_eager_obj(const path &path) const {
     return false;
   }
   return re2::RE2::FullMatch(path.string(), *is_eager_obj_);
+}
+
+ConfigUnitIsolationKey Config::get_unit_isolation_key(const path &path) const {
+  ConfigUnitIsolationKey key;
+  const string path_str = path.string();
+  for (const UnitIsolationPattern &unit_isolation_pattern :
+       unit_isolation_patterns_) {
+    if (!unit_isolation_pattern.pattern ||
+        !unit_isolation_pattern.pattern->ok()) {
+      continue;
+    }
+    if (re2::RE2::FullMatch(path_str, *unit_isolation_pattern.pattern)) {
+      key.ordered_matched_patterns.push_back(unit_isolation_pattern.name);
+    }
+  }
+  return key;
 }
 
 ConfigDiscovery::ConfigDiscovery() {

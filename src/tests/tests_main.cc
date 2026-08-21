@@ -173,6 +173,10 @@ TEST(Integration, UnnormalizedIncludePrefix) {
   test_simple_cmake_project("unnormalized_include_prefix", "ok\n");
 }
 
+TEST(Integration, UnitIsolationCMake) {
+  test_simple_cmake_project("unit_isolation_cmake", "12\n");
+}
+
 static string read_file(const path &file_path) {
   std::ifstream in(file_path);
   std::ostringstream contents;
