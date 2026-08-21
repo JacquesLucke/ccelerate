@@ -1,0 +1,24 @@
+# 1 "nested_typedef_template_arg.cc"
+namespace N {
+
+namespace {
+
+struct A__ {};
+
+template <typename T> struct B__ {
+  struct C {
+    static constexpr int k = 1;
+  };
+};
+
+}
+
+int use() {
+
+
+  return ::N::B__<::N::A__>::C::k;
+}
+
+}
+
+int main() { return ::N::use(); }

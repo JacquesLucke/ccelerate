@@ -1,0 +1,32 @@
+# 1 "nested_template_deep.cc"
+namespace N {
+
+namespace {
+
+struct X__ {};
+
+template <typename T> struct A__ {
+  struct Inner {};
+};
+
+template <typename T> struct B__ {
+  struct Mid {
+    template <typename U> struct C {
+      struct Leaf {
+        static constexpr int k = 1;
+      };
+    };
+  };
+};
+
+}
+
+int use() {
+
+
+  return ::N::B__<::N::A__<::N::X__>>::Mid::C<::N::A__<::N::X__>::Inner>::Leaf::k;
+}
+
+}
+
+int main() { return ::N::use(); }

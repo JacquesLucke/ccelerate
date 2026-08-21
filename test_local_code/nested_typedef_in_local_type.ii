@@ -1,0 +1,21 @@
+# 1 "nested_typedef_in_local_type.cc"
+namespace N {
+
+struct B {
+  static constexpr int k = 1;
+};
+
+namespace {
+
+struct A__ {
+  using C = ::N::B;
+  int f() { return ::N::A__::C::k; }
+};
+
+}
+
+int use() { return ::N::A__().f(); }
+
+}
+
+int main() { return ::N::use(); }

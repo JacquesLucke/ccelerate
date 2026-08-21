@@ -1,0 +1,25 @@
+# 1 "nested_typedef_name_collision.cc"
+namespace N {
+namespace A {
+
+struct B {
+  static constexpr int k = 1;
+};
+
+namespace {
+
+
+
+struct A__ {
+  using C = ::N::A::B;
+  int f() { return ::N::A::A__::C::k; }
+};
+
+}
+
+int use() { return ::N::A::A__().f(); }
+
+}
+}
+
+int main() { return ::N::A::use(); }

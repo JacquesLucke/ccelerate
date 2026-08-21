@@ -629,11 +629,49 @@ class SymbolRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
   LocalCodeState &state_;
   clang::SourceManager &sm_;
-  std::unordered_set<uint32_t> renamed_locs_;
+  std::unordered_set<uint32_t> pending_rename_keys_;
+  vector<clang::SourceLocation> pending_renames_;
+  // Ranges covered by qualifier ReplaceText. Checked when flushing renames so
+  // matcher order between qualify and rename does not matter.
+  vector<std::pair<clang::SourceLocation, clang::SourceLocation>> claimed_ranges_;
+
+  bool location_is_claimed(clang::SourceLocation loc) const {
+    if (!loc.isValid()) {
+      return false;
+    }
+    for (const auto &range : claimed_ranges_) {
+      if (!sm_.isBeforeInTranslationUnit(loc, range.first) &&
+          !sm_.isBeforeInTranslationUnit(range.second, loc)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
 public:
   SymbolRenamer(LocalCodeState &state)
       : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+
+  void claim_range(clang::SourceLocation begin, clang::SourceLocation end) {
+    if (begin.isValid() && end.isValid()) {
+      claimed_ranges_.emplace_back(begin, end);
+    }
+  }
+
+  // Apply local_id inserts after all qualifier ReplaceTexts have claimed their
+  // ranges. Names inside those ranges already include local_id in the
+  // generated replacement.
+  void apply_pending_renames() {
+    const string_view local_id = state_.args.local_id;
+    for (const clang::SourceLocation loc : pending_renames_) {
+      if (location_is_claimed(loc)) {
+        continue;
+      }
+      state_.rewriter->InsertTextAfterToken(loc, local_id);
+    }
+    pending_renames_.clear();
+    pending_rename_keys_.clear();
+  }
 
   virtual void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
@@ -740,10 +778,10 @@ public:
       return;
     }
     const uint32_t loc_key = loc.getRawEncoding();
-    if (!renamed_locs_.insert(loc_key).second) {
+    if (!pending_rename_keys_.insert(loc_key).second) {
       return;
     }
-    state_.rewriter->InsertTextAfterToken(loc, state_.args.local_id);
+    pending_renames_.push_back(loc);
   }
 
   // Individual function locality, ignoring other overloads of the same name.
@@ -900,16 +938,206 @@ static bool is_adl_call_expr(const clang::DeclRefExpr &ref,
   return false;
 }
 
+// Print a named DeclContext component for a rewrite qualifier, appending
+// local_id when that component is localized. Only named contexts that can
+// appear in insertable C++ are handled (anonymous scopes are skipped when
+// collecting).
+static string generate_fully_qualified_name_for_rewrite(
+    const clang::NamedDecl &decl,
+    const clang::LangOptions &lang,
+    SymbolRenamer &renamer,
+    string_view local_id,
+    bool leading_global_scope = true);
+
+static void append_nested_name_specifier_for_rewrite(
+    string &result,
+    const clang::NamedDecl &decl,
+    const clang::LangOptions &lang,
+    const clang::PrintingPolicy &policy,
+    SymbolRenamer &renamer,
+    string_view local_id);
+
+static void append_template_arguments_for_rewrite(
+    string &result,
+    const clang::ClassTemplateSpecializationDecl &spec,
+    const clang::LangOptions &lang,
+    const clang::PrintingPolicy &policy,
+    SymbolRenamer &renamer,
+    string_view local_id);
+
+static void append_type_for_rewrite(string &result,
+                                    clang::QualType type,
+                                    const clang::LangOptions &lang,
+                                    const clang::PrintingPolicy &policy,
+                                    SymbolRenamer &renamer,
+                                    string_view local_id) {
+  if (const clang::TagDecl *td = type->getAsTagDecl()) {
+    if (const auto *spec =
+            llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(td)) {
+      const clang::CXXRecordDecl *pattern =
+          spec->getSpecializedTemplate()->getTemplatedDecl();
+      result += "::";
+      append_nested_name_specifier_for_rewrite(
+          result, *spec, lang, policy, renamer, local_id);
+      result += pattern->getNameAsString();
+      if (renamer.name_should_be_localized(*pattern)) {
+        result += local_id;
+      }
+      append_template_arguments_for_rewrite(
+          result, *spec, lang, policy, renamer, local_id);
+      return;
+    }
+    result += generate_fully_qualified_name_for_rewrite(
+        *td, lang, renamer, local_id, /*leading_global_scope=*/true);
+    return;
+  }
+  llvm::raw_string_ostream os(result);
+  type.print(os, policy);
+}
+
+static void append_template_arguments_for_rewrite(
+    string &result,
+    const clang::ClassTemplateSpecializationDecl &spec,
+    const clang::LangOptions &lang,
+    const clang::PrintingPolicy &policy,
+    SymbolRenamer &renamer,
+    string_view local_id) {
+  result += '<';
+  const clang::TemplateArgumentList &args = spec.getTemplateArgs();
+  for (unsigned i = 0; i < args.size(); ++i) {
+    if (i != 0) {
+      result += ", ";
+    }
+    const clang::TemplateArgument &arg = args[i];
+    if (arg.getKind() == clang::TemplateArgument::Type) {
+      append_type_for_rewrite(
+          result, arg.getAsType(), lang, policy, renamer, local_id);
+      continue;
+    }
+    llvm::raw_string_ostream os(result);
+    arg.print(policy, os, /*includeType=*/true);
+  }
+  result += '>';
+}
+
+static void append_qualifying_context_for_rewrite(
+    string &result,
+    const clang::DeclContext &dc,
+    const clang::LangOptions &lang,
+    const clang::PrintingPolicy &policy,
+    SymbolRenamer &renamer,
+    string_view local_id) {
+  if (const auto *spec =
+          llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(&dc)) {
+    const clang::CXXRecordDecl *pattern =
+        spec->getSpecializedTemplate()->getTemplatedDecl();
+    result += pattern->getNameAsString();
+    if (renamer.name_should_be_localized(*pattern)) {
+      result += local_id;
+    }
+    append_template_arguments_for_rewrite(
+        result, *spec, lang, policy, renamer, local_id);
+    return;
+  }
+  const auto *nd = llvm::cast<clang::NamedDecl>(&dc);
+  result += nd->getNameAsString();
+  if (renamer.name_should_be_localized(*nd)) {
+    result += local_id;
+  }
+}
+
+static void append_nested_name_specifier_for_rewrite(
+    string &result,
+    const clang::NamedDecl &decl,
+    const clang::LangOptions &lang,
+    const clang::PrintingPolicy &policy,
+    SymbolRenamer &renamer,
+    string_view local_id) {
+  const clang::DeclContext *ctx = decl.getDeclContext();
+  if (ctx->isFunctionOrMethod()) {
+    return;
+  }
+
+  llvm::SmallVector<const clang::DeclContext *, 8> contexts;
+  clang::DeclarationName name_in_scope = decl.getDeclName();
+  for (; ctx; ctx = ctx->getParent()) {
+    // Never written in source; cannot appear in rewritten local code.
+    if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(ctx)) {
+      if (ns->isAnonymousNamespace()) {
+        continue;
+      }
+    }
+    if (policy.SuppressInlineNamespace && ctx->isInlineNamespace() &&
+        name_in_scope) {
+      if (const auto *ns = llvm::dyn_cast<clang::NamespaceDecl>(ctx)) {
+        if (ns->isRedundantInlineQualifierFor(name_in_scope)) {
+          continue;
+        }
+      }
+    }
+    // Function-local and anonymous types are not rewrite qualifier components.
+    if (ctx->isFunctionOrMethod()) {
+      continue;
+    }
+    if (const auto *rd = llvm::dyn_cast<clang::RecordDecl>(ctx)) {
+      if (!rd->getIdentifier()) {
+        continue;
+      }
+    }
+    // C++ [dcl.enum]p10: unscoped enumerators live in the enclosing scope.
+    if (const auto *ed = llvm::dyn_cast<clang::EnumDecl>(ctx)) {
+      if (!ed->isScoped()) {
+        continue;
+      }
+    }
+    const auto *nd = llvm::dyn_cast<clang::NamedDecl>(ctx);
+    if (!nd || !nd->getIdentifier()) {
+      continue;
+    }
+    contexts.push_back(ctx);
+    name_in_scope = nd->getDeclName();
+  }
+
+  for (const clang::DeclContext *dc : llvm::reverse(contexts)) {
+    append_qualifying_context_for_rewrite(
+        result, *dc, lang, policy, renamer, local_id);
+    result += "::";
+  }
+}
+
 static string
 generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
                                           const clang::LangOptions &lang,
-                                          bool leading_global_scope = true) {
+                                          SymbolRenamer &renamer,
+                                          string_view local_id,
+                                          bool leading_global_scope) {
   clang::PrintingPolicy policy(lang);
   policy.SuppressUnwrittenScope = true;
+
+  // Include local_id for every localized component, including the leaf: the
+  // replacement string is the only place embedded names (e.g. template args)
+  // appear, and use-site tokens covered by ReplaceText are claimed so
+  // SymbolRenamer does not append local_id again.
+  auto append_leaf = [&](string &result) {
+    {
+      llvm::raw_string_ostream os(result);
+      decl.printName(os, policy);
+    }
+    if (renamer.name_should_be_localized(decl)) {
+      result += local_id;
+    }
+  };
+
+  if (decl.getDeclContext()->isFunctionOrMethod()) {
+    string result;
+    append_leaf(result);
+    return result;
+  }
+
   string result = leading_global_scope ? "::" : "";
-  llvm::raw_string_ostream os(result);
-  decl.printQualifiedName(os, policy);
-  os.flush();
+  append_nested_name_specifier_for_rewrite(
+      result, decl, lang, policy, renamer, local_id);
+  append_leaf(result);
   return result;
 }
 
@@ -955,18 +1183,20 @@ static bool is_declarator_qualifier_leading_type_loc(clang::TypeLoc type_loc,
 
 static bool try_qualify_type_nested_name_specifier(
     LocalCodeState &state,
+    SymbolRenamer &renamer,
     std::unordered_set<uint32_t> &edited_locs,
     clang::NestedNameSpecifierLoc nns_loc);
 
 class CallQualifierInserter
     : public clang::ast_matchers::MatchFinder::MatchCallback {
   LocalCodeState &state_;
+  SymbolRenamer &renamer_;
   clang::SourceManager &sm_;
   std::unordered_set<uint32_t> edited_locs_;
 
 public:
-  CallQualifierInserter(LocalCodeState &state)
-      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+  CallQualifierInserter(LocalCodeState &state, SymbolRenamer &renamer)
+      : state_(state), renamer_(renamer), sm_(state.rewriter->getSourceMgr()) {}
 
   void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
@@ -987,7 +1217,7 @@ public:
       if (const clang::NestedNameSpecifierLoc qualifier =
               ref->getQualifierLoc()) {
         if (try_qualify_type_nested_name_specifier(
-                state_, edited_locs_, qualifier)) {
+                state_, renamer_, edited_locs_, qualifier)) {
           return;
         }
       }
@@ -1028,8 +1258,8 @@ public:
         return;
       }
 
-      const string qualified =
-          generate_fully_qualified_name_for_rewrite(*decl, lang_opts);
+      const string qualified = generate_fully_qualified_name_for_rewrite(
+          *decl, lang_opts, renamer_, state_.args.local_id);
 
       // Only rewrite the qualifier + name and keep explicit template arguments.
       clang::SourceLocation begin = loc;
@@ -1052,6 +1282,7 @@ public:
       if (!edited_locs_.insert(loc_key).second) {
         return;
       }
+      renamer_.claim_range(begin, loc);
       state_.rewriter->ReplaceText(range, qualified);
     }
   }
@@ -1111,6 +1342,7 @@ static bool type_has_declaration_before(const clang::NamedDecl &named_decl,
 // Returns true if a rewrite was applied.
 static bool try_qualify_type_nested_name_specifier(
     LocalCodeState &state,
+    SymbolRenamer &renamer,
     std::unordered_set<uint32_t> &edited_locs,
     clang::NestedNameSpecifierLoc nns_loc) {
   if (!nns_loc) {
@@ -1180,8 +1412,8 @@ static bool try_qualify_type_nested_name_specifier(
 
   // Nested classes are not file-context decls; still OK because we replace the
   // whole written nested name (`Instance::StaticData`) via printQualifiedName.
-  const string qualified =
-      generate_fully_qualified_name_for_rewrite(*named_decl, lang_opts);
+  const string qualified = generate_fully_qualified_name_for_rewrite(
+      *named_decl, lang_opts, renamer, state.args.local_id);
   const clang::CharSourceRange range =
       clang::CharSourceRange::getTokenRange(begin, name_loc);
   if (!range.isValid()) {
@@ -1196,6 +1428,7 @@ static bool try_qualify_type_nested_name_specifier(
   if (!edited_locs.insert(loc_key).second) {
     return false;
   }
+  renamer.claim_range(begin, name_loc);
   state.rewriter->ReplaceText(range, qualified);
   return true;
 }
@@ -1311,12 +1544,13 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
 class TypeQualifierInserter
     : public clang::ast_matchers::MatchFinder::MatchCallback {
   LocalCodeState &state_;
+  SymbolRenamer &renamer_;
   clang::SourceManager &sm_;
   std::unordered_set<uint32_t> edited_locs_;
 
 public:
-  TypeQualifierInserter(LocalCodeState &state)
-      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+  TypeQualifierInserter(LocalCodeState &state, SymbolRenamer &renamer)
+      : state_(state), renamer_(renamer), sm_(state.rewriter->getSourceMgr()) {}
 
   void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
@@ -1424,7 +1658,8 @@ public:
     const bool leading_global_scope =
         !is_declarator_qualifier_leading_type_loc(matched_tl, *result.Context);
     const string qualified = generate_fully_qualified_name_for_rewrite(
-        *named_decl, lang_opts, leading_global_scope);
+        *named_decl, lang_opts, renamer_, state_.args.local_id,
+        leading_global_scope);
 
     const clang::SourceLocation begin =
         find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
@@ -1442,6 +1677,7 @@ public:
     if (!edited_locs_.insert(loc_key).second) {
       return;
     }
+    renamer_.claim_range(begin, name_loc);
     state_.rewriter->ReplaceText(range, qualified);
   }
 };
@@ -1449,12 +1685,14 @@ public:
 class UsingNamespaceQualifierInserter
     : public clang::ast_matchers::MatchFinder::MatchCallback {
   LocalCodeState &state_;
+  SymbolRenamer &renamer_;
   clang::SourceManager &sm_;
   std::unordered_set<uint32_t> edited_locs_;
 
 public:
-  UsingNamespaceQualifierInserter(LocalCodeState &state)
-      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+  UsingNamespaceQualifierInserter(LocalCodeState &state,
+                                  SymbolRenamer &renamer)
+      : state_(state), renamer_(renamer), sm_(state.rewriter->getSourceMgr()) {}
 
   void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
@@ -1484,8 +1722,8 @@ public:
     if (const clang::NestedNameSpecifierLoc qualifier = ud->getQualifierLoc()) {
       begin = qualifier.getBeginLoc();
     }
-    const string qualified =
-        generate_fully_qualified_name_for_rewrite(*nominated, lang_opts);
+    const string qualified = generate_fully_qualified_name_for_rewrite(
+        *nominated, lang_opts, renamer_, state_.args.local_id);
     const clang::CharSourceRange range =
         clang::CharSourceRange::getTokenRange(begin, name_loc);
     if (!range.isValid()) {
@@ -1500,6 +1738,7 @@ public:
     if (!edited_locs_.insert(loc_key).second) {
       return;
     }
+    renamer_.claim_range(begin, name_loc);
     state_.rewriter->ReplaceText(range, qualified);
   }
 };
@@ -1516,8 +1755,9 @@ private:
 
 public:
   LocalCodeASTConsumer(LocalCodeState &state)
-      : renamer_(state), namespace_qualify_inserter_(state),
-        type_qualify_inserter_(state), using_namespace_qualify_inserter_(state),
+      : renamer_(state), namespace_qualify_inserter_(state, renamer_),
+        type_qualify_inserter_(state, renamer_),
+        using_namespace_qualify_inserter_(state, renamer_),
         using_namespace_collector_(state), state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
@@ -1530,6 +1770,29 @@ public:
     finder_.addMatcher(tag_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(enum_const_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(typedef_matcher.bind("staticDecl"), &renamer_);
+    finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
+                       &using_namespace_collector_);
+    if (state.rewriter->getLangOpts().CPlusPlus) {
+      finder_.addMatcher(declRefExpr().bind("declRef"),
+                         &namespace_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(tag_matcher))))
+                             .bind("tagTypeLoc"),
+                         &type_qualify_inserter_);
+      finder_.addMatcher(
+          templateSpecializationTypeLoc().bind("templateSpecTypeLoc"),
+          &type_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(deducedTemplateSpecializationType()))
+                             .bind("deducedTemplateSpecTypeLoc"),
+                         &type_qualify_inserter_);
+      finder_.addMatcher(
+          typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
+              .bind("typedefTypeLoc"),
+          &type_qualify_inserter_);
+      finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
+                         &using_namespace_qualify_inserter_);
+    }
+    // Use-site renames are recorded during matching and applied after all
+    // qualifier ReplaceTexts (see apply_pending_renames).
     finder_.addMatcher(declRefExpr(to(func_matcher)).bind("declRef"),
                        &renamer_);
     finder_.addMatcher(unresolvedLookupExpr().bind("unresolvedLookup"),
@@ -1548,30 +1811,11 @@ public:
     finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
                            .bind("typedefTypeLoc"),
                        &renamer_);
-    finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
-                       &using_namespace_collector_);
-    if (state.rewriter->getLangOpts().CPlusPlus) {
-      finder_.addMatcher(declRefExpr().bind("declRef"),
-                         &namespace_qualify_inserter_);
-      finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(tag_matcher))))
-                             .bind("tagTypeLoc"),
-                         &type_qualify_inserter_);
-      finder_.addMatcher(
-          templateSpecializationTypeLoc().bind("templateSpecTypeLoc"),
-          &type_qualify_inserter_);
-      finder_.addMatcher(typeLoc(loc(deducedTemplateSpecializationType()))
-                             .bind("deducedTemplateSpecTypeLoc"),
-                         &type_qualify_inserter_);
-      finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
-                             .bind("typedefTypeLoc"),
-                         &type_qualify_inserter_);
-      finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
-                         &using_namespace_qualify_inserter_);
-    }
   }
 
   void HandleTranslationUnit(clang::ASTContext &context) override {
     finder_.matchAST(context);
+    renamer_.apply_pending_renames();
   }
 
   bool shouldSkipFunctionBody(clang::Decl *decl) override {
