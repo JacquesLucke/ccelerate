@@ -7,11 +7,11 @@ struct A {
 namespace {
 
 struct B__ : ::A {
-  using A::A;
+  using ::A::A;
 };
 
 struct C__ : ::B__ {
-  using B__::B__;
+  using ::B__::B__;
 };
 
 }

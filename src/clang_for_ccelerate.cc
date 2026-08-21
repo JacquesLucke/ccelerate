@@ -1214,7 +1214,10 @@ static bool try_qualify_type_nested_name_specifier(
 // - Constructor name: `A::A(...)` / `A(...)` (must not become `A::::ns::A`).
 //   This also covers TypeLocs in Clang-synthesized defaulted move-ctor bodies
 //   (e.g. implicit static_cast) that reuse the constructor name location.
-// - Using-declarator / inheriting ctor: `using Base::Base`.
+// - Using-declarator / inheriting ctor: qualify the nested-name type
+//   (`using ::N::A<T>::A`) but not the unqualified-id after `::` (that yields
+//   `using ::N::A<T>::::N::A`). Dependent `using Base<T>::Base` is
+//   UnresolvedUsingValueDecl, not UsingDecl.
 // - Implicit CXXConstructExpr TypeLocs: copy/move construction can place a
 //   TypeLoc for the parameter type at the argument expression (e.g. a
 //   parameter named `string` rewritten as `::std::string`). Written type
@@ -1252,9 +1255,24 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
       continue;
     }
     for (const clang::DynTypedNode &parent : parents) {
-      if (parent.get<clang::UsingDecl>() ||
-          parent.get<clang::CXXDestructorDecl>() ||
-          parent.get<clang::CXXPseudoDestructorExpr>()) {
+      // Only the imported name is skipped; the leading nested-name type is
+      // still qualified (`using A::A` → `using ::N::A::A`).
+      if (const auto *ud = parent.get<clang::UsingDecl>()) {
+        if (ud->getNameInfo().getLoc() == name_loc) {
+          return true;
+        }
+      } else if (const auto *ud =
+                     parent.get<clang::UnresolvedUsingValueDecl>()) {
+        if (ud->getNameInfo().getLoc() == name_loc) {
+          return true;
+        }
+      } else if (const auto *ud =
+                     parent.get<clang::UnresolvedUsingTypenameDecl>()) {
+        if (ud->getNameInfo().getLoc() == name_loc) {
+          return true;
+        }
+      } else if (parent.get<clang::CXXDestructorDecl>() ||
+                 parent.get<clang::CXXPseudoDestructorExpr>()) {
         return true;
       }
       if (const auto *member = parent.get<clang::MemberExpr>()) {

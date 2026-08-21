@@ -1,0 +1,15 @@
+# 1 "using_template_base_ctor.cc"
+namespace N {
+
+template <typename T> struct A {
+  explicit A(int x) : v(x) {}
+  int v;
+};
+
+template <typename T> struct B : ::N::A<T> {
+  using ::N::A<T>::A;
+};
+
+}
+
+int main() { return ::N::B<int>(1).v; }
