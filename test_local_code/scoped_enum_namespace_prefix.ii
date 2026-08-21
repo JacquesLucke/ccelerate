@@ -1,0 +1,27 @@
+# 1 "scoped_enum_namespace_prefix.cc"
+namespace A {
+namespace B {
+
+enum class C { D = 1, E = 2 };
+
+constexpr int k__ = 3;
+
+struct F {
+  static constexpr int g = 4;
+};
+
+}
+}
+
+namespace N {
+using namespace ::A;
+
+int use() {
+
+
+  return int(::A::B::C::D) + int(::A::B::C::E) + ::A::B::k__ + ::A::B::F::g;
+}
+
+}
+
+int main() { return ::N::use(); }

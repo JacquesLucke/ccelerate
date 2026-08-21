@@ -1397,12 +1397,18 @@ static bool try_qualify_type_nested_name_specifier(
   if (named_decl->getLocation() == name_loc) {
     return false;
   }
-  // File-context leading names (`A` in `A::VALUE`) are handled by
-  // TypeQualifierInserter. This path is for TypeSpec NNS that nominate a
-  // nested type (`Instance::StaticData` in `Instance::StaticData::get`).
   // Function-local types/aliases must stay unqualified (`::MyType` is wrong).
   const clang::DeclContext *decl_ctx = named_decl->getDeclContext();
-  if (decl_ctx->isFileContext() || decl_ctx->isFunctionOrMethod()) {
+  if (decl_ctx->isFunctionOrMethod()) {
+    return false;
+  }
+  // Bare file-context leading names (`A` in `A::VALUE`) are handled by
+  // TypeQualifierInserter. When a prefix is already written (`ns::A` in
+  // `ns::A::VALUE`), TypeQualifierInserter skips the type (to avoid
+  // `ns::::ns::A`), so rewrite the whole written NNS here. Nested types
+  // (`Instance::StaticData` in `Instance::StaticData::get`) always go through
+  // this path.
+  if (decl_ctx->isFileContext() && !nns_loc.getPrefix()) {
     return false;
   }
   const std::string name = named_decl->getNameAsString();
