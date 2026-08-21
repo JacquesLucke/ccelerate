@@ -1,0 +1,7 @@
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+    {is_system_header = true, path = "<BUILD_DIR>/extern/gcc-13-install/include/c++/13/array"},
+]
+local_code_path = "constexpr_parameter.ii"

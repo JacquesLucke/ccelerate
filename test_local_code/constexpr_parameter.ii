@@ -1,0 +1,10 @@
+# 2 "constexpr_parameter.cc"
+
+constexpr int a__ = 1;
+constexpr int b__ = ::a__ + ::a__;
+
+template <int N> struct A {
+  static ::std::array<float, N> data;
+};
+
+int main() { return ::A<::b__ * 2>::data[0]; }
