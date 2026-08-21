@@ -1,0 +1,9 @@
+source_language = "C++"
+include_defines = [
+]
+using_namespaces = [
+    {used = "A", parent = "N"},
+]
+direct_includes = [
+]
+local_code_path = "using_decl_type.ii"

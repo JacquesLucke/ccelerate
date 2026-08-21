@@ -625,6 +625,19 @@ public:
   }
 };
 
+// Target NamedDecl for a UsingTypeLoc (`using ns::T; … T`), or null.
+static const clang::NamedDecl *
+named_decl_from_using_type_loc(clang::UsingTypeLoc ut) {
+  if (ut.isNull()) {
+    return nullptr;
+  }
+  const clang::UsingShadowDecl *found = ut.getFoundDecl();
+  if (!found) {
+    return nullptr;
+  }
+  return found->getTargetDecl();
+}
+
 class SymbolRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
   LocalCodeState &state_;
@@ -762,6 +775,15 @@ public:
       }
       loc = typedef_tl.getNameLoc();
       named_decl = typedef_tl.getTypedefNameDecl();
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>("usingTypeLoc")) {
+      const clang::UsingTypeLoc using_tl =
+          type_loc->getAs<clang::UsingTypeLoc>();
+      if (using_tl.isNull()) {
+        return;
+      }
+      loc = using_tl.getNameLoc();
+      named_decl = named_decl_from_using_type_loc(using_tl);
     }
     if (!loc.isValid() || !named_decl) {
       return;
@@ -1369,7 +1391,12 @@ static bool try_qualify_type_nested_name_specifier(
 
   clang::SourceLocation name_loc;
   const clang::NamedDecl *named_decl = nullptr;
-  if (const clang::TagTypeLoc tag = cur.getAsAdjusted<clang::TagTypeLoc>()) {
+  // UsingType is not peeled by getAsAdjusted; check it before Tag/Typedef.
+  if (const clang::UsingTypeLoc ut = cur.getAs<clang::UsingTypeLoc>()) {
+    name_loc = ut.getNameLoc();
+    named_decl = named_decl_from_using_type_loc(ut);
+  } else if (const clang::TagTypeLoc tag =
+                 cur.getAsAdjusted<clang::TagTypeLoc>()) {
     if (tag.isDefinition() ||
         llvm::isa<clang::ClassTemplateSpecializationDecl>(tag.getDecl())) {
       return false;
@@ -1628,6 +1655,16 @@ public:
       name_loc = typedef_tl.getNameLoc();
       named_decl = typedef_tl.getTypedefNameDecl();
       matched_tl = typedef_tl;
+    } else if (const clang::TypeLoc *type_loc =
+                   result.Nodes.getNodeAs<clang::TypeLoc>("usingTypeLoc")) {
+      const clang::UsingTypeLoc using_tl =
+          type_loc->getAs<clang::UsingTypeLoc>();
+      if (using_tl.isNull()) {
+        return;
+      }
+      name_loc = using_tl.getNameLoc();
+      named_decl = named_decl_from_using_type_loc(using_tl);
+      matched_tl = using_tl;
     }
 
     if (!name_loc.isValid() || !named_decl || matched_tl.isNull()) {
@@ -1749,12 +1786,85 @@ public:
   }
 };
 
+// `using ns::Name` / `using ns::Type` — rewrite the written nested-name +
+// imported id to the target's fully qualified name. Inheriting constructors
+// (`using Base::Base`) keep their trailing `::Base`; TypeQualifierInserter
+// already qualifies the base type prefix.
+class UsingDeclQualifierInserter
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
+  LocalCodeState &state_;
+  SymbolRenamer &renamer_;
+  clang::SourceManager &sm_;
+  std::unordered_set<uint32_t> edited_locs_;
+
+public:
+  UsingDeclQualifierInserter(LocalCodeState &state, SymbolRenamer &renamer)
+      : state_(state), renamer_(renamer), sm_(state.rewriter->getSourceMgr()) {}
+
+  void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    const clang::UsingDecl *ud =
+        result.Nodes.getNodeAs<clang::UsingDecl>("usingDecl");
+    if (!ud) {
+      return;
+    }
+    if (!mapped_location_is_local(state_, ud->getLocation(), sm_)) {
+      return;
+    }
+    if (!ud->getQualifierLoc()) {
+      return;
+    }
+    for (const clang::UsingShadowDecl *shadow : ud->shadows()) {
+      if (llvm::isa<clang::ConstructorUsingShadowDecl>(shadow)) {
+        return;
+      }
+    }
+    if (ud->shadow_size() == 0) {
+      return;
+    }
+    const clang::NamedDecl *target = (*ud->shadow_begin())->getTargetDecl();
+    if (!target) {
+      return;
+    }
+    const std::string name = target->getNameAsString();
+    if (name.empty()) {
+      return;
+    }
+    const clang::LangOptions &lang_opts = state_.rewriter->getLangOpts();
+    const clang::SourceLocation name_loc = ud->getNameInfo().getLoc();
+    if (!name_loc.isValid() ||
+        !token_spells_name(name_loc, name, sm_, lang_opts)) {
+      return;
+    }
+    const clang::SourceLocation begin = ud->getQualifierLoc().getBeginLoc();
+    const string qualified = generate_fully_qualified_name_for_rewrite(
+        *target, lang_opts, renamer_, state_.args.local_id);
+    const clang::CharSourceRange range =
+        clang::CharSourceRange::getTokenRange(begin, name_loc);
+    if (!range.isValid()) {
+      return;
+    }
+    const llvm::StringRef existing =
+        clang::Lexer::getSourceText(range, sm_, lang_opts);
+    if (existing == qualified) {
+      return;
+    }
+    const uint32_t loc_key = range.getBegin().getRawEncoding();
+    if (!edited_locs_.insert(loc_key).second) {
+      return;
+    }
+    renamer_.claim_range(begin, name_loc);
+    state_.rewriter->ReplaceText(range, qualified);
+  }
+};
+
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
   CallQualifierInserter namespace_qualify_inserter_;
   TypeQualifierInserter type_qualify_inserter_;
   UsingNamespaceQualifierInserter using_namespace_qualify_inserter_;
+  UsingDeclQualifierInserter using_decl_qualify_inserter_;
   UsingNamespaceCollector using_namespace_collector_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
@@ -1764,6 +1874,7 @@ public:
       : renamer_(state), namespace_qualify_inserter_(state, renamer_),
         type_qualify_inserter_(state, renamer_),
         using_namespace_qualify_inserter_(state, renamer_),
+        using_decl_qualify_inserter_(state, renamer_),
         using_namespace_collector_(state), state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
@@ -1794,8 +1905,12 @@ public:
           typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
               .bind("typedefTypeLoc"),
           &type_qualify_inserter_);
+      finder_.addMatcher(typeLoc(loc(usingType())).bind("usingTypeLoc"),
+                         &type_qualify_inserter_);
       finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
                          &using_namespace_qualify_inserter_);
+      finder_.addMatcher(usingDecl().bind("usingDecl"),
+                         &using_decl_qualify_inserter_);
     }
     // Use-site renames are recorded during matching and applied after all
     // qualifier ReplaceTexts (see apply_pending_renames).
@@ -1816,6 +1931,8 @@ public:
                        &renamer_);
     finder_.addMatcher(typeLoc(loc(qualType(hasDeclaration(typedef_matcher))))
                            .bind("typedefTypeLoc"),
+                       &renamer_);
+    finder_.addMatcher(typeLoc(loc(usingType())).bind("usingTypeLoc"),
                        &renamer_);
   }
 
