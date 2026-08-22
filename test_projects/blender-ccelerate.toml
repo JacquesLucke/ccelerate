@@ -91,6 +91,8 @@ eager_obj_patterns = [
     "**/bf_intern_libmv.dir/intern/reconstruction.cc.o",
     "**/bf_intern_libmv.dir/intern/tracks.cc.o",
     "**/bf_intern_libmv.dir/intern/tracksN.cc.o",
+    # Explicit specialization of 'Zero' afer instantiation.
+    "**/extern_mantaflow.dir/helper/util/vectorbase.cpp.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
