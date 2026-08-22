@@ -107,6 +107,7 @@ local_type_patterns = [
     "**::GridLocalData",
     "**::BMeshLocalData",
     "blender::SplineCoeffs",
+    "**::TestData",
 ]
 
 [[unit_isolation_patterns]]
