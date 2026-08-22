@@ -1270,6 +1270,29 @@ static bool immediately_preceded_by_colon(clang::SourceLocation loc,
   return buffer[offset - 1] == ':';
 }
 
+// Non-type template arguments with nested names such as `Leaf<Inner::k>` must
+// keep the written scope (`Inner::k`). Qualifying to `::N::B::Inner::k` does
+// not parse as an integral constant expression. Unqualified names (`Leaf<b>`)
+// are still qualified so merged TUs cannot pick up the wrong `b`.
+static bool is_inside_template_argument(clang::DynTypedNode node,
+                                        clang::ASTContext &ast) {
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      return false;
+    }
+    for (const clang::DynTypedNode &parent : parents) {
+      if (parent.get<clang::TemplateArgumentLoc>()) {
+        return true;
+      }
+      if (parent.get<clang::TemplateSpecializationTypeLoc>()) {
+        return true;
+      }
+    }
+    node = parents[0];
+  }
+}
+
 static bool try_qualify_type_nested_name_specifier(
     LocalCodeState &state,
     SymbolRenamer &renamer,
@@ -1298,6 +1321,11 @@ public:
       }
       const clang::ValueDecl *decl = ref->getDecl();
       if (decl->isTemplateParameter()) {
+        return;
+      }
+      if (ref->getQualifierLoc() &&
+          is_inside_template_argument(clang::DynTypedNode::create(*ref),
+                                      *result.Context)) {
         return;
       }
       // Qualify type prefixes on any DeclRef nested-name (including methods):
@@ -1458,6 +1486,9 @@ static bool try_qualify_type_nested_name_specifier(
     clang::NestedNameSpecifierLoc nns_loc,
     clang::ASTContext &ast) {
   if (!nns_loc) {
+    return false;
+  }
+  if (is_inside_template_argument(clang::DynTypedNode::create(nns_loc), ast)) {
     return false;
   }
   clang::TypeLoc type_loc = nns_loc.getTypeLoc();
