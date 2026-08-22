@@ -1,0 +1,7 @@
+source_language = "C++"
+include_defines = [
+]
+direct_includes = [
+    {is_system_header = false, path = "<REPO_DIR>/test_local_code/partial_ns_temporary_ctor.hh"},
+]
+local_code_path = "partial_ns_temporary_ctor.ii"

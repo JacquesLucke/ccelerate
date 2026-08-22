@@ -1,0 +1,20 @@
+# 2 "partial_ns_temporary_ctor.cc"
+
+namespace A {
+namespace B {
+const ::A::B::F &A::B::F::g() {
+  static ::A::B::F f{};
+  return f;
+}
+}
+
+namespace C {
+namespace D {
+void h() {
+  ::A::B::E x{};
+  auto r = ::A::B::f(x, ::A::B::Options()).v;
+  (void)r;
+}
+}
+}
+}

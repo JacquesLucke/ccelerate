@@ -1168,8 +1168,9 @@ generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
 // (`B` in `T B::f()` / `S` in `S::P::x()`). Qualifying those with a leading
 // `::` yields `::T ::N::B::f`, which does not parse (same as `size_t ::N::A::k`
 // parsing as `size_t::N::A::k`).
-static bool is_type_loc_in_declarator_nested_name_qualifier(
-    clang::TypeLoc type_loc, clang::ASTContext &ast) {
+static bool
+is_type_loc_in_declarator_nested_name_qualifier(clang::TypeLoc type_loc,
+                                                clang::ASTContext &ast) {
   const clang::SourceLocation loc = type_loc.getBeginLoc();
   if (!loc.isValid()) {
     return false;
@@ -1241,7 +1242,8 @@ static bool is_type_loc_in_declarator_nested_name_qualifier(
 
 static bool is_nested_name_loc_in_declarator_qualifier(
     clang::NestedNameSpecifierLoc nns_loc, clang::ASTContext &ast) {
-  for (clang::NestedNameSpecifierLoc cur = nns_loc; cur; cur = cur.getPrefix()) {
+  for (clang::NestedNameSpecifierLoc cur = nns_loc; cur;
+       cur = cur.getPrefix()) {
     const clang::TypeLoc type_loc = cur.getTypeLoc();
     if (!type_loc.isNull() &&
         is_type_loc_in_declarator_nested_name_qualifier(type_loc, ast)) {
@@ -1380,16 +1382,20 @@ public:
       }
 
       clang::SourceLocation begin = loc;
-      const clang::NestedNameSpecifierLoc qualifier_loc = ref->getQualifierLoc();
+      const clang::NestedNameSpecifierLoc qualifier_loc =
+          ref->getQualifierLoc();
       if (qualifier_loc) {
         begin = qualifier_loc.getBeginLoc();
       }
       const bool leading_global_scope =
           !(qualifier_loc && is_nested_name_loc_in_declarator_qualifier(
-                                  qualifier_loc, *result.Context));
-      const string qualified = generate_fully_qualified_name_for_rewrite(
-          *decl, lang_opts, renamer_, state_.args.local_id,
-          leading_global_scope);
+                                 qualifier_loc, *result.Context));
+      const string qualified =
+          generate_fully_qualified_name_for_rewrite(*decl,
+                                                    lang_opts,
+                                                    renamer_,
+                                                    state_.args.local_id,
+                                                    leading_global_scope);
 
       // Only rewrite the qualifier + name and keep explicit template arguments.
       const clang::CharSourceRange range =
@@ -1575,9 +1581,12 @@ static bool try_qualify_type_nested_name_specifier(
   // whole written nested name (`Instance::StaticData`) via printQualifiedName.
   const bool leading_global_scope =
       !is_nested_name_loc_in_declarator_qualifier(nns_loc, ast);
-  const string qualified = generate_fully_qualified_name_for_rewrite(
-      *named_decl, lang_opts, renamer, state.args.local_id,
-      leading_global_scope);
+  const string qualified =
+      generate_fully_qualified_name_for_rewrite(*named_decl,
+                                                lang_opts,
+                                                renamer,
+                                                state.args.local_id,
+                                                leading_global_scope);
   const clang::CharSourceRange range =
       clang::CharSourceRange::getTokenRange(begin, name_loc);
   if (!range.isValid()) {
@@ -1616,6 +1625,23 @@ type_loc_under_decl_ref_or_member_qualifier(clang::DynTypedNode node,
   }
 }
 
+static bool type_loc_in_written_temporary_object_expr(clang::TypeLoc type_loc,
+                                                      clang::ASTContext &ast) {
+  clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      return false;
+    }
+    for (const clang::DynTypedNode &parent : parents) {
+      if (parent.get<clang::CXXTemporaryObjectExpr>()) {
+        return true;
+      }
+    }
+    node = parents[0];
+  }
+}
+
 // Skip TypeLocs that are not ordinary type-ids. Qualifying these is wrong:
 //
 // - No prior declaration: `struct B` / `friend class B` can introduce `B`, but
@@ -1638,9 +1664,11 @@ type_loc_under_decl_ref_or_member_qualifier(clang::DynTypedNode node,
 // - Implicit CXXConstructExpr TypeLocs: copy/move construction can place a
 //   TypeLoc for the parameter type at the argument expression (e.g. a
 //   parameter named `string` rewritten as `::std::string`). Written type
-//   constructions are CXXTemporaryObjectExpr (`T(args)` / `T{args}`).
+//   constructions are CXXTemporaryObjectExpr (`T(args)` / `T{args}`); if one
+//   wraps an outer implicit CXXConstructExpr (e.g. binding a temporary to
+//   `const T&`), still qualify the written temporary's type.
 // - Lambda capture fields: capture FieldDecls reuse the body's use location
-//   for their TypeLoc name (same `string` → `::std::string` failure).
+//   for their TypeLoc name (same `string` → `::std::string` failure),
 static bool
 should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
                                    const clang::NamedDecl &named_decl,
@@ -1713,7 +1741,8 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
         }
       }
       if (const auto *construct = parent.get<clang::CXXConstructExpr>()) {
-        if (!llvm::isa<clang::CXXTemporaryObjectExpr>(construct)) {
+        if (!llvm::isa<clang::CXXTemporaryObjectExpr>(construct) &&
+            !type_loc_in_written_temporary_object_expr(type_loc, ast)) {
           return true;
         }
       }
@@ -1864,7 +1893,7 @@ public:
         find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
     const bool leading_global_scope =
         !is_type_loc_in_declarator_nested_name_qualifier(matched_tl,
-                                                        *result.Context);
+                                                         *result.Context);
     string qualified =
         generate_fully_qualified_name_for_rewrite(*named_decl,
                                                   lang_opts,
