@@ -1192,9 +1192,36 @@ static bool is_type_loc_in_declarator_nested_name_qualifier(
         if (!qual_begin.isValid() || !qual_end.isValid()) {
           return false;
         }
-        return (sm.isBeforeInTranslationUnit(qual_begin, loc) ||
-                qual_begin == loc) &&
-               (sm.isBeforeInTranslationUnit(loc, qual_end) || loc == qual_end);
+        if ((sm.isBeforeInTranslationUnit(qual_begin, loc) ||
+             qual_begin == loc) &&
+            (sm.isBeforeInTranslationUnit(loc, qual_end) || loc == qual_end)) {
+          return true;
+        }
+        return false;
+      }
+      if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
+        const clang::DynTypedNodeList nns_parents = ast.getParents(parent);
+        for (const clang::DynTypedNode &gp : nns_parents) {
+          if (const auto *dd = gp.get<clang::DeclaratorDecl>()) {
+            const clang::NestedNameSpecifierLoc qual = dd->getQualifierLoc();
+            if (!qual) {
+              return false;
+            }
+            const clang::SourceManager &sm = ast.getSourceManager();
+            const clang::SourceLocation qual_begin = qual.getBeginLoc();
+            const clang::SourceLocation qual_end = qual.getEndLoc();
+            if (!qual_begin.isValid() || !qual_end.isValid()) {
+              return false;
+            }
+            if ((sm.isBeforeInTranslationUnit(qual_begin, loc) ||
+                 qual_begin == loc) &&
+                (sm.isBeforeInTranslationUnit(loc, qual_end) ||
+                 loc == qual_end)) {
+              return true;
+            }
+            return false;
+          }
+        }
       }
     }
     const clang::TypeLoc *type_loc_parent = nullptr;
@@ -1214,38 +1241,14 @@ static bool is_type_loc_in_declarator_nested_name_qualifier(
 
 static bool is_nested_name_loc_in_declarator_qualifier(
     clang::NestedNameSpecifierLoc nns_loc, clang::ASTContext &ast) {
-  while (nns_loc.getPrefix()) {
-    nns_loc = nns_loc.getPrefix();
-  }
-  clang::DynTypedNode node = clang::DynTypedNode::create(nns_loc);
-  const clang::SourceLocation loc = nns_loc.getBeginLoc();
-  if (!loc.isValid()) {
-    return false;
-  }
-  while (true) {
-    const clang::DynTypedNodeList parents = ast.getParents(node);
-    if (parents.empty()) {
-      return false;
+  for (clang::NestedNameSpecifierLoc cur = nns_loc; cur; cur = cur.getPrefix()) {
+    const clang::TypeLoc type_loc = cur.getTypeLoc();
+    if (!type_loc.isNull() &&
+        is_type_loc_in_declarator_nested_name_qualifier(type_loc, ast)) {
+      return true;
     }
-    for (const clang::DynTypedNode &parent : parents) {
-      if (const auto *dd = parent.get<clang::DeclaratorDecl>()) {
-        const clang::NestedNameSpecifierLoc qual = dd->getQualifierLoc();
-        if (!qual) {
-          return false;
-        }
-        const clang::SourceManager &sm = ast.getSourceManager();
-        const clang::SourceLocation qual_begin = qual.getBeginLoc();
-        const clang::SourceLocation qual_end = qual.getEndLoc();
-        if (!qual_begin.isValid() || !qual_end.isValid()) {
-          return false;
-        }
-        return (sm.isBeforeInTranslationUnit(qual_begin, loc) ||
-                qual_begin == loc) &&
-               (sm.isBeforeInTranslationUnit(loc, qual_end) || loc == qual_end);
-      }
-    }
-    node = parents[0];
   }
+  return false;
 }
 
 // `Ctor():Base()` with no space — inserting `::Base` yields `:::Base`.
@@ -1376,15 +1379,19 @@ public:
         return;
       }
 
+      clang::SourceLocation begin = loc;
+      const clang::NestedNameSpecifierLoc qualifier_loc = ref->getQualifierLoc();
+      if (qualifier_loc) {
+        begin = qualifier_loc.getBeginLoc();
+      }
+      const bool leading_global_scope =
+          !(qualifier_loc && is_nested_name_loc_in_declarator_qualifier(
+                                  qualifier_loc, *result.Context));
       const string qualified = generate_fully_qualified_name_for_rewrite(
-          *decl, lang_opts, renamer_, state_.args.local_id);
+          *decl, lang_opts, renamer_, state_.args.local_id,
+          leading_global_scope);
 
       // Only rewrite the qualifier + name and keep explicit template arguments.
-      clang::SourceLocation begin = loc;
-      if (const clang::NestedNameSpecifierLoc qualifier =
-              ref->getQualifierLoc()) {
-        begin = qualifier.getBeginLoc();
-      }
       const clang::CharSourceRange range =
           clang::CharSourceRange::getTokenRange(begin, loc);
       if (!range.isValid()) {

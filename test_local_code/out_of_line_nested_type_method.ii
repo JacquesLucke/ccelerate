@@ -1,0 +1,9 @@
+# 2 "out_of_line_nested_type_method.cc"
+
+namespace A {
+
+::A::B::C A::B::D::f() const {
+  return C{};
+}
+
+}
