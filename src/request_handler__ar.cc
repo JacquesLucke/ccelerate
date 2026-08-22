@@ -182,6 +182,9 @@ build_compatible_local_objects(const ClientID &client_id,
     for (const path &p : local_obj_files) {
       args.arg("--input").arg(p);
     }
+    for (const path &config_path : ConfigDiscovery::get().config_paths()) {
+      args.arg("--config").arg(config_path.string());
+    }
 
     const path out_path = create_temporary_path();
     if (out_path.empty()) {

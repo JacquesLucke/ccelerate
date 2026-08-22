@@ -29,6 +29,7 @@ public:
   vector<string> include_defines;
   vector<string> eager_obj_patterns;
   vector<UnitIsolationPattern> unit_isolation_patterns;
+  vector<string> first_include_patterns;
 
   static optional<ConfigFile> from_path(const path &path);
   static optional<ConfigFile> from_toml_string(string toml_str);
@@ -57,6 +58,7 @@ private:
   unique_ptr<re2::RE2> is_include_define_;
   unique_ptr<re2::RE2> is_eager_obj_;
   vector<UnitIsolationPattern> unit_isolation_patterns_;
+  vector<unique_ptr<re2::RE2>> first_include_patterns_;
 
 public:
   static Config from_paths(span<const path> paths);
@@ -68,6 +70,10 @@ public:
   bool is_include_define(string_view define) const;
   bool is_eager_obj(const path &path) const;
   ConfigUnitIsolationKey get_unit_isolation_key(const path &path) const;
+
+  // Returns an order key or null opt if the order doesn't matter and it
+  // should come after everything that has a key.
+  optional<int> include_order_key(const path &path) const;
 };
 
 class ConfigDiscovery {
@@ -96,8 +102,8 @@ public:
 } // namespace ccelerate
 
 template <> struct std::hash<ccelerate::ConfigUnitIsolationKey> {
-  size_t operator()(
-      const ccelerate::ConfigUnitIsolationKey &key) const noexcept {
+  size_t
+  operator()(const ccelerate::ConfigUnitIsolationKey &key) const noexcept {
     size_t seed = key.ordered_matched_patterns.size();
     for (const std::string &pattern : key.ordered_matched_patterns) {
       seed ^= std::hash<std::string_view>{}(pattern) + 0x9e3779b9 +

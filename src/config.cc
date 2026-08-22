@@ -33,6 +33,8 @@ optional<ConfigFile> ConfigFile::from_toml_string(string toml_str) {
       toml::find_or_default<vector<string>>(data, "include_defines");
   auto eager_obj_patterns =
       toml::find_or_default<vector<string>>(data, "eager_obj_patterns");
+  auto first_include_patterns =
+      toml::find_or_default<vector<string>>(data, "first_include_patterns");
 
   ConfigFile config_file;
   config_file.local_header_patterns = std::move(local_header_patterns);
@@ -40,13 +42,13 @@ optional<ConfigFile> ConfigFile::from_toml_string(string toml_str) {
   config_file.pure_c_header_patterns = std::move(pure_c_header_patterns);
   config_file.include_defines = std::move(include_defines);
   config_file.eager_obj_patterns = std::move(eager_obj_patterns);
+  config_file.first_include_patterns = std::move(first_include_patterns);
 
   for (const toml::value &entry :
        toml::find_or_default<toml::array>(data, "unit_isolation_patterns")) {
     ConfigFile::UnitIsolationPattern pattern;
     pattern.name = toml::find_or_default<string>(entry, "name");
-    pattern.patterns =
-        toml::find_or_default<vector<string>>(entry, "patterns");
+    pattern.patterns = toml::find_or_default<vector<string>>(entry, "patterns");
     config_file.unit_isolation_patterns.push_back(std::move(pattern));
   }
 
@@ -153,6 +155,10 @@ Config Config::from_config_files(const span<const ConfigFile> config_files) {
           .pattern = make_unique<re2::RE2>(expr),
       });
     }
+    for (const string &pattern : config_file.first_include_patterns) {
+      config.first_include_patterns_.push_back(
+          make_unique<re2::RE2>(glob_to_regex(pattern)));
+    }
   }
   if (!is_local_header_expr.empty()) {
     config.is_local_header_ = make_unique<re2::RE2>(is_local_header_expr);
@@ -221,6 +227,17 @@ ConfigUnitIsolationKey Config::get_unit_isolation_key(const path &path) const {
     }
   }
   return key;
+}
+
+optional<int> Config::include_order_key(const path &path) const {
+  const string path_str = path.string();
+  for (size_t i = 0; i < first_include_patterns_.size(); i++) {
+    const unique_ptr<re2::RE2> &pattern = first_include_patterns_[i];
+    if (pattern && pattern->ok() && re2::RE2::FullMatch(path_str, *pattern)) {
+      return static_cast<int>(i);
+    }
+  }
+  return nullopt;
 }
 
 ConfigDiscovery::ConfigDiscovery() {

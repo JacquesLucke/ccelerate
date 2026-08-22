@@ -73,6 +73,7 @@ struct Cmd_ExtractLocalCode {
 struct Cmd_CompileLocalCode {
   vector<string> clang_args;
   vector<path> local_code_paths;
+  vector<path> config_paths;
   path obj_output_path;
 };
 
@@ -2499,6 +2500,27 @@ static void add_direct_include(CompileLocalCodeState &state,
   state.ordered_direct_include_paths[it->second].is_pure_c |= is_pure_c;
 }
 
+static void sort_direct_includes_by_config(
+    vector<LocalCodeInfo::DirectInclude> &includes, const Config &config) {
+  std::stable_sort(
+      includes.begin(), includes.end(),
+      [&](const LocalCodeInfo::DirectInclude &a,
+          const LocalCodeInfo::DirectInclude &b) {
+        const optional<int> key_a = config.include_order_key(a.include_path);
+        const optional<int> key_b = config.include_order_key(b.include_path);
+        if (key_a && key_b) {
+          return *key_a < *key_b;
+        }
+        if (key_a) {
+          return true;
+        }
+        if (key_b) {
+          return false;
+        }
+        return false;
+      });
+}
+
 class PreprocessHeadersAction : public clang::PreprocessorFrontendAction {
 private:
   CompileLocalCodeState &state_;
@@ -2536,6 +2558,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
   llvm::InitializeAllAsmParsers();
 
   CompileLocalCodeState state;
+  const Config config = Config::from_paths(args.config_paths);
 
   // Gather inputs from frontmatter (.toml) + preprocessed code (.i / .ii).
   for (const path &frontmatter_path : args.local_code_paths) {
@@ -2587,6 +2610,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     state.merged_local_code.append("#pragma clang diagnostic pop\n");
     state.merged_local_code.append("#pragma GCC diagnostic pop\n");
   }
+  sort_direct_includes_by_config(state.ordered_direct_include_paths, config);
 
   // Preprocess headers.
   {
@@ -2775,6 +2799,11 @@ int clang_ops_main(const int argc, char **argv) {
                   compile_local_code_args.obj_output_path,
                   "Path to write the object file to")
       ->required();
+  compile_local_code_cmd
+      .add_option("--config",
+                  compile_local_code_args.config_paths,
+                  "Path to a ccelerate config .toml (repeatable)")
+      ->allow_extra_args(false);
   compile_local_code_cmd.add_option("passthrough",
                                     compile_local_code_args.clang_args,
                                     "Arguments passed to clang");

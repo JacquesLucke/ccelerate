@@ -110,6 +110,8 @@ local_type_patterns = [
     "**::TestData",
 ]
 
+first_include_patterns = ["**/epoxy/gl.h"]
+
 [[unit_isolation_patterns]]
 name = "opengl"
 patterns = ["**/bf_gpu.dir/opengl/**"]

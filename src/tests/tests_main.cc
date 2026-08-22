@@ -177,6 +177,10 @@ TEST(Integration, UnitIsolationCMake) {
   test_simple_cmake_project("unit_isolation_cmake", "12\n");
 }
 
+TEST(Integration, FirstIncludeCMake) {
+  test_simple_cmake_project("first_include_cmake", "12\n");
+}
+
 static string read_file(const path &file_path) {
   std::ifstream in(file_path);
   std::ostringstream contents;
