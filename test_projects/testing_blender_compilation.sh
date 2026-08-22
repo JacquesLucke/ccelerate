@@ -4,6 +4,11 @@
 ```
 /home/jacques/Documents/ccelerate/build/release/bin/ccelerate_cmake /home/jacques/blender/blender -GNinja -DWITH_COMPILER_PRECOMPILED_HEADERS=OFF -DWITH_UNITY_BUILD=OFF -DWITH_GTESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_CYCLES_NATIVE_ONLY=ON -DWITH_LINKER_MOLD=ON -DCMAKE_BUILD_TYPE=Release
 
+Baseline: ninja install
+real	20m12.157s
+user	355m28.489s
+sys	    42m48.782s
+
 time ninja install
 real	35m22.102s
 user	0m36.780s
