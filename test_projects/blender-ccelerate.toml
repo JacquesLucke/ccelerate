@@ -119,3 +119,12 @@ patterns = ["**/bf_gpu.dir/opengl/**"]
 [[unit_isolation_patterns]]
 name = "vulkan"
 patterns = ["**/bf_gpu.dir/vulkan/**"]
+
+# Work around annoying issue where math::interpolate_curves does not find
+# math::interpolate overload for quaternions due to two-phase lookup.
+[[unit_isolation_patterns]]
+name = "math::interpolate workaround"
+patterns = [
+    "**/bf_geometry.dir/intern/interpolate_curves.cc.o",
+    "**/bf_geometry.dir/intern/resample_curves.cc.o",
+]
