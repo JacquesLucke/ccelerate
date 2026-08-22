@@ -1164,43 +1164,87 @@ generate_fully_qualified_name_for_rewrite(const clang::NamedDecl &decl,
   return result;
 }
 
-// True when `type_loc` is the leading type of a DeclaratorDecl nested-name
-// (`A` in `size_t A::k` / `T B::f()`). Qualifying those with a leading `::`
-// yields `size_t ::N::A::k`, which C++ parses as `size_t::N::A::k`.
-static bool is_declarator_qualifier_leading_type_loc(clang::TypeLoc type_loc,
-                                                     clang::ASTContext &ast) {
+// True when `type_loc` is written inside a DeclaratorDecl nested-name qualifier
+// (`B` in `T B::f()` / `S` in `S::P::x()`). Qualifying those with a leading
+// `::` yields `::T ::N::B::f`, which does not parse (same as `size_t ::N::A::k`
+// parsing as `size_t::N::A::k`).
+static bool is_type_loc_in_declarator_nested_name_qualifier(
+    clang::TypeLoc type_loc, clang::ASTContext &ast) {
+  const clang::SourceLocation loc = type_loc.getBeginLoc();
+  if (!loc.isValid()) {
+    return false;
+  }
   clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
   while (true) {
     const clang::DynTypedNodeList parents = ast.getParents(node);
     if (parents.empty()) {
       return false;
     }
-    const clang::TypeLoc *type_loc_parent = nullptr;
     for (const clang::DynTypedNode &parent : parents) {
-      if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
-        if (nns->getPrefix()) {
+      if (const auto *dd = parent.get<clang::DeclaratorDecl>()) {
+        const clang::NestedNameSpecifierLoc qual = dd->getQualifierLoc();
+        if (!qual) {
           return false;
         }
-        const clang::DynTypedNodeList nns_parents = ast.getParents(parent);
-        for (const clang::DynTypedNode &gp : nns_parents) {
-          if (const auto *dd = gp.get<clang::DeclaratorDecl>()) {
-            const clang::NestedNameSpecifierLoc qual = dd->getQualifierLoc();
-            if (qual && qual.getBeginLoc() == nns->getBeginLoc()) {
-              return true;
-            }
-          }
+        const clang::SourceManager &sm = ast.getSourceManager();
+        const clang::SourceLocation qual_begin = qual.getBeginLoc();
+        const clang::SourceLocation qual_end = qual.getEndLoc();
+        if (!qual_begin.isValid() || !qual_end.isValid()) {
+          return false;
         }
-        return false;
+        return (sm.isBeforeInTranslationUnit(qual_begin, loc) ||
+                qual_begin == loc) &&
+               (sm.isBeforeInTranslationUnit(loc, qual_end) || loc == qual_end);
       }
-      if (!type_loc_parent) {
-        type_loc_parent = parent.get<clang::TypeLoc>();
+    }
+    const clang::TypeLoc *type_loc_parent = nullptr;
+    for (const clang::DynTypedNode &parent : parents) {
+      if (const clang::TypeLoc *tl = parent.get<clang::TypeLoc>()) {
+        type_loc_parent = tl;
+        break;
       }
     }
     if (type_loc_parent) {
       node = clang::DynTypedNode::create(*type_loc_parent);
       continue;
     }
+    node = parents[0];
+  }
+}
+
+static bool is_nested_name_loc_in_declarator_qualifier(
+    clang::NestedNameSpecifierLoc nns_loc, clang::ASTContext &ast) {
+  while (nns_loc.getPrefix()) {
+    nns_loc = nns_loc.getPrefix();
+  }
+  clang::DynTypedNode node = clang::DynTypedNode::create(nns_loc);
+  const clang::SourceLocation loc = nns_loc.getBeginLoc();
+  if (!loc.isValid()) {
     return false;
+  }
+  while (true) {
+    const clang::DynTypedNodeList parents = ast.getParents(node);
+    if (parents.empty()) {
+      return false;
+    }
+    for (const clang::DynTypedNode &parent : parents) {
+      if (const auto *dd = parent.get<clang::DeclaratorDecl>()) {
+        const clang::NestedNameSpecifierLoc qual = dd->getQualifierLoc();
+        if (!qual) {
+          return false;
+        }
+        const clang::SourceManager &sm = ast.getSourceManager();
+        const clang::SourceLocation qual_begin = qual.getBeginLoc();
+        const clang::SourceLocation qual_end = qual.getEndLoc();
+        if (!qual_begin.isValid() || !qual_end.isValid()) {
+          return false;
+        }
+        return (sm.isBeforeInTranslationUnit(qual_begin, loc) ||
+                qual_begin == loc) &&
+               (sm.isBeforeInTranslationUnit(loc, qual_end) || loc == qual_end);
+      }
+    }
+    node = parents[0];
   }
 }
 
@@ -1230,7 +1274,8 @@ static bool try_qualify_type_nested_name_specifier(
     LocalCodeState &state,
     SymbolRenamer &renamer,
     std::unordered_set<uint32_t> &edited_locs,
-    clang::NestedNameSpecifierLoc nns_loc);
+    clang::NestedNameSpecifierLoc nns_loc,
+    clang::ASTContext &ast);
 
 class CallQualifierInserter
     : public clang::ast_matchers::MatchFinder::MatchCallback {
@@ -1262,7 +1307,7 @@ public:
       if (const clang::NestedNameSpecifierLoc qualifier =
               ref->getQualifierLoc()) {
         if (try_qualify_type_nested_name_specifier(
-                state_, renamer_, edited_locs_, qualifier)) {
+                state_, renamer_, edited_locs_, qualifier, *result.Context)) {
           return;
         }
       }
@@ -1410,7 +1455,8 @@ static bool try_qualify_type_nested_name_specifier(
     LocalCodeState &state,
     SymbolRenamer &renamer,
     std::unordered_set<uint32_t> &edited_locs,
-    clang::NestedNameSpecifierLoc nns_loc) {
+    clang::NestedNameSpecifierLoc nns_loc,
+    clang::ASTContext &ast) {
   if (!nns_loc) {
     return false;
   }
@@ -1489,8 +1535,11 @@ static bool try_qualify_type_nested_name_specifier(
 
   // Nested classes are not file-context decls; still OK because we replace the
   // whole written nested name (`Instance::StaticData`) via printQualifiedName.
+  const bool leading_global_scope =
+      !is_nested_name_loc_in_declarator_qualifier(nns_loc, ast);
   const string qualified = generate_fully_qualified_name_for_rewrite(
-      *named_decl, lang_opts, renamer, state.args.local_id);
+      *named_decl, lang_opts, renamer, state.args.local_id,
+      leading_global_scope);
   const clang::CharSourceRange range =
       clang::CharSourceRange::getTokenRange(begin, name_loc);
   if (!range.isValid()) {
@@ -1776,7 +1825,8 @@ public:
     const clang::SourceLocation begin =
         find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
     const bool leading_global_scope =
-        !is_declarator_qualifier_leading_type_loc(matched_tl, *result.Context);
+        !is_type_loc_in_declarator_nested_name_qualifier(matched_tl,
+                                                        *result.Context);
     string qualified =
         generate_fully_qualified_name_for_rewrite(*named_decl,
                                                   lang_opts,

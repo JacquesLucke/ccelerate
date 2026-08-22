@@ -1,0 +1,10 @@
+# 1 "qualified_method_definition.cc"
+namespace A {
+struct S {
+  struct P {
+    ::A::S x();
+  };
+};
+
+::A::S A::S::P::x() { return {}; }
+}
