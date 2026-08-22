@@ -2,7 +2,7 @@
 
 ## 2026-08-11
 ```
-/home/jacques/Documents/ccelerate/build/release/bin/ccelerate_cmake /home/jacques/blender/blender -GNinja -DWITH_COMPILER_PRECOMPILED_HEADERS=OFF -DWITH_UNITY_BUILD=OFF -DWITH_GTESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_CYCLES_NATIVE_ONLY=ON -DWITH_LINKER_MOLD=ON -DCMAKE_BUILD_TYPE=Release
+/home/jacques/Documents/ccelerate/build/release/bin/ccelerate_cmake /home/jacques/blender/blender -GNinja -DWITH_COMPILER_PRECOMPILED_HEADERS=OFF -DWITH_UNITY_BUILD=OFF -DWITH_GTESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DWITH_CYCLES_NATIVE_ONLY=ON -DWITH_LINKER_MOLD=ON -DCMAKE_BUILD_TYPE=Release -DNINJA_MAX_NUM_PARALLEL_COMPILE_HEAVY_JOBS=30 -DNINJA_MAX_NUM_PARALLEL_COMPILE_JOBS=30 -DNINJA_MAX_NUM_PARALLEL_LINK_JOBS=30
 
 Baseline: ninja install
 real	20m12.157s
@@ -51,4 +51,12 @@ Success rate:
 69.9%
 81.8%
 100%
+```
+### 2026-08-23
+
+```
+ninja install
+real	21m58.142s
+user	0m39.300s
+sys	    0m56.952s
 ```
