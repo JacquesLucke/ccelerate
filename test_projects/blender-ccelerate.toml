@@ -10,6 +10,7 @@ local_header_patterns = [
     "**/kernel/integrator/state_template.h",
     "**/kernel/integrator/shadow_state_template.h",
     "**/kernel/svm/node_types_template.h",
+    "**/kernel/osl/closures_template.h",
     "**/blenlib/intern/radial_tiling_shared.hh",
     "**/kernel/svm/radial_tiling_shared.h",
     "**/PulseAudioSymbols.h",

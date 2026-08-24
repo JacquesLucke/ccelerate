@@ -1,0 +1,23 @@
+# 1 "./xmacro_twice.hh"
+
+
+
+
+static int B__() { return 1; }
+static int C__() { return 1; }
+# 6 "xmacro_twice.cc"
+
+
+
+int main() {
+  int x = 0;
+# 1 "./xmacro_twice.hh"
+
+
+
+
+x += ::B__();
+x += ::C__();
+# 12 "xmacro_twice.cc"
+ return x;
+}
