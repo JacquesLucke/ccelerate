@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 
+#include <thread>
+
 #include "get_current_executable_path.hh"
 #include "request_handler.hh"
 #include "run_process_traced.hh"
@@ -21,6 +23,16 @@ void handle_request__cmake(const Request &request) {
       request.args, [](const string &arg) { return arg == "--build"; });
   if (!has_build_arg) {
     args.arg(fmt::format("-DCMAKE_AR={}", (dir / "ccelerate_ar").string()));
+    // The exact number of jobs is not critical, since this just invokes
+    // ccelerate which does its own parallelization. It just needs to be large
+    // enough to keep the pipeline busy.
+    const int parallel_jobs = std::thread::hardware_concurrency() * 2;
+    args.arg(fmt::format("-DNINJA_MAX_NUM_PARALLEL_COMPILE_HEAVY_JOBS={}",
+                         parallel_jobs));
+    args.arg(
+        fmt::format("-DNINJA_MAX_NUM_PARALLEL_COMPILE_JOBS={}", parallel_jobs));
+    args.arg(
+        fmt::format("-DNINJA_MAX_NUM_PARALLEL_LINK_JOBS={}", parallel_jobs));
   }
 
   const ExitCodeOrError exit_code_or_error = run_process_stream_output_traced(
