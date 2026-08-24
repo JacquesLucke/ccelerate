@@ -361,6 +361,58 @@ static string format_define_line(const clang::IdentifierInfo &identifier,
   return result;
 }
 
+enum class LineMarkerState {
+  NotMarker,
+  PrintedMarker,
+};
+
+// Gather lines where line markers are printed by the preprocessor.
+class PrintedLineMarkerCallbacks : public clang::PPCallbacks {
+private:
+  const string &output_;
+  clang::SourceManager &sm_;
+  vector<LineMarkerState> &marker_lines_;
+  size_t scanned_ = 0;
+  size_t line_index_ = 0;
+
+public:
+  PrintedLineMarkerCallbacks(const string &output,
+                             clang::SourceManager &sm,
+                             vector<LineMarkerState> &marker_lines)
+      : output_(output), sm_(sm), marker_lines_(marker_lines) {}
+
+  void FileChanged(clang::SourceLocation loc,
+                   FileChangeReason /*reason*/,
+                   clang::SrcMgr::CharacteristicKind /*file_type*/,
+                   clang::FileID /*prev_fid*/) override {
+    if (sm_.getPresumedLoc(loc).isInvalid()) {
+      return;
+    }
+    this->record_last_output_line();
+  }
+
+private:
+  void record_last_output_line() {
+    if (output_.empty()) {
+      return;
+    }
+    // Exclude a trailing newline so the index is the last printed line, not
+    // the empty line after it. That newline is counted on a later call once
+    // more content has been appended past it.
+    const size_t n = output_.size() - (output_.back() == '\n' ? 1 : 0);
+    while (scanned_ < n) {
+      if (output_[scanned_] == '\n') {
+        ++line_index_;
+      }
+      ++scanned_;
+    }
+    if (line_index_ >= marker_lines_.size()) {
+      marker_lines_.resize(line_index_ + 1, LineMarkerState::NotMarker);
+    }
+    marker_lines_[line_index_] = LineMarkerState::PrintedMarker;
+  }
+};
+
 class IncludeDefineCallbacks : public clang::PPCallbacks {
 private:
   LocalCodeState &state_;
@@ -438,6 +490,11 @@ public:
     pp.addPPCallbacks(std::make_unique<IncludeDefineCallbacks>(state_, pp));
 
     llvm::raw_string_ostream os(state_.raw_preprocessed);
+    vector<LineMarkerState> printed_line_markers;
+    pp.addPPCallbacks(std::make_unique<PrintedLineMarkerCallbacks>(
+        state_.raw_preprocessed,
+        compiler.getSourceManager(),
+        printed_line_markers));
     clang::PreprocessorOutputOptions opts;
     opts.ShowCPP = true;
     opts.ShowLineMarkers = true;
@@ -458,11 +515,12 @@ public:
       const bool is_local = int(header_stack.size()) == local_depth;
       const bool line_only_whitespace = trim_whitespace(lines[line_i]).empty();
       const string_view line = lines[line_i];
-      if (line.starts_with("# ")) {
-        const optional<LineMarker> line_marker = LineMarker::parse(line);
-        if (!line_marker) {
-          continue;
-        }
+      const bool is_printed_line_marker =
+          line_i < printed_line_markers.size() &&
+          printed_line_markers[line_i] == LineMarkerState::PrintedMarker;
+      const optional<LineMarker> line_marker =
+          is_printed_line_marker ? LineMarker::parse(line) : nullopt;
+      if (line_marker) {
         const string_view file = line_marker->file;
         if (line_marker->is_start_of_new_file) {
           if (is_local) {
@@ -2500,25 +2558,28 @@ static void add_direct_include(CompileLocalCodeState &state,
   state.ordered_direct_include_paths[it->second].is_pure_c |= is_pure_c;
 }
 
-static void sort_direct_includes_by_config(
-    vector<LocalCodeInfo::DirectInclude> &includes, const Config &config) {
-  std::stable_sort(
-      includes.begin(), includes.end(),
-      [&](const LocalCodeInfo::DirectInclude &a,
-          const LocalCodeInfo::DirectInclude &b) {
-        const optional<int> key_a = config.include_order_key(a.include_path);
-        const optional<int> key_b = config.include_order_key(b.include_path);
-        if (key_a && key_b) {
-          return *key_a < *key_b;
-        }
-        if (key_a) {
-          return true;
-        }
-        if (key_b) {
-          return false;
-        }
-        return false;
-      });
+static void
+sort_direct_includes_by_config(vector<LocalCodeInfo::DirectInclude> &includes,
+                               const Config &config) {
+  std::stable_sort(includes.begin(),
+                   includes.end(),
+                   [&](const LocalCodeInfo::DirectInclude &a,
+                       const LocalCodeInfo::DirectInclude &b) {
+                     const optional<int> key_a =
+                         config.include_order_key(a.include_path);
+                     const optional<int> key_b =
+                         config.include_order_key(b.include_path);
+                     if (key_a && key_b) {
+                       return *key_a < *key_b;
+                     }
+                     if (key_a) {
+                       return true;
+                     }
+                     if (key_b) {
+                       return false;
+                     }
+                     return false;
+                   });
 }
 
 class PreprocessHeadersAction : public clang::PreprocessorFrontendAction {

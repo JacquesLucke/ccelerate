@@ -1,0 +1,6 @@
+# 1 "hash_space_in_raw_string.cc"
+const char *A = R"(
+# 1 "B"
+# 1 "B" 1
+#  include "C"
+)";
