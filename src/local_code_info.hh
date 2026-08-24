@@ -26,6 +26,7 @@ struct LocalCodeInfo {
   path local_code_path;
   path object_path;
   string source_language;
+  string preprocess_hash;
   vector<string> include_defines;
   vector<DirectInclude> direct_includes;
   path cwd;

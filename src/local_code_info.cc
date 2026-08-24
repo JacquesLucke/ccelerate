@@ -46,6 +46,9 @@ string LocalCodeInfo::to_toml_string() const {
   table["direct_includes"] = toml::value(direct_include_values, fmt);
   table["include_defines"] = toml::value(include_defines, fmt);
   table["source_language"] = source_language;
+  if (!preprocess_hash.empty()) {
+    table["preprocess_hash"] = preprocess_hash;
+  }
   if (!cc1_args.empty()) {
     table["cc1_args"] = toml::value(cc1_args, fmt);
   }
@@ -83,6 +86,7 @@ optional<LocalCodeInfo> LocalCodeInfo::from_toml_string(string toml_str) {
   info.source_language = toml::find_or_default<string>(data, "source_language");
   info.include_defines =
       toml::find_or_default<vector<string>>(data, "include_defines");
+  info.preprocess_hash = toml::find_or_default<string>(data, "preprocess_hash");
 
   for (const toml::value &entry :
        toml::find_or_default<toml::array>(data, "direct_includes")) {

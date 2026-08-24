@@ -86,6 +86,7 @@ target_link_libraries(clang_for_ccelerate PRIVATE
   ctre::ctre
   re2::re2
   toml11::toml11
+  xxHash::xxhash
 )
 
 # LLVM is built with -fno-rtti; subclasses of Clang AST/Frontend types need the same.

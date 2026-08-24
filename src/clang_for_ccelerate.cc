@@ -41,6 +41,7 @@
 #include <llvm/TargetParser/Host.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <xxhash.h>
 
 #include "clang_for_ccelerate_io.hh"
 #include "config.hh"
@@ -2324,6 +2325,29 @@ static string apply_path_maps(const path &include,
   return best->replacement + abs_str.substr(from_str.size());
 }
 
+static std::string
+compute_local_code_preprocess_hash(const Cmd_ExtractLocalCode &args,
+                                   const LocalCodeState &state) {
+  XXH3_state_t *xxh3_state = XXH3_createState();
+  XXH3_64bits_reset(xxh3_state);
+  XXH3_64bits_update(xxh3_state, args.local_id.c_str(), args.local_id.size());
+  for (const string_view arg : args.clang_args) {
+    XXH3_64bits_update(xxh3_state, arg.data(), arg.size());
+  }
+  for (const string_view line : state.local_code_lines) {
+    XXH3_64bits_update(xxh3_state, line.data(), line.size());
+  }
+  for (const LocalCodeInfo::DirectInclude &include : state.direct_includes) {
+    XXH3_64bits_update(xxh3_state,
+                       include.include_path.string().data(),
+                       include.include_path.string().size());
+    XXH3_64bits_update(xxh3_state, include.is_system_header ? "1" : "0", 1);
+    XXH3_64bits_update(xxh3_state, include.is_pure_c ? "1" : "0", 1);
+  }
+  XXH3_freeState(xxh3_state);
+  return fmt::format("{:016x}", XXH3_64bits_digest(xxh3_state));
+}
+
 static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   // The driver job args start with "-cc1"; CompilerInvocation expects the
   // remaining cc1 options only (same as clang's cc1_main entry point).
@@ -2374,6 +2398,23 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     success = clang_instance.ExecuteAction(action);
     if (!success) {
       return 1;
+    }
+  }
+
+  // Skip processing local code again if it didn't change most likely.
+  const string preprocess_hash =
+      compute_local_code_preprocess_hash(args, state);
+  const bool is_cxx = state.input_kind.getLanguage() == clang::Language::CXX;
+  path code_path = args.local_code_path;
+  code_path.replace_extension(is_cxx ? "ii" : "i");
+  {
+    const optional<LocalCodeInfo> info =
+        LocalCodeInfo::from_path(args.local_code_path);
+    if (info) {
+      if (info->preprocess_hash == preprocess_hash) {
+        if (std::filesystem::is_regular_file(code_path))
+          return 0;
+      }
     }
   }
 
@@ -2433,13 +2474,8 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     }
   }
 
-  // Write the local code output as frontmatter (.toml) + preprocessed code
-  // (.i / .ii).
+  // Write the local code output.
   {
-    const bool is_cxx = state.input_kind.getLanguage() == clang::Language::CXX;
-    path code_path = args.local_code_path;
-    code_path.replace_extension(is_cxx ? "ii" : "i");
-
     {
       error_code ec;
       llvm::raw_fd_ostream fs(code_path.string(), ec);
@@ -2481,6 +2517,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       info.cc1_args = std::move(cc1_arg_strings);
       info.cwd = std::filesystem::current_path();
       info.object_path = state.object_path;
+      info.preprocess_hash = preprocess_hash;
     }
     info.using_namespaces = std::move(state.using_namespaces);
     if (!info.write_to_path(args.local_code_path)) {
