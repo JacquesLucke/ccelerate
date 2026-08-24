@@ -1260,7 +1260,7 @@ is_type_loc_in_declarator_nested_name_qualifier(clang::TypeLoc type_loc,
         }
         return false;
       }
-      if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
+      if (parent.get<clang::NestedNameSpecifierLoc>()) {
         const clang::DynTypedNodeList nns_parents = ast.getParents(parent);
         for (const clang::DynTypedNode &gp : nns_parents) {
           if (const auto *dd = gp.get<clang::DeclaratorDecl>()) {
@@ -2208,7 +2208,7 @@ public:
 };
 
 class CustomDiagnosticsConsumer : public clang::DiagnosticConsumer {
-  const LocalCodeState &state_;
+  [[maybe_unused]] const LocalCodeState &state_;
   unique_ptr<clang::DiagnosticConsumer> inner_;
 
   // Notes after an ignored diagnostic are suppressed until the next non-ignored
