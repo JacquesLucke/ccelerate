@@ -96,6 +96,13 @@ TEST(Integration, ClangNoArgs) {
   EXPECT_THAT(result.stderr_data, testing::HasSubstr("no input files"));
 }
 
+static string read_file(const path &file_path) {
+  std::ifstream in(file_path);
+  std::ostringstream contents;
+  contents << in.rdbuf();
+  return contents.str();
+}
+
 TEST(Integration, HelloWorld) {
   const Args &args = Args::get();
   CcelerateServerContext server_ctx;
@@ -117,6 +124,42 @@ TEST(Integration, HelloWorld) {
   ASSERT_EQ(run_result.exit_code(), 0);
   EXPECT_EQ(run_result.stdout_data, "Hello World!\n");
   EXPECT_EQ(run_result.stderr_data, "");
+}
+
+TEST(Integration, HelloWorldDependencyFile) {
+  const Args &args = Args::get();
+  CcelerateServerContext server_ctx;
+
+  const path project_dir = args.test_projects_dir / "hello_world";
+  const path source_file = project_dir / "hello_world.cc";
+  const path output_file =
+      args.test_out_dir / "hello_world_dependency_file.o";
+  const path dependency_file =
+      args.test_out_dir / "hello_world_dependency_file.d";
+  std::filesystem::create_directories(output_file.parent_path());
+  std::filesystem::remove(dependency_file);
+
+  // Use -c so we only exercise local-code extraction. A full link would
+  // rewrite the .d file later via compile-object and hide extraction bugs.
+  const ProcessResult build_result =
+      run_process(ProcessArgs()
+                      .args({args.binary_dir / "ccelerate_clang",
+                             "-c",
+                             "-MD",
+                             "-MF",
+                             dependency_file,
+                             "-o",
+                             output_file,
+                             source_file})
+                      .envs(server_ctx.env));
+  ASSERT_EQ(build_result.exit_code(), 0) << build_result.stderr_data;
+
+  ASSERT_TRUE(std::filesystem::is_regular_file(dependency_file));
+  const string dependency_contents = read_file(dependency_file);
+  EXPECT_THAT(dependency_contents,
+              testing::HasSubstr(output_file.string() + ":"));
+  EXPECT_THAT(dependency_contents, testing::HasSubstr(source_file.string()));
+  EXPECT_THAT(dependency_contents, testing::HasSubstr("cstdio"));
 }
 
 static void test_simple_cmake_project(const string_view project_name,
@@ -179,13 +222,6 @@ TEST(Integration, UnitIsolationCMake) {
 
 TEST(Integration, FirstIncludeCMake) {
   test_simple_cmake_project("first_include_cmake", "12\n");
-}
-
-static string read_file(const path &file_path) {
-  std::ifstream in(file_path);
-  std::ostringstream contents;
-  contents << in.rdbuf();
-  return contents.str();
 }
 
 static bool should_update_tests() {

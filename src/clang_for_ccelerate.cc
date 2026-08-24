@@ -16,6 +16,7 @@
 #include <clang/Driver/Driver.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/CompilerInvocation.h>
+#include <clang/Frontend/DependencyOutputOptions.h>
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/FrontendOptions.h>
 #include <clang/Frontend/TextDiagnosticBuffer.h>
@@ -2394,6 +2395,10 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
     if (!success) {
       return 1;
     }
+    // The preprocess pass already wrote -dependency-file if requested. Clear
+    // it here so rewriting the in-memory local code does not overwrite that
+    // file with an empty dependency list.
+    clang_instance.getDependencyOutputOpts() = clang::DependencyOutputOptions();
     clang_instance.getDiagnostics().setClient(
         new CustomDiagnosticsConsumer(
             state, clang_instance.getDiagnostics().takeClient()),
