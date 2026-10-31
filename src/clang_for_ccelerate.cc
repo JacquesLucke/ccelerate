@@ -33,6 +33,7 @@
 #include <ctre.hpp>
 #include <filesystem>
 #include <fmt/format.h>
+#include <fstream>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -97,13 +98,11 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
     driver_args.push_back(arg.c_str());
   }
 
-  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_ops =
-      new clang::DiagnosticOptions();
+  clang::DiagnosticOptions diag_opts;
   clang::TextDiagnosticPrinter *diag_client =
-      new clang::TextDiagnosticPrinter(llvm::errs(), &*diag_ops);
-  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-      new clang::DiagnosticIDs());
-  clang::DiagnosticsEngine diags(diag_id, diag_ops, diag_client);
+      new clang::TextDiagnosticPrinter(llvm::errs(), diag_opts);
+  clang::DiagnosticsEngine diags(
+      clang::DiagnosticIDs::create(), diag_opts, diag_client);
 
   std::string target_triple = llvm::sys::getProcessTriple();
   clang::driver::Driver driver(
@@ -154,9 +153,9 @@ static int handle__parse_args(const Cmd_ParseArgs &args) {
   return 0;
 }
 
-static int execute_cc1(const vector<string> &clang_args) {
-  // The driver job args start with "-cc1"; CompilerInvocation expects the
-  // remaining cc1 options only (same as clang's cc1_main entry point).
+// The driver job args start with "-cc1"; CompilerInvocation expects the
+// remaining cc1 options only (same as clang's cc1_main entry point).
+static vector<const char *> get_cc1_args(const vector<string> &clang_args) {
   vector<const char *> cc1_args;
   cc1_args.reserve(clang_args.size());
   for (const string &arg : clang_args) {
@@ -165,6 +164,30 @@ static int execute_cc1(const vector<string> &clang_args) {
     }
     cc1_args.push_back(arg.c_str());
   }
+  return cc1_args;
+}
+
+// Set up the invocation, file system and diagnostics of `clang_instance` the
+// same way as clang's cc1_main. Diagnostics from argument parsing are buffered
+// and replayed into the instance's diagnostics engine. Returns false if the
+// arguments are invalid.
+static bool init_compiler_instance(clang::CompilerInstance &clang_instance,
+                                   const vector<const char *> &cc1_args) {
+  clang::DiagnosticOptions diag_opts;
+  clang::TextDiagnosticBuffer *diags_buffer = new clang::TextDiagnosticBuffer();
+  clang::DiagnosticsEngine diags(
+      clang::DiagnosticIDs::create(), diag_opts, diags_buffer);
+  const bool success = clang::CompilerInvocation::CreateFromArgs(
+      clang_instance.getInvocation(), cc1_args, diags);
+  clang_instance.createVirtualFileSystem(llvm::vfs::getRealFileSystem(),
+                                         diags_buffer);
+  clang_instance.createDiagnostics();
+  diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+  return success;
+}
+
+static int execute_cc1(const vector<string> &clang_args) {
+  const vector<const char *> cc1_args = get_cc1_args(clang_args);
 
   llvm::InitializeAllTargets();
   llvm::InitializeAllTargetMCs();
@@ -172,26 +195,11 @@ static int execute_cc1(const vector<string> &clang_args) {
   llvm::InitializeAllAsmParsers();
 
   clang::CompilerInstance clang_instance;
-  clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-      new clang::DiagnosticIDs());
-  clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
-      new clang::DiagnosticOptions());
-  clang::TextDiagnosticBuffer *diags_buffer = new clang::TextDiagnosticBuffer();
-  clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
-
-  bool success = clang::CompilerInvocation::CreateFromArgs(
-      clang_instance.getInvocation(), cc1_args, diags);
-
-  clang_instance.createDiagnostics();
-  if (!clang_instance.hasDiagnostics()) {
-    return 1;
-  }
-  diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
-  if (!success) {
+  if (!init_compiler_instance(clang_instance, cc1_args)) {
     return 1;
   }
 
-  success = clang::ExecuteCompilerInvocation(&clang_instance);
+  const bool success = clang::ExecuteCompilerInvocation(&clang_instance);
   return success ? 0 : 1;
 }
 
@@ -635,8 +643,8 @@ static string format_used_namespace(const clang::UsingDirectiveDecl &ud,
                                     const clang::PrintingPolicy &policy) {
   string result;
   llvm::raw_string_ostream os(result);
-  if (const clang::NestedNameSpecifier *qualifier = ud.getQualifier()) {
-    qualifier->print(os, policy);
+  if (const clang::NestedNameSpecifier qualifier = ud.getQualifier()) {
+    qualifier.print(os, policy);
   }
   if (const clang::NamedDecl *nominated = ud.getNominatedNamespaceAsWritten()) {
     os << nominated->getName();
@@ -686,17 +694,136 @@ public:
   }
 };
 
+// The written qualifier before the last component of a nested-name-specifier
+// (`ns::A::` for `ns::A::B::`), or null. For type components, the prefix is
+// stored as the qualifier of the type itself.
+static clang::NestedNameSpecifierLoc
+get_nested_name_prefix(const clang::NestedNameSpecifierLoc nns_loc) {
+  switch (nns_loc.getNestedNameSpecifier().getKind()) {
+    case clang::NestedNameSpecifier::Kind::Namespace:
+      return nns_loc.castAsNamespaceAndPrefix().Prefix;
+    case clang::NestedNameSpecifier::Kind::Type:
+      return nns_loc.castAsTypeLoc().getPrefix();
+    default:
+      return {};
+  }
+}
+
 // Target NamedDecl for a UsingTypeLoc (`using ns::T; … T`), or null.
 static const clang::NamedDecl *
 named_decl_from_using_type_loc(clang::UsingTypeLoc ut) {
   if (ut.isNull()) {
     return nullptr;
   }
-  const clang::UsingShadowDecl *found = ut.getFoundDecl();
+  const clang::UsingShadowDecl *found = ut.getDecl();
   if (!found) {
     return nullptr;
   }
   return found->getTargetDecl();
+}
+
+// A type name written in source, e.g. `S`, `ns::S`, `const S`, `Box<int>`,
+// `Box b(1)` (deduced) or an alias.
+struct WrittenTypeName {
+  // The TypeLoc as visited by the matcher (and known to the parent map). For
+  // `const S` this is the QualifiedTypeLoc; the unqualified TypeLoc is not
+  // visited separately.
+  clang::TypeLoc type_loc;
+  clang::SourceLocation name_loc;
+  const clang::NamedDecl *decl = nullptr;
+  // `struct S {…}` written as part of a declaration.
+  bool is_tag_definition = false;
+};
+
+// Like TypeLoc::getAsAdjusted, but also looks through cv-qualifiers.
+template <typename T>
+static T get_as_unqualified(const clang::TypeLoc type_loc) {
+  return type_loc.getUnqualifiedLoc().getAsAdjusted<T>();
+}
+
+// The templated decl (class or alias pattern) named by a template name, or
+// null.
+static const clang::NamedDecl *
+templated_decl_for(const clang::TemplateName template_name) {
+  const clang::TemplateDecl *td = template_name.getAsTemplateDecl();
+  if (llvm::isa_and_nonnull<clang::ClassTemplateDecl,
+                            clang::TypeAliasTemplateDecl>(td)) {
+    return td->getTemplatedDecl();
+  }
+  return nullptr;
+}
+
+// Extract the written type name from a match of one of the type name matchers
+// (bound as "tagTypeLoc", "templateSpecTypeLoc", "deducedTemplateSpecTypeLoc",
+// "typedefTypeLoc" or "usingTypeLoc").
+static optional<WrittenTypeName> find_written_type_name(
+    const clang::ast_matchers::MatchFinder::MatchResult &result) {
+  WrittenTypeName type_name;
+  if (const clang::TypeLoc *type_loc =
+          result.Nodes.getNodeAs<clang::TypeLoc>("tagTypeLoc")) {
+    const clang::TagTypeLoc tag_tl =
+        get_as_unqualified<clang::TagTypeLoc>(*type_loc);
+    // Injected class names (`A` inside `template <class T> class A`) are
+    // TagTypes too, but refer to the current specialization and are kept as
+    // written.
+    if (tag_tl.isNull() ||
+        llvm::isa<clang::InjectedClassNameType>(tag_tl.getTypePtr())) {
+      return std::nullopt;
+    }
+    type_name.type_loc = *type_loc;
+    type_name.name_loc = tag_tl.getNameLoc();
+    type_name.decl = tag_tl.getDecl();
+    type_name.is_tag_definition = tag_tl.isDefinition();
+  } else if (const clang::TypeLoc *type_loc =
+                 result.Nodes.getNodeAs<clang::TypeLoc>(
+                     "templateSpecTypeLoc")) {
+    const clang::TemplateSpecializationTypeLoc tst =
+        get_as_unqualified<clang::TemplateSpecializationTypeLoc>(*type_loc);
+    if (tst.isNull()) {
+      return std::nullopt;
+    }
+    type_name.type_loc = *type_loc;
+    type_name.name_loc = tst.getTemplateNameLoc();
+    type_name.decl = templated_decl_for(tst.getTypePtr()->getTemplateName());
+  } else if (const clang::TypeLoc *type_loc =
+                 result.Nodes.getNodeAs<clang::TypeLoc>(
+                     "deducedTemplateSpecTypeLoc")) {
+    const clang::DeducedTemplateSpecializationTypeLoc dtst =
+        get_as_unqualified<clang::DeducedTemplateSpecializationTypeLoc>(
+            *type_loc);
+    if (dtst.isNull()) {
+      return std::nullopt;
+    }
+    type_name.type_loc = *type_loc;
+    type_name.name_loc = dtst.getTemplateNameLoc();
+    type_name.decl = templated_decl_for(dtst.getTypePtr()->getTemplateName());
+  } else if (const clang::TypeLoc *type_loc =
+                 result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
+    const clang::TypedefTypeLoc typedef_tl =
+        get_as_unqualified<clang::TypedefTypeLoc>(*type_loc);
+    if (typedef_tl.isNull()) {
+      return std::nullopt;
+    }
+    type_name.type_loc = *type_loc;
+    type_name.name_loc = typedef_tl.getNameLoc();
+    type_name.decl = typedef_tl.getDecl();
+  } else if (const clang::TypeLoc *type_loc =
+                 result.Nodes.getNodeAs<clang::TypeLoc>("usingTypeLoc")) {
+    const clang::UsingTypeLoc using_tl =
+        get_as_unqualified<clang::UsingTypeLoc>(*type_loc);
+    if (using_tl.isNull()) {
+      return std::nullopt;
+    }
+    type_name.type_loc = *type_loc;
+    type_name.name_loc = using_tl.getNameLoc();
+    type_name.decl = named_decl_from_using_type_loc(using_tl);
+  } else {
+    return std::nullopt;
+  }
+  if (!type_name.name_loc.isValid() || !type_name.decl) {
+    return std::nullopt;
+  }
+  return type_name;
 }
 
 class SymbolRenamer : public clang::ast_matchers::MatchFinder::MatchCallback {
@@ -780,72 +907,10 @@ public:
         }
         named_decl = fd;
       }
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>("tagTypeLoc")) {
-      const clang::TagTypeLoc tag_tl =
-          type_loc->getAsAdjusted<clang::TagTypeLoc>();
-      if (tag_tl.isNull()) {
-        return;
-      }
-      loc = tag_tl.getNameLoc();
-      named_decl = tag_tl.getDecl();
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>(
-                       "templateSpecTypeLoc")) {
-      const clang::TemplateSpecializationTypeLoc tst =
-          type_loc->getAsAdjusted<clang::TemplateSpecializationTypeLoc>();
-      if (tst.isNull()) {
-        return;
-      }
-      loc = tst.getTemplateNameLoc();
-      const clang::TemplateName template_name =
-          tst.getTypePtr()->getTemplateName();
-      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
-        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
-          named_decl = ctd->getTemplatedDecl();
-        } else if (const auto *tatd =
-                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
-          named_decl = tatd->getTemplatedDecl();
-        }
-      }
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>(
-                       "deducedTemplateSpecTypeLoc")) {
-      const clang::DeducedTemplateSpecializationTypeLoc dtst =
-          type_loc
-              ->getAsAdjusted<clang::DeducedTemplateSpecializationTypeLoc>();
-      if (dtst.isNull()) {
-        return;
-      }
-      loc = dtst.getTemplateNameLoc();
-      const clang::TemplateName template_name =
-          dtst.getTypePtr()->getTemplateName();
-      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
-        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
-          named_decl = ctd->getTemplatedDecl();
-        } else if (const auto *tatd =
-                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
-          named_decl = tatd->getTemplatedDecl();
-        }
-      }
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
-      const clang::TypedefTypeLoc typedef_tl =
-          type_loc->getAsAdjusted<clang::TypedefTypeLoc>();
-      if (typedef_tl.isNull()) {
-        return;
-      }
-      loc = typedef_tl.getNameLoc();
-      named_decl = typedef_tl.getTypedefNameDecl();
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>("usingTypeLoc")) {
-      const clang::UsingTypeLoc using_tl =
-          type_loc->getAs<clang::UsingTypeLoc>();
-      if (using_tl.isNull()) {
-        return;
-      }
-      loc = using_tl.getNameLoc();
-      named_decl = named_decl_from_using_type_loc(using_tl);
+    } else if (const optional<WrittenTypeName> type_name =
+                   find_written_type_name(result)) {
+      loc = type_name->name_loc;
+      named_decl = type_name->decl;
     }
     if (!loc.isValid() || !named_decl) {
       return;
@@ -1304,8 +1369,8 @@ is_type_loc_in_declarator_nested_name_qualifier(clang::TypeLoc type_loc,
 static bool is_nested_name_loc_in_declarator_qualifier(
     clang::NestedNameSpecifierLoc nns_loc, clang::ASTContext &ast) {
   for (clang::NestedNameSpecifierLoc cur = nns_loc; cur;
-       cur = cur.getPrefix()) {
-    const clang::TypeLoc type_loc = cur.getTypeLoc();
+       cur = get_nested_name_prefix(cur)) {
+    const clang::TypeLoc type_loc = cur.getAsTypeLoc();
     if (!type_loc.isNull() &&
         is_type_loc_in_declarator_nested_name_qualifier(type_loc, ast)) {
       return true;
@@ -1429,7 +1494,7 @@ public:
           return;
         }
         if (const clang::NestedNameSpecifierLoc q = ref->getQualifierLoc()) {
-          if (!q.getTypeLoc().isNull()) {
+          if (!q.getAsTypeLoc().isNull()) {
             return;
           }
         }
@@ -1483,14 +1548,14 @@ public:
 // Start of the source range to replace with a fully qualified type name:
 //
 // - `S` → name_loc (`S`)
-// - `B::S` / `ns::Traits<T>` → begin of the written nested-name
-// - `const B::S` → begin of `B` (peels QualifiedTypeLoc first)
+// - `B::S` / `struct B::S` → begin of the written qualifier `B::`
+// - `A` in `A::B::S` (a component of an enclosing nested-name) → begin of the
+//   outermost nested-name, so the whole written qualifier is replaced.
 static clang::SourceLocation
 find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
-                             const clang::SourceLocation name_loc,
                              clang::ASTContext &ast) {
+  clang::SourceLocation begin = type_loc.getNonElaboratedBeginLoc();
   clang::DynTypedNode node = clang::DynTypedNode::create(type_loc);
-  clang::SourceLocation begin = name_loc;
   while (true) {
     const clang::DynTypedNodeList parents = ast.getParents(node);
     if (parents.empty()) {
@@ -1499,8 +1564,6 @@ find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
     const clang::NestedNameSpecifierLoc *nns_parent = nullptr;
     const clang::TypeLoc *type_loc_parent = nullptr;
     for (const clang::DynTypedNode &parent : parents) {
-      // `ns::Traits<T>` may parent the template TypeLoc directly under the NNS
-      // (no ElaboratedTypeLoc wrapper). Include the whole nested-name.
       if (!nns_parent) {
         nns_parent = parent.get<clang::NestedNameSpecifierLoc>();
       }
@@ -1514,15 +1577,6 @@ find_type_name_rewrite_begin(const clang::TypeLoc type_loc,
       continue;
     }
     if (!type_loc_parent) {
-      break;
-    }
-    const clang::ElaboratedTypeLoc etl =
-        type_loc_parent->getUnqualifiedLoc().getAs<clang::ElaboratedTypeLoc>();
-    if (!etl.isNull()) {
-      if (const clang::NestedNameSpecifierLoc qualifier =
-              etl.getQualifierLoc()) {
-        begin = qualifier.getBeginLoc();
-      }
       break;
     }
     node = clang::DynTypedNode::create(*type_loc_parent);
@@ -1565,7 +1619,7 @@ static bool try_qualify_type_nested_name_specifier(
   if (is_inside_template_argument(clang::DynTypedNode::create(nns_loc), ast)) {
     return false;
   }
-  clang::TypeLoc type_loc = nns_loc.getTypeLoc();
+  clang::TypeLoc type_loc = nns_loc.getAsTypeLoc();
   if (type_loc.isNull()) {
     return false;
   }
@@ -1601,7 +1655,7 @@ static bool try_qualify_type_nested_name_specifier(
   } else if (const clang::TypedefTypeLoc td =
                  cur.getAsAdjusted<clang::TypedefTypeLoc>()) {
     name_loc = td.getNameLoc();
-    named_decl = td.getTypedefNameDecl();
+    named_decl = td.getDecl();
   } else {
     return false;
   }
@@ -1630,7 +1684,7 @@ static bool try_qualify_type_nested_name_specifier(
   // `ns::::ns::A`), so rewrite the whole written NNS here. Nested types
   // (`Instance::StaticData` in `Instance::StaticData::get`) always go through
   // this path.
-  if (decl_ctx->isFileContext() && !nns_loc.getPrefix()) {
+  if (decl_ctx->isFileContext() && !get_nested_name_prefix(nns_loc)) {
     return false;
   }
   const std::string name = named_decl->getNameAsString();
@@ -1748,7 +1802,7 @@ should_skip_type_loc_for_qualifier(clang::TypeLoc type_loc,
     const clang::TypeLoc *type_loc_parent = nullptr;
     for (const clang::DynTypedNode &parent : parents) {
       if (const auto *nns = parent.get<clang::NestedNameSpecifierLoc>()) {
-        if (nns->getPrefix() &&
+        if (get_nested_name_prefix(*nns) &&
             type_loc_under_decl_ref_or_member_qualifier(parent, ast)) {
           return true;
         }
@@ -1837,89 +1891,15 @@ public:
 
   void
   run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
-    clang::SourceLocation name_loc;
-    const clang::NamedDecl *named_decl = nullptr;
-    clang::TypeLoc matched_tl;
-
-    if (const clang::TypeLoc *type_loc =
-            result.Nodes.getNodeAs<clang::TypeLoc>("tagTypeLoc")) {
-      const clang::TagTypeLoc tag_tl =
-          type_loc->getAsAdjusted<clang::TagTypeLoc>();
-      if (tag_tl.isNull() || tag_tl.isDefinition()) {
-        return;
-      }
-      if (llvm::isa<clang::ClassTemplateSpecializationDecl>(tag_tl.getDecl())) {
-        return;
-      }
-      name_loc = tag_tl.getNameLoc();
-      named_decl = tag_tl.getDecl();
-      matched_tl = tag_tl;
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>(
-                       "templateSpecTypeLoc")) {
-      const clang::TemplateSpecializationTypeLoc tst =
-          type_loc->getAsAdjusted<clang::TemplateSpecializationTypeLoc>();
-      if (tst.isNull()) {
-        return;
-      }
-      name_loc = tst.getTemplateNameLoc();
-      const clang::TemplateName template_name =
-          tst.getTypePtr()->getTemplateName();
-      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
-        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
-          named_decl = ctd->getTemplatedDecl();
-        } else if (const auto *tatd =
-                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
-          named_decl = tatd->getTemplatedDecl();
-        }
-      }
-      matched_tl = tst;
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>(
-                       "deducedTemplateSpecTypeLoc")) {
-      const clang::DeducedTemplateSpecializationTypeLoc dtst =
-          type_loc
-              ->getAsAdjusted<clang::DeducedTemplateSpecializationTypeLoc>();
-      if (dtst.isNull()) {
-        return;
-      }
-      name_loc = dtst.getTemplateNameLoc();
-      const clang::TemplateName template_name =
-          dtst.getTypePtr()->getTemplateName();
-      if (const clang::TemplateDecl *td = template_name.getAsTemplateDecl()) {
-        if (const auto *ctd = llvm::dyn_cast<clang::ClassTemplateDecl>(td)) {
-          named_decl = ctd->getTemplatedDecl();
-        } else if (const auto *tatd =
-                       llvm::dyn_cast<clang::TypeAliasTemplateDecl>(td)) {
-          named_decl = tatd->getTemplatedDecl();
-        }
-      }
-      matched_tl = dtst;
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>("typedefTypeLoc")) {
-      const clang::TypedefTypeLoc typedef_tl =
-          type_loc->getAsAdjusted<clang::TypedefTypeLoc>();
-      if (typedef_tl.isNull()) {
-        return;
-      }
-      name_loc = typedef_tl.getNameLoc();
-      named_decl = typedef_tl.getTypedefNameDecl();
-      matched_tl = typedef_tl;
-    } else if (const clang::TypeLoc *type_loc =
-                   result.Nodes.getNodeAs<clang::TypeLoc>("usingTypeLoc")) {
-      const clang::UsingTypeLoc using_tl =
-          type_loc->getAs<clang::UsingTypeLoc>();
-      if (using_tl.isNull()) {
-        return;
-      }
-      name_loc = using_tl.getNameLoc();
-      named_decl = named_decl_from_using_type_loc(using_tl);
-      matched_tl = using_tl;
-    }
-
-    if (!name_loc.isValid() || !named_decl || matched_tl.isNull()) {
+    const optional<WrittenTypeName> type_name = find_written_type_name(result);
+    if (!type_name || type_name->is_tag_definition ||
+        llvm::isa<clang::ClassTemplateSpecializationDecl>(type_name->decl)) {
       return;
     }
+    const clang::SourceLocation name_loc = type_name->name_loc;
+    const clang::NamedDecl *named_decl = type_name->decl;
+    const clang::TypeLoc matched_tl = type_name->type_loc;
+
     if (should_skip_type_loc_for_qualifier(
             matched_tl, *named_decl, name_loc, *result.Context)) {
       return;
@@ -1951,7 +1931,7 @@ public:
     // Ctor-initializers written as `Ctor():Base()` (no space) need a space
     // before `::` or they become `:::Base`.
     const clang::SourceLocation begin =
-        find_type_name_rewrite_begin(matched_tl, name_loc, *result.Context);
+        find_type_name_rewrite_begin(matched_tl, *result.Context);
     const bool leading_global_scope =
         !is_type_loc_in_declarator_nested_name_qualifier(matched_tl,
                                                          *result.Context);
@@ -2228,8 +2208,6 @@ public:
 
   void EndSourceFile() override { inner_->EndSourceFile(); }
 
-  void finish() override { inner_->finish(); }
-
   void clear() override {
     DiagnosticConsumer::clear();
     inner_->clear();
@@ -2349,16 +2327,7 @@ compute_local_code_preprocess_hash(const Cmd_ExtractLocalCode &args,
 }
 
 static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
-  // The driver job args start with "-cc1"; CompilerInvocation expects the
-  // remaining cc1 options only (same as clang's cc1_main entry point).
-  vector<const char *> cc1_args;
-  cc1_args.reserve(args.clang_args.size());
-  for (const string &arg : args.clang_args) {
-    if (cc1_args.empty() && arg == "-cc1") {
-      continue;
-    }
-    cc1_args.push_back(arg.c_str());
-  }
+  const vector<const char *> cc1_args = get_cc1_args(args.clang_args);
 
   llvm::InitializeAllTargets();
   llvm::InitializeAllTargetMCs();
@@ -2371,18 +2340,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   // Handle the preprocessing part.
   {
     clang::CompilerInstance clang_instance;
-    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-        new clang::DiagnosticIDs());
-    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
-        new clang::DiagnosticOptions());
-    clang::TextDiagnosticBuffer *diags_buffer =
-        new clang::TextDiagnosticBuffer();
-    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
-
-    bool success = clang::CompilerInvocation::CreateFromArgs(
-        clang_instance.getInvocation(), cc1_args, diags);
-    clang_instance.createDiagnostics();
-    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    bool success = init_compiler_instance(clang_instance, cc1_args);
     if (!success) {
       return 1;
     }
@@ -2421,18 +2379,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
   // Do semantic changes.
   {
     clang::CompilerInstance clang_instance;
-    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-        new clang::DiagnosticIDs());
-    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
-        new clang::DiagnosticOptions());
-    clang::TextDiagnosticBuffer *diags_buffer =
-        new clang::TextDiagnosticBuffer();
-    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
-
-    bool success = clang::CompilerInvocation::CreateFromArgs(
-        clang_instance.getInvocation(), cc1_args, diags);
-    clang_instance.createDiagnostics();
-    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    bool success = init_compiler_instance(clang_instance, cc1_args);
     if (!success) {
       return 1;
     }
@@ -2457,7 +2404,7 @@ static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
       return 1;
     }
 
-    clang::RewriteBuffer &buffer = state.rewriter->getEditBuffer(
+    llvm::RewriteBuffer &buffer = state.rewriter->getEditBuffer(
         state.rewriter->getSourceMgr().getMainFileID());
     llvm::raw_string_ostream os(state.rewrite_result);
     buffer.write(os);
@@ -2644,16 +2591,7 @@ public:
 };
 
 static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
-  // The driver job args start with "-cc1"; CompilerInvocation expects the
-  // remaining cc1 options only (same as clang's cc1_main entry point).
-  vector<const char *> cc1_args;
-  cc1_args.reserve(args.clang_args.size());
-  for (const string &arg : args.clang_args) {
-    if (cc1_args.empty() && arg == "-cc1") {
-      continue;
-    }
-    cc1_args.push_back(arg.c_str());
-  }
+  const vector<const char *> cc1_args = get_cc1_args(args.clang_args);
 
   llvm::InitializeAllTargets();
   llvm::InitializeAllTargetMCs();
@@ -2718,18 +2656,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
   // Preprocess headers.
   {
     clang::CompilerInstance clang_instance;
-    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-        new clang::DiagnosticIDs());
-    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
-        new clang::DiagnosticOptions());
-    clang::TextDiagnosticBuffer *diags_buffer =
-        new clang::TextDiagnosticBuffer();
-    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
-
-    bool success = clang::CompilerInvocation::CreateFromArgs(
-        clang_instance.getInvocation(), cc1_args, diags);
-    clang_instance.createDiagnostics();
-    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    bool success = init_compiler_instance(clang_instance, cc1_args);
     if (!success) {
       return 1;
     }
@@ -2779,7 +2706,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     // Add wrappers for system includes.
     llvm::IntrusiveRefCntPtr<llvm::vfs::OverlayFileSystem> overlay =
         llvm::makeIntrusiveRefCnt<llvm::vfs::OverlayFileSystem>(
-            llvm::vfs::getRealFileSystem());
+            clang_instance.getVirtualFileSystemPtr());
     llvm::IntrusiveRefCntPtr<llvm::vfs::InMemoryFileSystem> memfs =
         llvm::makeIntrusiveRefCnt<llvm::vfs::InMemoryFileSystem>();
     for (size_t i = 0; i < system_wrapper_bodies.size(); i++) {
@@ -2791,7 +2718,8 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
                          system_wrapper_bodies[i], wrapper_path));
     }
     overlay->pushOverlay(memfs);
-    clang_instance.createFileManager(overlay);
+    clang_instance.setVirtualFileSystem(overlay);
+    clang_instance.createFileManager();
 
     auto &inputs = clang_instance.getFrontendOpts().Inputs;
     clang::InputKind kind = clang::InputKind(
@@ -2812,18 +2740,7 @@ static int handle__compile_local_code(const Cmd_CompileLocalCode &args) {
     state.combined_preprocessed_code += state.merged_local_code;
 
     clang::CompilerInstance clang_instance;
-    clang::IntrusiveRefCntPtr<clang::DiagnosticIDs> diag_id(
-        new clang::DiagnosticIDs());
-    clang::IntrusiveRefCntPtr<clang::DiagnosticOptions> diag_opts(
-        new clang::DiagnosticOptions());
-    clang::TextDiagnosticBuffer *diags_buffer =
-        new clang::TextDiagnosticBuffer();
-    clang::DiagnosticsEngine diags(diag_id, diag_opts, diags_buffer);
-
-    bool success = clang::CompilerInvocation::CreateFromArgs(
-        clang_instance.getInvocation(), cc1_args, diags);
-    clang_instance.createDiagnostics();
-    diags_buffer->FlushDiagnostics(clang_instance.getDiagnostics());
+    bool success = init_compiler_instance(clang_instance, cc1_args);
     if (!success) {
       return 1;
     }
