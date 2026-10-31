@@ -71,7 +71,6 @@ eager_obj_patterns = [
     "**/gpu_shader_depencency.cc.o",
     "**/intern/gpu_shader_create_info.cc.o",
     "**/intern/wayland_dynload_egl.c.o",
-    "**/makesrna/intern/**_gen.cc.o",
     # Generated DNA tables; makesdna_test supplies its own TUs for these symbols.
     "**/bf_dna.dir/dna.cc.o",
     "**/bf_dna.dir/dna_struct_ids.cc.o",
@@ -94,6 +93,9 @@ eager_obj_patterns = [
     "**/bf_intern_libmv.dir/intern/tracksN.cc.o",
     # Explicit specialization of 'Zero' afer instantiation.
     "**/extern_mantaflow.dir/helper/util/vectorbase.cpp.o",
+    # Intentional duplicate symbols.
+    "**/dbus_dynload_utils.c.o",
+    "**/wayland_dynload_utils.c.o",
 ]
 pure_c_header_patterns = [
     # FFmpeg headers have no extern "C" guards; Blender wraps includes itself.
