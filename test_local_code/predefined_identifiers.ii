@@ -1,0 +1,18 @@
+# 1 "predefined_identifiers.cc"
+static const char *A__() { return "A"; }
+
+namespace {
+struct B__ {
+  const char *f() { return "const char *(anonymous namespace)::B::f()"; }
+};
+}
+
+static const char *C__()
+{
+  auto lambda = []() { return "operator()"; };
+  return lambda();
+}
+
+template<typename T> static const char *D__() { return "D"; }
+
+int main() { return ::A__()[0] + ::B__().f()[0] + ::C__()[0] + ::D__<int>()[0]; }

@@ -2096,6 +2096,118 @@ public:
   }
 };
 
+// True if `dc` is (inside) a template pattern or a template instantiation. The
+// value of a predefined identifier there can differ per instantiation or is not
+// computed at all.
+static bool is_in_template(const clang::DeclContext *dc) {
+  if (dc->isDependentContext()) {
+    return true;
+  }
+  for (; dc; dc = dc->getParent()) {
+    if (const auto *fd = llvm::dyn_cast<clang::FunctionDecl>(dc)) {
+      if (fd->isTemplateInstantiation()) {
+        return true;
+      }
+    } else if (const auto *rd = llvm::dyn_cast<clang::CXXRecordDecl>(dc)) {
+      if (rd->getTemplateSpecializationKind() ==
+              clang::TSK_ImplicitInstantiation ||
+          rd->getTemplateSpecializationKind() ==
+              clang::TSK_ExplicitInstantiationDefinition ||
+          rd->getTemplateSpecializationKind() ==
+              clang::TSK_ExplicitInstantiationDeclaration) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Replace `__func__`, `__FUNCTION__` and `__PRETTY_FUNCTION__` with the string
+// literal they evaluate to in the original code. Otherwise their value changes
+// when the enclosing function or class is renamed, e.g. Blender uses
+// `ot->idname = __func__;` to name operators after their static definition
+// function.
+class PredefinedExprInliner
+    : public clang::ast_matchers::MatchFinder::MatchCallback {
+  LocalCodeState &state_;
+  clang::SourceManager &sm_;
+  std::unordered_set<uint32_t> edited_locs_;
+
+public:
+  PredefinedExprInliner(LocalCodeState &state)
+      : state_(state), sm_(state.rewriter->getSourceMgr()) {}
+
+  void
+  run(const clang::ast_matchers::MatchFinder::MatchResult &result) override {
+    const auto *expr =
+        result.Nodes.getNodeAs<clang::PredefinedExpr>("predefinedExpr");
+    const auto *function =
+        result.Nodes.getNodeAs<clang::FunctionDecl>("function");
+    if (!expr || !function) {
+      return;
+    }
+    const optional<string> value = get_value(*expr, *function);
+    if (!value) {
+      return;
+    }
+    const clang::SourceLocation loc = expr->getLocation();
+    if (!mapped_location_is_local(state_, loc, sm_)) {
+      return;
+    }
+    if (!token_spells_name(
+            loc,
+            clang::PredefinedExpr::getIdentKindName(expr->getIdentKind()),
+            sm_,
+            state_.rewriter->getLangOpts())) {
+      return;
+    }
+    if (!edited_locs_.insert(loc.getRawEncoding()).second) {
+      return;
+    }
+    state_.rewriter->ReplaceText(clang::CharSourceRange::getTokenRange(loc),
+                                 to_string_literal(*value));
+  }
+
+private:
+  static optional<string> get_value(const clang::PredefinedExpr &expr,
+                                    const clang::FunctionDecl &function) {
+    switch (expr.getIdentKind()) {
+      case clang::PredefinedIdentKind::Func:
+      case clang::PredefinedIdentKind::Function:
+        // Only the plain function name, so this also works in templates where
+        // Clang does not compute the value for the pattern.
+        return clang::PredefinedExpr::ComputeName(expr.getIdentKind(),
+                                                  &function);
+      case clang::PredefinedIdentKind::PrettyFunction: {
+        // Contains template arguments, so the value may differ between
+        // instantiations.
+        if (is_in_template(&function)) {
+          return std::nullopt;
+        }
+        const clang::StringLiteral *value = expr.getFunctionName();
+        if (!value || !value->isOrdinary()) {
+          return std::nullopt;
+        }
+        return value->getString().str();
+      }
+      default:
+        return std::nullopt;
+    }
+  }
+
+  static string to_string_literal(const string_view value) {
+    string literal = "\"";
+    for (const char c : value) {
+      if (c == '"' || c == '\\') {
+        literal += '\\';
+      }
+      literal += c;
+    }
+    literal += '"';
+    return literal;
+  }
+};
+
 class LocalCodeASTConsumer : public clang::ASTConsumer {
 private:
   SymbolRenamer renamer_;
@@ -2104,6 +2216,7 @@ private:
   UsingNamespaceQualifierInserter using_namespace_qualify_inserter_;
   UsingDeclQualifierInserter using_decl_qualify_inserter_;
   UsingNamespaceCollector using_namespace_collector_;
+  PredefinedExprInliner predefined_expr_inliner_;
   clang::ast_matchers::MatchFinder finder_;
   [[maybe_unused]] LocalCodeState &state_;
 
@@ -2113,7 +2226,8 @@ public:
         type_qualify_inserter_(state, renamer_),
         using_namespace_qualify_inserter_(state, renamer_),
         using_decl_qualify_inserter_(state, renamer_),
-        using_namespace_collector_(state), state_(state) {
+        using_namespace_collector_(state), predefined_expr_inliner_(state),
+        state_(state) {
     using namespace clang::ast_matchers;
     auto func_matcher = functionDecl();
     auto var_matcher = varDecl();
@@ -2127,6 +2241,10 @@ public:
     finder_.addMatcher(typedef_matcher.bind("staticDecl"), &renamer_);
     finder_.addMatcher(usingDirectiveDecl().bind("usingNamespace"),
                        &using_namespace_collector_);
+    finder_.addMatcher(
+        predefinedExpr(forFunction(functionDecl().bind("function")))
+            .bind("predefinedExpr"),
+        &predefined_expr_inliner_);
     if (state.rewriter->getLangOpts().CPlusPlus) {
       finder_.addMatcher(declRefExpr().bind("declRef"),
                          &namespace_qualify_inserter_);
@@ -2303,12 +2421,26 @@ static string apply_path_maps(const path &include,
   return best->replacement + abs_str.substr(from_str.size());
 }
 
+// Identifies the build of this executable, without having to hash the whole
+// binary.
+static string get_tool_version() {
+  const path self_path = get_current_executable_path();
+  std::error_code ec;
+  const auto size = std::filesystem::file_size(self_path, ec);
+  const auto mtime = std::filesystem::last_write_time(self_path, ec);
+  return fmt::format(
+      "{}:{}:{}", self_path.string(), size, mtime.time_since_epoch().count());
+}
+
 static std::string
 compute_local_code_preprocess_hash(const Cmd_ExtractLocalCode &args,
                                    const LocalCodeState &state) {
   XXH3_state_t *xxh3_state = XXH3_createState();
   XXH3_64bits_reset(xxh3_state);
   XXH3_64bits_update(xxh3_state, args.local_id.c_str(), args.local_id.size());
+  // Changes to this tool can change the generated local code.
+  const string tool_version = get_tool_version();
+  XXH3_64bits_update(xxh3_state, tool_version.data(), tool_version.size());
   for (const string_view arg : args.clang_args) {
     XXH3_64bits_update(xxh3_state, arg.data(), arg.size());
   }
@@ -2322,8 +2454,9 @@ compute_local_code_preprocess_hash(const Cmd_ExtractLocalCode &args,
     XXH3_64bits_update(xxh3_state, include.is_system_header ? "1" : "0", 1);
     XXH3_64bits_update(xxh3_state, include.is_pure_c ? "1" : "0", 1);
   }
+  const XXH64_hash_t hash = XXH3_64bits_digest(xxh3_state);
   XXH3_freeState(xxh3_state);
-  return fmt::format("{:016x}", XXH3_64bits_digest(xxh3_state));
+  return fmt::format("{:016x}", hash);
 }
 
 static int handle__extract_local_code(const Cmd_ExtractLocalCode &args) {
